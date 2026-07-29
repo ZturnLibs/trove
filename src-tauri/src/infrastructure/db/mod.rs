@@ -2,7 +2,10 @@ use rusqlite::{Connection, OptionalExtension};
 use std::path::{Path, PathBuf};
 use thiserror::Error;
 
-const MIGRATIONS: &[(i64, &str)] = &[(1, include_str!("../../../migrations/0001_init.sql"))];
+const MIGRATIONS: &[(i64, &str)] = &[
+    (1, include_str!("../../../migrations/0001_init.sql")),
+    (2, include_str!("../../../migrations/0002_tasks.sql")),
+];
 
 #[derive(Debug, Error)]
 pub enum DbError {
@@ -137,7 +140,7 @@ mod tests {
         let db_path = dir.path().join("workbench.db");
         let db = Database::open(&db_path).unwrap();
         let health = db.health_check().unwrap();
-        assert_eq!(health.schema_version, 1);
+        assert_eq!(health.schema_version, 2);
         assert_eq!(health.journal_mode.to_lowercase(), "wal");
         assert!(health.fts5_available);
     }
@@ -149,6 +152,6 @@ mod tests {
         let db = Database::open(&db_path).unwrap();
         db.migrate().unwrap();
         db.migrate().unwrap();
-        assert_eq!(db.health_check().unwrap().schema_version, 1);
+        assert_eq!(db.health_check().unwrap().schema_version, 2);
     }
 }

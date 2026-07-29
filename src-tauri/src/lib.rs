@@ -184,7 +184,7 @@ pub fn run() {
             let db_path = resolve_db_path(app.handle())?;
             tracing::info!(path = %db_path.display(), "opening database");
             let db = Database::open(db_path).map_err(|e| e.to_string())?;
-            let state = AppState::new(db);
+            let state = AppState::new(db)?;
             let _ = state.settings.get();
             app.manage(state);
 
@@ -202,8 +202,23 @@ pub fn run() {
             commands::smoke_note_create,
             commands::smoke_note_list,
             commands::smoke_note_delete,
+            commands::task_list_lists,
+            commands::task_list_create,
+            commands::task_create,
+            commands::task_update,
+            commands::task_get,
+            commands::task_query,
+            commands::task_today,
+            commands::task_complete,
+            commands::task_uncomplete,
+            commands::task_archive,
+            commands::task_delete,
+            commands::task_reorder,
+            commands::task_list_tags,
+            commands::task_counts,
             commands::window_show_main,
             commands::window_show_quick,
+            commands::window_hide_quick,
             commands::app_quit,
         ])
         .run(tauri::generate_context!())

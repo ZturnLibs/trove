@@ -60,6 +60,90 @@ export type SmokeNote = {
   revision: number;
 };
 
+export type TaskStatus = "todo" | "completed" | "archived";
+export type TaskPriority = "none" | "low" | "medium" | "high";
+export type ListKind = "inbox" | "custom";
+
+export type TaskList = {
+  id: string;
+  name: string;
+  kind: ListKind;
+  sortOrder: number;
+  createdAt: string;
+  updatedAt: string;
+  revision: number;
+};
+
+export type Tag = {
+  id: string;
+  name: string;
+  createdAt: string;
+  updatedAt: string;
+  revision: number;
+};
+
+export type Task = {
+  id: string;
+  title: string;
+  notes: string;
+  status: TaskStatus;
+  priority: TaskPriority;
+  listId: string;
+  listName: string;
+  listKind: ListKind;
+  dueDate: string | null;
+  dueTime: string | null;
+  completedAt: string | null;
+  sortOrder: number;
+  tagIds: string[];
+  tagNames: string[];
+  createdAt: string;
+  updatedAt: string;
+  revision: number;
+};
+
+export type CreateTaskInput = {
+  title: string;
+  notes?: string;
+  priority?: TaskPriority;
+  listId?: string;
+  dueDate?: string | null;
+  dueTime?: string | null;
+  tagNames?: string[];
+};
+
+export type UpdateTaskInput = {
+  id: string;
+  title: string;
+  notes: string;
+  priority: TaskPriority;
+  listId: string;
+  dueDate: string | null;
+  dueTime: string | null;
+  tagNames: string[];
+};
+
+export type TaskQuery = {
+  listId?: string;
+  inboxOnly?: boolean;
+  status?: TaskStatus;
+  priority?: TaskPriority;
+  tagId?: string;
+  includeArchived?: boolean;
+};
+
+export type TodayTasks = {
+  overdue: Task[];
+  dueToday: Task[];
+  completedToday: Task[];
+  today: string;
+};
+
+export type TaskCounts = {
+  inbox: number;
+  overdue: number;
+};
+
 export const ipc = {
   appHealth: () => invoke<AppHealth>("app_health"),
   settingsGet: () => invoke<AppSettings>("settings_get"),
@@ -69,8 +153,24 @@ export const ipc = {
     invoke<SmokeNote>("smoke_note_create", { body }),
   smokeNoteList: () => invoke<SmokeNote[]>("smoke_note_list"),
   smokeNoteDelete: (id: string) => invoke<void>("smoke_note_delete", { id }),
+  taskListLists: () => invoke<TaskList[]>("task_list_lists"),
+  taskListCreate: (name: string) => invoke<TaskList>("task_list_create", { name }),
+  taskCreate: (input: CreateTaskInput) => invoke<Task>("task_create", { input }),
+  taskUpdate: (input: UpdateTaskInput) => invoke<Task>("task_update", { input }),
+  taskGet: (id: string) => invoke<Task>("task_get", { id }),
+  taskQuery: (query: TaskQuery = {}) => invoke<Task[]>("task_query", { query }),
+  taskToday: () => invoke<TodayTasks>("task_today"),
+  taskComplete: (id: string) => invoke<Task>("task_complete", { id }),
+  taskUncomplete: (id: string) => invoke<Task>("task_uncomplete", { id }),
+  taskArchive: (id: string) => invoke<Task>("task_archive", { id }),
+  taskDelete: (id: string) => invoke<void>("task_delete", { id }),
+  taskReorder: (orderedIds: string[]) =>
+    invoke<void>("task_reorder", { orderedIds }),
+  taskListTags: () => invoke<Tag[]>("task_list_tags"),
+  taskCounts: () => invoke<TaskCounts>("task_counts"),
   windowShowMain: () => invoke<void>("window_show_main"),
   windowShowQuick: (mode?: "capture" | "search" | "clip") =>
     invoke<void>("window_show_quick", { mode }),
+  windowHideQuick: () => invoke<void>("window_hide_quick"),
   appQuit: () => invoke<void>("app_quit"),
 };
