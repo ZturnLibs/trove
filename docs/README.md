@@ -1,0 +1,5 @@
+# 产品与开发文档
+
+- [第一版开发规划](./development-roadmap.md)：从空项目到 `v1.0` 的阶段拆分、范围和发布门槛。
+- [第一版之后的迭代详细设计](./post-v1-iteration-design.md)：`v1.1+` 的产品目标、详细功能、数据影响和验收标准。
+- [技术设计](./technical-design.md)：Tauri、React、Tailwind CSS 跨端架构，SQLite 混合存储、系统适配、安全和测试方案。
