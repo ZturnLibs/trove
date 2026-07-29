@@ -1,0 +1,47 @@
+:root {
+  --workbench-surface: #f4f5f7;
+  --workbench-surface-raised: #ffffff;
+  --workbench-foreground: #1c1f24;
+  --workbench-muted: #6b7280;
+  --workbench-border: #d8dde5;
+  --workbench-accent: #2563eb;
+  --workbench-accent-fg: #ffffff;
+  --workbench-danger: #c2410c;
+  --workbench-sidebar: #eceff3;
+  --workbench-row-hover: #e8edf5;
+  --workbench-row-active: #dbe7fb;
+}
+
+[data-theme="dark"] {
+  --workbench-surface: #12151a;
+  --workbench-surface-raised: #1a1f27;
+  --workbench-foreground: #e8ecf2;
+  --workbench-muted: #9aa3b2;
+  --workbench-border: #2a3140;
+  --workbench-accent: #5b8def;
+  --workbench-accent-fg: #0b1020;
+  --workbench-danger: #f97316;
+  --workbench-sidebar: #161b22;
+  --workbench-row-hover: #222936;
+  --workbench-row-active: #243247;
+}
+
+@theme {
+  --color-surface: var(--workbench-surface);
+  --color-surface-raised: var(--workbench-surface-raised);
+  --color-foreground: var(--workbench-foreground);
+  --color-muted: var(--workbench-muted);
+  --color-border: var(--workbench-border);
+  --color-accent: var(--workbench-accent);
+  --color-accent-fg: var(--workbench-accent-fg);
+  --color-danger: var(--workbench-danger);
+  --color-sidebar: var(--workbench-sidebar);
+  --color-row-hover: var(--workbench-row-hover);
+  --color-row-active: var(--workbench-row-active);
+  --radius-control: 0.375rem;
+  --radius-panel: 0.5rem;
+  --font-sans:
+    "IBM Plex Sans", "Source Han Sans SC", "Noto Sans SC", "Segoe UI", sans-serif;
+}
+
+@custom-variant dark (&:where([data-theme="dark"], [data-theme="dark"] *));

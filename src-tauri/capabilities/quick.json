@@ -1,0 +1,17 @@
+{
+  "$schema": "../gen/schemas/desktop-schema.json",
+  "identifier": "quick-capability",
+  "description": "Limited capability for the quick window",
+  "windows": ["quick"],
+  "permissions": [
+    "core:default",
+    "core:window:allow-show",
+    "core:window:allow-hide",
+    "core:window:allow-set-focus",
+    "core:window:allow-close",
+    "core:window:allow-is-visible",
+    "clipboard-manager:allow-read-text",
+    "clipboard-manager:allow-write-text",
+    "notification:default"
+  ]
+}
