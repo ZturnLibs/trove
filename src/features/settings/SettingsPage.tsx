@@ -1,12 +1,23 @@
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { PageScaffold } from "@/components/PageScaffold";
 import { Button } from "@/design-system/primitives/Button";
 import { Input } from "@/design-system/primitives/Input";
-import { ipc, type AppSettings, type ThemePreference } from "@/ipc/client";
+import {
+  ipc,
+  type AppSettings,
+  type ThemePreference,
+} from "@/ipc/client";
+
+function formatBytes(n: number) {
+  if (n < 1024) return `${n} B`;
+  if (n < 1024 * 1024) return `${(n / 1024).toFixed(1)} KB`;
+  return `${(n / (1024 * 1024)).toFixed(1)} MB`;
+}
 
 export function SettingsPage() {
   const queryClient = useQueryClient();
+  const fileRef = useRef<HTMLInputElement>(null);
   const healthQuery = useQuery({
     queryKey: ["app", "health"],
     queryFn: () => ipc.appHealth(),
@@ -15,15 +26,16 @@ export function SettingsPage() {
     queryKey: ["settings"],
     queryFn: () => ipc.settingsGet(),
   });
-  const notesQuery = useQuery({
-    queryKey: ["smoke-notes"],
-    queryFn: () => ipc.smokeNoteList(),
+  const backupsQuery = useQuery({
+    queryKey: ["backups"],
+    queryFn: () => ipc.backupList(),
   });
 
-  const [draft, setDraft] = useState("");
   const [excludedText, setExcludedText] = useState("");
   const [retentionText, setRetentionText] = useState("");
   const [maxItemsText, setMaxItemsText] = useState("");
+  const [backupKeepText, setBackupKeepText] = useState("");
+  const [message, setMessage] = useState<string | null>(null);
 
   const settings = settingsQuery.data;
   const health = healthQuery.data;
@@ -33,6 +45,7 @@ export function SettingsPage() {
     setExcludedText(settings.clipboardExcludedApps.join("\n"));
     setRetentionText(String(settings.clipboardRetentionDays));
     setMaxItemsText(String(settings.clipboardMaxItems));
+    setBackupKeepText(String(settings.backupRetentionCount));
   }, [settings]);
 
   const saveSettings = useMutation({
@@ -40,21 +53,69 @@ export function SettingsPage() {
     onSuccess: () => {
       void queryClient.invalidateQueries({ queryKey: ["settings"] });
       void queryClient.invalidateQueries({ queryKey: ["app", "health"] });
+      setMessage("设置已保存");
+    },
+    onError: (err) => {
+      setMessage(err instanceof Error ? err.message : "保存失败");
     },
   });
 
-  const createNote = useMutation({
-    mutationFn: (body: string) => ipc.smokeNoteCreate(body),
+  const resetShortcuts = useMutation({
+    mutationFn: () => ipc.settingsResetShortcuts(),
     onSuccess: () => {
-      setDraft("");
-      void queryClient.invalidateQueries({ queryKey: ["smoke-notes"] });
+      void queryClient.invalidateQueries({ queryKey: ["settings"] });
+      setMessage("快捷键已恢复默认（需重启应用后全局快捷键生效）");
     },
   });
 
-  const deleteNote = useMutation({
-    mutationFn: (id: string) => ipc.smokeNoteDelete(id),
+  const createBackup = useMutation({
+    mutationFn: () => ipc.backupCreate(),
+    onSuccess: (info) => {
+      void queryClient.invalidateQueries({ queryKey: ["backups"] });
+      void queryClient.invalidateQueries({ queryKey: ["app", "health"] });
+      setMessage(`备份已创建：${info.fileName}`);
+    },
+    onError: (err) => {
+      setMessage(err instanceof Error ? err.message : "备份失败");
+    },
+  });
+
+  const restoreBackup = useMutation({
+    mutationFn: (fileName: string) => ipc.backupRestore(fileName),
     onSuccess: () => {
-      void queryClient.invalidateQueries({ queryKey: ["smoke-notes"] });
+      void queryClient.invalidateQueries();
+      setMessage("已从备份恢复，数据已刷新");
+    },
+    onError: (err) => {
+      setMessage(err instanceof Error ? err.message : "恢复失败");
+    },
+  });
+
+  const exportData = useMutation({
+    mutationFn: () => ipc.dataExport(),
+    onSuccess: (json) => {
+      const blob = new Blob([json], { type: "application/json" });
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement("a");
+      a.href = url;
+      a.download = `workbench-export-${new Date().toISOString().slice(0, 10)}.json`;
+      a.click();
+      URL.revokeObjectURL(url);
+      setMessage("已导出 JSON 文件");
+    },
+    onError: (err) => {
+      setMessage(err instanceof Error ? err.message : "导出失败");
+    },
+  });
+
+  const importData = useMutation({
+    mutationFn: (json: string) => ipc.dataImport(json),
+    onSuccess: (result) => {
+      void queryClient.invalidateQueries();
+      setMessage(`导入完成：${result.tables} 张表，${result.rows} 行（已先自动备份）`);
+    },
+    onError: (err) => {
+      setMessage(err instanceof Error ? err.message : "导入失败");
     },
   });
 
@@ -79,20 +140,40 @@ export function SettingsPage() {
         .split("\n")
         .map((s) => s.trim())
         .filter(Boolean),
+      backupRetentionCount: Number(backupKeepText) || 10,
     });
   };
 
+  const capLabel: Record<string, string> = {
+    notifications: "通知",
+    globalShortcuts: "全局快捷键",
+    clipboardRead: "剪切板读取",
+    directPaste: "直接粘贴",
+    autostart: "开机启动",
+    tray: "托盘",
+  };
+
   return (
-    <PageScaffold title="设置" description="应用健康、主题、剪切板与持久化">
+    <PageScaffold title="设置" description="备份、权限、快捷键与隐私说明">
       <div className="mx-auto flex max-w-3xl flex-col gap-6 p-4">
+        {message ? (
+          <div className="rounded-[var(--radius-panel)] border border-border bg-surface-raised px-3 py-2 text-[12px]">
+            {message}
+          </div>
+        ) : null}
+
+        {health?.backup.lastError ? (
+          <div className="rounded-[var(--radius-panel)] border border-danger/40 bg-danger/5 px-3 py-2 text-[12px] text-danger">
+            备份异常：{health.backup.lastError}
+          </div>
+        ) : null}
+
         <section className="rounded-[var(--radius-panel)] border border-border bg-surface-raised p-4">
           <h2 className="text-[13px] font-semibold">应用状态</h2>
           {healthQuery.isLoading ? (
             <p className="mt-2 text-[12px] text-muted">检查中…</p>
           ) : healthQuery.isError ? (
-            <p className="mt-2 text-[12px] text-danger">
-              无法连接本地后端（浏览器预览模式也可能出现此提示）
-            </p>
+            <p className="mt-2 text-[12px] text-danger">无法连接本地后端</p>
           ) : health ? (
             <dl className="mt-3 grid grid-cols-2 gap-x-4 gap-y-2 text-[12px]">
               <div>
@@ -104,12 +185,12 @@ export function SettingsPage() {
                 <dd>v{health.database.schemaVersion}</dd>
               </div>
               <div>
-                <dt className="text-muted">Journal</dt>
-                <dd>{health.database.journalMode}</dd>
+                <dt className="text-muted">备份数量</dt>
+                <dd>{health.backup.count}</dd>
               </div>
               <div>
-                <dt className="text-muted">FTS5</dt>
-                <dd>{health.database.fts5Available ? "可用" : "不可用"}</dd>
+                <dt className="text-muted">最近备份</dt>
+                <dd>{health.backup.latest?.createdAt ?? "无"}</dd>
               </div>
               <div className="col-span-2">
                 <dt className="text-muted">数据库路径</dt>
@@ -120,20 +201,85 @@ export function SettingsPage() {
         </section>
 
         <section className="rounded-[var(--radius-panel)] border border-border bg-surface-raised p-4">
-          <h2 className="text-[13px] font-semibold">主题</h2>
-          <div className="mt-3 flex gap-2">
-            {(["system", "light", "dark"] as const).map((theme) => (
-              <Button
-                key={theme}
-                size="sm"
-                variant={settings?.theme === theme ? "default" : "secondary"}
-                onClick={() => updateTheme(theme)}
-                disabled={!settings || saveSettings.isPending}
-              >
-                {theme === "system" ? "跟随系统" : theme === "light" ? "浅色" : "深色"}
-              </Button>
-            ))}
+          <h2 className="text-[13px] font-semibold">通用</h2>
+          <div className="mt-3 space-y-3 text-[12px]">
+            <div>
+              <p className="mb-2 text-muted">主题</p>
+              <div className="flex gap-2">
+                {(["system", "light", "dark"] as const).map((theme) => (
+                  <Button
+                    key={theme}
+                    size="sm"
+                    variant={settings?.theme === theme ? "default" : "secondary"}
+                    onClick={() => updateTheme(theme)}
+                    disabled={!settings || saveSettings.isPending}
+                  >
+                    {theme === "system"
+                      ? "跟随系统"
+                      : theme === "light"
+                        ? "浅色"
+                        : "深色"}
+                  </Button>
+                ))}
+              </div>
+            </div>
+            {settings ? (
+              <label className="flex items-start gap-2">
+                <input
+                  type="checkbox"
+                  className="mt-0.5"
+                  checked={settings.launchAtLogin}
+                  onChange={(e) =>
+                    saveSettings.mutate({
+                      ...settings,
+                      launchAtLogin: e.target.checked,
+                    })
+                  }
+                />
+                <span>
+                  <span className="block font-medium">开机启动</span>
+                  <span className="text-muted">
+                    登录系统后后台运行，以便提醒与剪切板采集继续工作。关闭主窗口不会退出应用。
+                  </span>
+                </span>
+              </label>
+            ) : null}
           </div>
+        </section>
+
+        <section className="rounded-[var(--radius-panel)] border border-border bg-surface-raised p-4">
+          <h2 className="text-[13px] font-semibold">快捷键</h2>
+          <p className="mt-1 text-[12px] text-muted">
+            全局快捷键在启动时注册。若与其他应用冲突，请先关闭冲突应用或恢复默认后重启。
+          </p>
+          {settings ? (
+            <dl className="mt-3 space-y-2 text-[12px]">
+              <div className="flex justify-between gap-4">
+                <dt className="text-muted">快速记录</dt>
+                <dd className="font-mono">{settings.shortcuts.quickCapture}</dd>
+              </div>
+              <div className="flex justify-between gap-4">
+                <dt className="text-muted">统一搜索</dt>
+                <dd className="font-mono">{settings.shortcuts.search}</dd>
+              </div>
+              <div className="flex justify-between gap-4">
+                <dt className="text-muted">剪切板浮层</dt>
+                <dd className="font-mono">{settings.shortcuts.clipboard}</dd>
+              </div>
+              <div className="flex justify-between gap-4">
+                <dt className="text-muted">聚焦主窗口</dt>
+                <dd className="font-mono">{settings.shortcuts.focusMain}</dd>
+              </div>
+              <Button
+                size="sm"
+                variant="secondary"
+                className="mt-2"
+                onClick={() => resetShortcuts.mutate()}
+              >
+                恢复默认快捷键
+              </Button>
+            </dl>
+          ) : null}
         </section>
 
         <section className="rounded-[var(--radius-panel)] border border-border bg-surface-raised p-4">
@@ -187,83 +333,154 @@ export function SettingsPage() {
                   onBlur={persistClipboardFields}
                 />
               </label>
-              {health?.capabilities.directPaste ? (
-                <p className="text-muted">
-                  直接粘贴：
-                  {health.capabilities.directPaste.available
-                    ? "可用"
-                    : "未授权，再次使用将写入系统剪切板"}{" "}
-                  — {health.capabilities.directPaste.notes}
-                </p>
-              ) : null}
             </div>
-          ) : (
-            <p className="mt-2 text-[12px] text-muted">加载设置…</p>
-          )}
+          ) : null}
         </section>
 
         <section className="rounded-[var(--radius-panel)] border border-border bg-surface-raised p-4">
-          <h2 className="text-[13px] font-semibold">持久化冒烟测试</h2>
+          <h2 className="text-[13px] font-semibold">备份与数据</h2>
           <p className="mt-1 text-[12px] text-muted">
-            写入本地 SQLite，重启应用后仍应可见。用于验收阶段 0 数据层。
+            自动本地备份保存在应用数据目录。导入会覆盖当前业务数据，导入前会自动备份。
           </p>
-          <form
-            className="mt-3 flex gap-2"
-            onSubmit={(event) => {
-              event.preventDefault();
-              if (!draft.trim()) return;
-              createNote.mutate(draft.trim());
-            }}
-          >
-            <Input
-              value={draft}
-              onChange={(event) => setDraft(event.target.value)}
-              placeholder="输入一条测试笔记…"
-            />
-            <Button type="submit" disabled={createNote.isPending}>
-              保存
-            </Button>
-          </form>
-          <ul className="mt-3 divide-y divide-border border-t border-border">
-            {(notesQuery.data ?? []).map((note) => (
-              <li
-                key={note.id}
-                className="flex items-center justify-between gap-3 py-2 text-[13px]"
-              >
-                <div className="min-w-0">
-                  <p className="truncate">{note.body}</p>
-                  <p className="text-[11px] text-muted">{note.updatedAt}</p>
-                </div>
+          {settings ? (
+            <div className="mt-3 space-y-3 text-[12px]">
+              <label className="flex items-center gap-2">
+                <input
+                  type="checkbox"
+                  checked={settings.autoBackupOnLaunch}
+                  onChange={(e) =>
+                    saveSettings.mutate({
+                      ...settings,
+                      autoBackupOnLaunch: e.target.checked,
+                    })
+                  }
+                />
+                启动时自动备份
+              </label>
+              <label className="flex flex-col gap-1">
+                <span className="text-muted">保留备份数量</span>
+                <Input
+                  type="number"
+                  min={1}
+                  max={100}
+                  value={backupKeepText}
+                  onChange={(e) => setBackupKeepText(e.target.value)}
+                  onBlur={persistClipboardFields}
+                />
+              </label>
+              <div className="flex flex-wrap gap-2">
                 <Button
                   size="sm"
-                  variant="ghost"
-                  onClick={() => deleteNote.mutate(note.id)}
+                  onClick={() => createBackup.mutate()}
+                  disabled={createBackup.isPending}
                 >
-                  删除
+                  立即备份
                 </Button>
-              </li>
-            ))}
-            {notesQuery.data?.length === 0 ? (
-              <li className="py-3 text-[12px] text-muted">暂无测试笔记</li>
-            ) : null}
-          </ul>
+                <Button
+                  size="sm"
+                  variant="secondary"
+                  onClick={() => exportData.mutate()}
+                  disabled={exportData.isPending}
+                >
+                  导出全部数据…
+                </Button>
+                <Button
+                  size="sm"
+                  variant="secondary"
+                  onClick={() => fileRef.current?.click()}
+                  disabled={importData.isPending}
+                >
+                  导入 JSON…
+                </Button>
+                <input
+                  ref={fileRef}
+                  type="file"
+                  accept="application/json,.json"
+                  className="hidden"
+                  onChange={(e) => {
+                    const file = e.target.files?.[0];
+                    if (!file) return;
+                    if (
+                      !confirm(
+                        "导入将覆盖当前任务、提醒、记忆与剪切板等业务数据。确定继续？",
+                      )
+                    ) {
+                      e.target.value = "";
+                      return;
+                    }
+                    void file.text().then((text) => importData.mutate(text));
+                    e.target.value = "";
+                  }}
+                />
+              </div>
+              <ul className="divide-y divide-border border-t border-border">
+                {(backupsQuery.data ?? []).slice(0, 8).map((item) => (
+                  <li
+                    key={item.fileName}
+                    className="flex items-center justify-between gap-3 py-2"
+                  >
+                    <div className="min-w-0">
+                      <p className="truncate font-mono text-[12px]">
+                        {item.fileName}
+                      </p>
+                      <p className="text-[11px] text-muted">
+                        {item.createdAt} · {formatBytes(item.sizeBytes)} ·{" "}
+                        {item.reason}
+                      </p>
+                    </div>
+                    <Button
+                      size="sm"
+                      variant="ghost"
+                      onClick={() => {
+                        if (
+                          confirm(
+                            `恢复备份 ${item.fileName}？当前数据会先自动备份。`,
+                          )
+                        ) {
+                          restoreBackup.mutate(item.fileName);
+                        }
+                      }}
+                    >
+                      恢复
+                    </Button>
+                  </li>
+                ))}
+                {(backupsQuery.data ?? []).length === 0 ? (
+                  <li className="py-3 text-muted">暂无备份</li>
+                ) : null}
+              </ul>
+              {health ? (
+                <p className="break-all text-[11px] text-muted">
+                  备份目录：{health.backup.directory}
+                </p>
+              ) : null}
+            </div>
+          ) : null}
         </section>
 
-        {health ? (
-          <section className="rounded-[var(--radius-panel)] border border-border bg-surface-raised p-4">
-            <h2 className="text-[13px] font-semibold">平台能力</h2>
-            <ul className="mt-3 space-y-2 text-[12px]">
+        <section className="rounded-[var(--radius-panel)] border border-border bg-surface-raised p-4">
+          <h2 className="text-[13px] font-semibold">权限与隐私</h2>
+          <p className="mt-1 text-[12px] text-muted">
+            所有业务数据保存在本机 SQLite，不上传云端。日志不记录任务正文、记忆正文或剪切板内容。
+          </p>
+          {health ? (
+            <ul className="mt-3 space-y-3 text-[12px]">
               {Object.entries(health.capabilities).map(([key, value]) => (
-                <li key={key} className="flex gap-3">
-                  <span className="w-28 shrink-0 text-muted">{key}</span>
-                  <span>
-                    {value.available ? "可用" : "不可用"} — {value.notes}
-                  </span>
+                <li key={key} className="rounded border border-border p-2">
+                  <div className="flex items-center justify-between gap-2">
+                    <span className="font-medium">
+                      {capLabel[key] ?? key}
+                    </span>
+                    <span className={value.available ? "text-muted" : "text-danger"}>
+                      {value.available ? "可用 / 可降级" : "受限"}
+                    </span>
+                  </div>
+                  <p className="mt-1 text-muted">{value.notes}</p>
                 </li>
               ))}
             </ul>
-          </section>
-        ) : null}
+          ) : null}
+        </section>
       </div>
     </PageScaffold>
   );

@@ -26,33 +26,34 @@ pub fn detect_capabilities() -> PlatformCapabilities {
     PlatformCapabilities {
         notifications: CapabilityStatus {
             available: true,
-            notes: "Requires user permission; denied state must degrade gracefully.".into(),
+            notes: "用于到期提醒。若系统拒绝通知权限，提醒仍会写入本地列表，但不会弹出系统通知。".into(),
         },
         global_shortcuts: CapabilityStatus {
             available: true,
-            notes: "Conflicts should be reported and remappable.".into(),
+            notes: "用于唤起快速记录、搜索与剪切板。若与其他应用冲突，可在设置中查看当前快捷键并恢复默认。".into(),
         },
         clipboard_read: CapabilityStatus {
             available: true,
-            notes: "Text only in v1; pause/exclude rules enforced later.".into(),
+            notes: "仅采集文本。可随时暂停；密码管理器等应用默认排除。正文不会写入日志。".into(),
         },
         direct_paste: CapabilityStatus {
             available: cfg!(any(target_os = "macos", target_os = "windows")),
             notes: if cfg!(target_os = "macos") {
-                "Requires Accessibility permission; falls back to copy.".into()
+                "需要辅助功能权限。未授权时「再次复制」仍可用，可手动粘贴。"
             } else if cfg!(target_os = "windows") {
-                "Uses system input APIs; falls back to copy on failure.".into()
+                "依赖系统输入能力；失败时降级为再次复制到剪切板。"
             } else {
-                "Deferred until Linux adaptation.".into()
-            },
+                "Linux 适配延后；请使用再次复制。"
+            }
+            .into(),
         },
         autostart: CapabilityStatus {
             available: true,
-            notes: "Optional; off by default.".into(),
+            notes: "可选。开启后登录系统时后台运行，以便提醒与剪切板采集继续工作；关闭主窗口不会退出。".into(),
         },
         tray: CapabilityStatus {
             available: true,
-            notes: "Close main window hides to tray; Exit ends process.".into(),
+            notes: "关闭主窗口会隐藏到托盘；只有「退出」才会结束进程。".into(),
         },
     }
 }

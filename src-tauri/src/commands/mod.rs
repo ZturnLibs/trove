@@ -1,4 +1,6 @@
 use crate::app_state::AppState;
+use crate::application::backup::{BackupInfo, BackupStatus};
+use crate::application::data_port::ImportResult;
 use crate::application::smoke_notes::SmokeNote;
 use crate::application::tasks::TaskCounts;
 use crate::domain::{
@@ -8,10 +10,11 @@ use crate::domain::{
     TaskList, TaskQuery, TodayTasks, UpdateMemoryInput, UpdateReminderInput, UpdateTaskInput,
 };
 use crate::infrastructure::db::DbHealth;
-use crate::infrastructure::settings::AppSettings;
+use crate::infrastructure::settings::{AppSettings, ShortcutSettings};
 use crate::platform::{detect_capabilities, PlatformCapabilities};
 use serde::Serialize;
 use tauri::{AppHandle, Emitter, State};
+use tauri_plugin_autostart::ManagerExt;
 use tauri_plugin_clipboard_manager::ClipboardExt;
 
 #[derive(Debug, Serialize, Clone)]
@@ -30,6 +33,7 @@ pub struct AppHealth {
     pub app_version: String,
     pub database: DbHealth,
     pub capabilities: PlatformCapabilities,
+    pub backup: BackupStatus,
 }
 
 fn emit_task_change(app: &AppHandle, task: &Task, change: &str) {
@@ -74,6 +78,7 @@ pub fn app_health(state: State<'_, AppState>) -> Result<AppHealth, AppError> {
         app_version: env!("CARGO_PKG_VERSION").into(),
         database,
         capabilities: detect_capabilities(),
+        backup: state.backups.status(),
     })
 }
 
@@ -84,6 +89,7 @@ pub fn settings_get(state: State<'_, AppState>) -> Result<AppSettings, AppError>
 
 #[tauri::command]
 pub fn settings_save(
+    app: AppHandle,
     state: State<'_, AppState>,
     settings: AppSettings,
 ) -> Result<AppSettings, AppError> {
@@ -93,6 +99,26 @@ pub fn settings_save(
         max_items: settings.clipboard_max_items,
         excluded_apps: settings.clipboard_excluded_apps.clone(),
     })?;
+    state.settings.save(&settings)?;
+
+    // Sync launch-at-login with OS.
+    let autostart = app.autolaunch();
+    let result = if settings.launch_at_login {
+        autostart.enable()
+    } else {
+        autostart.disable()
+    };
+    if let Err(err) = result {
+        tracing::warn!(error = %err, "failed to update launch at login");
+    }
+
+    Ok(settings)
+}
+
+#[tauri::command]
+pub fn settings_reset_shortcuts(state: State<'_, AppState>) -> Result<AppSettings, AppError> {
+    let mut settings = state.settings.get()?;
+    settings.shortcuts = ShortcutSettings::default();
     state.settings.save(&settings)?;
     Ok(settings)
 }
@@ -640,6 +666,88 @@ pub fn clipboard_set_capture_enabled(
         },
     );
     Ok(settings)
+}
+
+#[tauri::command]
+pub fn backup_create(
+    app: AppHandle,
+    state: State<'_, AppState>,
+) -> Result<BackupInfo, AppError> {
+    let info = state.backups.create("manual")?;
+    let settings = state.settings.get()?;
+    let _ = state
+        .backups
+        .rotate(settings.backup_retention_count as usize);
+    let _ = app.emit(
+        "domain://changed",
+        DomainChangeEvent {
+            entity_type: "backup".into(),
+            entity_id: info.file_name.clone(),
+            change: "created".into(),
+            revision: 0,
+        },
+    );
+    Ok(info)
+}
+
+#[tauri::command]
+pub fn backup_list(state: State<'_, AppState>) -> Result<Vec<BackupInfo>, AppError> {
+    state.backups.list().map_err(Into::into)
+}
+
+#[tauri::command]
+pub fn backup_status(state: State<'_, AppState>) -> Result<BackupStatus, AppError> {
+    Ok(state.backups.status())
+}
+
+#[tauri::command]
+pub fn backup_restore(
+    app: AppHandle,
+    state: State<'_, AppState>,
+    file_name: String,
+) -> Result<(), AppError> {
+    state.backups.restore(&file_name)?;
+    let _ = state.tasks.ensure_seed_data();
+    if let Err(err) = state.search.rebuild_all() {
+        tracing::warn!(error = %err, "search rebuild after restore failed");
+    }
+    let _ = app.emit(
+        "domain://changed",
+        DomainChangeEvent {
+            entity_type: "backup".into(),
+            entity_id: file_name,
+            change: "restored".into(),
+            revision: 0,
+        },
+    );
+    Ok(())
+}
+
+#[tauri::command]
+pub fn data_export(state: State<'_, AppState>) -> Result<String, AppError> {
+    state.data_port.export_json().map_err(Into::into)
+}
+
+#[tauri::command]
+pub fn data_import(
+    app: AppHandle,
+    state: State<'_, AppState>,
+    json: String,
+) -> Result<ImportResult, AppError> {
+    // Safety backup before destructive import.
+    let _ = state.backups.create("pre-import");
+    let result = state.data_port.import_json(&json)?;
+    let _ = state.tasks.ensure_seed_data();
+    let _ = app.emit(
+        "domain://changed",
+        DomainChangeEvent {
+            entity_type: "data".into(),
+            entity_id: "*".into(),
+            change: "imported".into(),
+            revision: 0,
+        },
+    );
+    Ok(result)
 }
 
 #[tauri::command]

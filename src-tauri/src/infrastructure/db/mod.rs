@@ -1,5 +1,6 @@
-use rusqlite::{Connection, OptionalExtension};
+use rusqlite::{backup::Backup, Connection, OptionalExtension};
 use std::path::{Path, PathBuf};
+use std::time::Duration;
 use thiserror::Error;
 
 const MIGRATIONS: &[(i64, &str)] = &[
@@ -27,13 +28,20 @@ pub struct Database {
 
 impl Database {
     pub fn open(path: impl Into<PathBuf>) -> Result<Self, DbError> {
+        Self::open_with_backup_dir(path, None)
+    }
+
+    pub fn open_with_backup_dir(
+        path: impl Into<PathBuf>,
+        backup_dir: Option<PathBuf>,
+    ) -> Result<Self, DbError> {
         let path = path.into();
         if let Some(parent) = path.parent() {
             std::fs::create_dir_all(parent)?;
         }
 
         let db = Self { path };
-        db.migrate()?;
+        db.migrate(backup_dir.as_deref())?;
         Ok(db)
     }
 
@@ -52,7 +60,7 @@ impl Database {
         Ok(conn)
     }
 
-    pub fn migrate(&self) -> Result<(), DbError> {
+    pub fn migrate(&self, backup_dir: Option<&Path>) -> Result<(), DbError> {
         let conn = self.connect()?;
         conn.execute_batch(
             "CREATE TABLE IF NOT EXISTS schema_migrations (
@@ -69,26 +77,54 @@ impl Database {
             )
             .unwrap_or(0);
 
-        for (version, sql) in MIGRATIONS {
-            if *version <= current {
-                continue;
+        let pending: Vec<&(i64, &str)> = MIGRATIONS
+            .iter()
+            .filter(|(version, _)| *version > current)
+            .collect();
+
+        if !pending.is_empty() {
+            if let Some(dir) = backup_dir {
+                if current > 0 && self.path.exists() {
+                    if let Err(err) = self.snapshot_before_migrate(dir, current) {
+                        tracing::error!(error = %err, "pre-migration backup failed");
+                        return Err(DbError::Message(format!(
+                            "数据库升级前备份失败，已中止迁移: {err}"
+                        )));
+                    }
+                }
             }
 
-            let tx = conn.unchecked_transaction()?;
-            tx.execute_batch(sql)?;
-            tx.execute(
-                "INSERT INTO schema_migrations (version, applied_at) VALUES (?1, ?2)",
-                rusqlite::params![
-                    version,
-                    chrono::Utc::now()
-                        .format("%Y-%m-%dT%H:%M:%S%.3fZ")
-                        .to_string()
-                ],
-            )?;
-            tx.commit()?;
-            tracing::info!(version, "applied database migration");
+            for (version, sql) in pending {
+                let tx = conn.unchecked_transaction()?;
+                tx.execute_batch(sql)?;
+                tx.execute(
+                    "INSERT INTO schema_migrations (version, applied_at) VALUES (?1, ?2)",
+                    rusqlite::params![
+                        version,
+                        chrono::Utc::now()
+                            .format("%Y-%m-%dT%H:%M:%S%.3fZ")
+                            .to_string()
+                    ],
+                )?;
+                tx.commit()?;
+                tracing::info!(version, "applied database migration");
+            }
         }
 
+        Ok(())
+    }
+
+    fn snapshot_before_migrate(&self, backup_dir: &Path, current: i64) -> Result<(), DbError> {
+        std::fs::create_dir_all(backup_dir)?;
+        let stamp = chrono::Local::now().format("%Y%m%d-%H%M%S");
+        let dest = backup_dir.join(format!("workbench-pre-migrate-v{current}-{stamp}.db"));
+        let src = self.connect()?;
+        let mut dst = Connection::open(&dest)?;
+        {
+            let backup = Backup::new(&src, &mut dst)?;
+            backup.run_to_completion(100, Duration::from_millis(25), None)?;
+        }
+        tracing::info!(path = %dest.display(), "created pre-migration backup");
         Ok(())
     }
 
@@ -153,8 +189,8 @@ mod tests {
         let dir = tempdir().unwrap();
         let db_path = dir.path().join("workbench.db");
         let db = Database::open(&db_path).unwrap();
-        db.migrate().unwrap();
-        db.migrate().unwrap();
+        db.migrate(None).unwrap();
+        db.migrate(None).unwrap();
         assert_eq!(db.health_check().unwrap().schema_version, 5);
     }
 }

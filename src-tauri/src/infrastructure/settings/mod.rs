@@ -17,6 +17,20 @@ pub struct AppSettings {
     pub clipboard_max_items: u32,
     #[serde(default = "crate::domain::default_excluded_apps")]
     pub clipboard_excluded_apps: Vec<String>,
+    #[serde(default = "default_true")]
+    pub auto_backup_on_launch: bool,
+    #[serde(default = "default_backup_keep")]
+    pub backup_retention_count: u32,
+    #[serde(default)]
+    pub onboarding_completed: bool,
+}
+
+fn default_true() -> bool {
+    true
+}
+
+fn default_backup_keep() -> u32 {
+    10
 }
 
 fn default_max_items() -> u32 {
@@ -54,6 +68,9 @@ impl Default for AppSettings {
             clipboard_retention_days: 30,
             clipboard_max_items: 500,
             clipboard_excluded_apps: crate::domain::default_excluded_apps(),
+            auto_backup_on_launch: true,
+            backup_retention_count: 10,
+            onboarding_completed: false,
         }
     }
 }
@@ -121,6 +138,9 @@ impl SettingsService {
     }
 
     pub fn save(&self, settings: &AppSettings) -> Result<(), DomainError> {
+        if settings.backup_retention_count == 0 || settings.backup_retention_count > 100 {
+            return Err(DomainError::Validation("备份保留数量需在 1–100".into()));
+        }
         let conn = self
             .db
             .connect()

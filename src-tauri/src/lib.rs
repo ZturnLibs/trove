@@ -15,7 +15,7 @@ use tauri::{
     tray::{MouseButton, MouseButtonState, TrayIconBuilder, TrayIconEvent},
     Emitter, Manager, WindowEvent,
 };
-use tauri_plugin_autostart::MacosLauncher;
+use tauri_plugin_autostart::{MacosLauncher, ManagerExt};
 
 fn resolve_db_path(app: &tauri::AppHandle) -> Result<std::path::PathBuf, String> {
     let dir = app
@@ -24,6 +24,16 @@ fn resolve_db_path(app: &tauri::AppHandle) -> Result<std::path::PathBuf, String>
         .map_err(|e| format!("resolve app data dir: {e}"))?;
     std::fs::create_dir_all(&dir).map_err(|e| format!("create app data dir: {e}"))?;
     Ok(dir.join("workbench.db"))
+}
+
+fn resolve_backup_dir(app: &tauri::AppHandle) -> Result<std::path::PathBuf, String> {
+    let dir = app
+        .path()
+        .app_data_dir()
+        .map_err(|e| format!("resolve app data dir: {e}"))?
+        .join("backups");
+    std::fs::create_dir_all(&dir).map_err(|e| format!("create backup dir: {e}"))?;
+    Ok(dir)
 }
 
 fn setup_tray(app: &tauri::AppHandle) -> tauri::Result<()> {
@@ -236,12 +246,41 @@ pub fn run() {
         .plugin(tauri_plugin_global_shortcut::Builder::new().build())
         .setup(|app| {
             let db_path = resolve_db_path(app.handle())?;
+            let backup_dir = resolve_backup_dir(app.handle())?;
             tracing::info!(path = %db_path.display(), "opening database");
-            let db = Database::open(db_path).map_err(|e| e.to_string())?;
-            let state = AppState::new(db)?;
-            let _ = state.settings.get();
+            let db = Database::open_with_backup_dir(db_path, Some(backup_dir.clone()))
+                .map_err(|e| e.to_string())?;
+            let state = AppState::new(db, backup_dir)?;
+            let settings = state.settings.get().unwrap_or_default();
             let reminders = state.reminders.clone();
             let clipboard = state.clipboard.clone();
+            let backups = state.backups.clone();
+
+            if settings.auto_backup_on_launch {
+                match backups.create("launch") {
+                    Ok(_) => {
+                        let _ = backups.rotate(settings.backup_retention_count as usize);
+                    }
+                    Err(err) => {
+                        tracing::error!(error = %err, "automatic launch backup failed");
+                        let _ = app.emit(
+                            "backup://failed",
+                            serde_json::json!({
+                                "message": format!("自动备份失败：{err}"),
+                            }),
+                        );
+                    }
+                }
+            }
+
+            // Sync autostart with persisted preference.
+            let autostart = app.autolaunch();
+            let _ = if settings.launch_at_login {
+                autostart.enable()
+            } else {
+                autostart.disable()
+            };
+
             app.manage(state);
 
             setup_tray(app.handle())?;
@@ -257,6 +296,7 @@ pub fn run() {
             commands::app_health,
             commands::settings_get,
             commands::settings_save,
+            commands::settings_reset_shortcuts,
             commands::smoke_note_create,
             commands::smoke_note_list,
             commands::smoke_note_delete,
@@ -292,6 +332,12 @@ pub fn run() {
             commands::clipboard_convert_to_task,
             commands::clipboard_convert_to_memory,
             commands::clipboard_set_capture_enabled,
+            commands::backup_create,
+            commands::backup_list,
+            commands::backup_status,
+            commands::backup_restore,
+            commands::data_export,
+            commands::data_import,
             commands::reminder_create,
             commands::reminder_update,
             commands::reminder_delete,

@@ -24,6 +24,9 @@ export type AppSettings = {
   clipboardRetentionDays: number;
   clipboardMaxItems: number;
   clipboardExcludedApps: string[];
+  autoBackupOnLaunch: boolean;
+  backupRetentionCount: number;
+  onboardingCompleted: boolean;
 };
 
 export type DbHealth = {
@@ -53,6 +56,27 @@ export type AppHealth = {
   appVersion: string;
   database: DbHealth;
   capabilities: PlatformCapabilities;
+  backup: BackupStatus;
+};
+
+export type BackupInfo = {
+  fileName: string;
+  path: string;
+  sizeBytes: number;
+  createdAt: string;
+  reason: string;
+};
+
+export type BackupStatus = {
+  directory: string;
+  count: number;
+  latest: BackupInfo | null;
+  lastError: string | null;
+};
+
+export type ImportResult = {
+  tables: number;
+  rows: number;
 };
 
 export type SmokeNote = {
@@ -302,6 +326,8 @@ export const ipc = {
   settingsGet: () => invoke<AppSettings>("settings_get"),
   settingsSave: (settings: AppSettings) =>
     invoke<AppSettings>("settings_save", { settings }),
+  settingsResetShortcuts: () =>
+    invoke<AppSettings>("settings_reset_shortcuts"),
   smokeNoteCreate: (body: string) =>
     invoke<SmokeNote>("smoke_note_create", { body }),
   smokeNoteList: () => invoke<SmokeNote[]>("smoke_note_list"),
@@ -362,6 +388,13 @@ export const ipc = {
     invoke<string>("clipboard_convert_to_memory", { id }),
   clipboardSetCaptureEnabled: (enabled: boolean) =>
     invoke<AppSettings>("clipboard_set_capture_enabled", { enabled }),
+  backupCreate: () => invoke<BackupInfo>("backup_create"),
+  backupList: () => invoke<BackupInfo[]>("backup_list"),
+  backupStatus: () => invoke<BackupStatus>("backup_status"),
+  backupRestore: (fileName: string) =>
+    invoke<void>("backup_restore", { fileName }),
+  dataExport: () => invoke<string>("data_export"),
+  dataImport: (json: string) => invoke<ImportResult>("data_import", { json }),
   windowShowMain: () => invoke<void>("window_show_main"),
   windowShowQuick: (mode?: "capture" | "search" | "clip") =>
     invoke<void>("window_show_quick", { mode }),

@@ -1,4 +1,6 @@
+use crate::application::backup::BackupService;
 use crate::application::clipboard::ClipboardService;
+use crate::application::data_port::DataPortService;
 use crate::application::memories::MemoryService;
 use crate::application::reminders::ReminderService;
 use crate::application::search::SearchService;
@@ -6,6 +8,7 @@ use crate::application::smoke_notes::SmokeNoteService;
 use crate::application::tasks::TaskService;
 use crate::infrastructure::db::Database;
 use crate::infrastructure::settings::SettingsService;
+use std::path::PathBuf;
 use std::sync::Arc;
 
 #[derive(Clone)]
@@ -18,10 +21,12 @@ pub struct AppState {
     pub memories: Arc<MemoryService>,
     pub search: Arc<SearchService>,
     pub clipboard: Arc<ClipboardService>,
+    pub backups: Arc<BackupService>,
+    pub data_port: Arc<DataPortService>,
 }
 
 impl AppState {
-    pub fn new(db: Database) -> Result<Self, String> {
+    pub fn new(db: Database, backup_dir: PathBuf) -> Result<Self, String> {
         let db = Arc::new(db);
         let tasks = TaskService::new(db.as_ref().clone());
         tasks
@@ -31,6 +36,8 @@ impl AppState {
         let search = SearchService::new(db.as_ref().clone());
         let memories = MemoryService::new(db.as_ref().clone());
         let clipboard = ClipboardService::new(db.as_ref().clone());
+        let backups = BackupService::new(db.as_ref().clone(), backup_dir);
+        let data_port = DataPortService::new(db.as_ref().clone());
         let state = Self {
             settings: Arc::new(SettingsService::new(db.as_ref().clone())),
             smoke_notes: Arc::new(SmokeNoteService::new(db.as_ref().clone())),
@@ -39,6 +46,8 @@ impl AppState {
             memories: Arc::new(memories),
             search: Arc::new(search),
             clipboard: Arc::new(clipboard),
+            backups: Arc::new(backups),
+            data_port: Arc::new(data_port),
             db,
         };
         if let Err(err) = state.search.rebuild_all() {
