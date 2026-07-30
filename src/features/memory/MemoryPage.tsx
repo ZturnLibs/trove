@@ -1,9 +1,274 @@
-import { EmptyState, PageScaffold } from "@/components/PageScaffold";
+import { useEffect, useMemo, useState } from "react";
+import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import { Pin } from "lucide-react";
+import { EmptyState } from "@/components/PageScaffold";
+import { Button } from "@/design-system/primitives/Button";
+import { Input } from "@/design-system/primitives/Input";
+import {
+  NewTaskButton,
+  SplitTaskLayout,
+} from "@/features/tasks/TaskLayout";
+import { useDomainInvalidation } from "@/features/tasks/useDomainInvalidation";
+import { ipc, type Memory, type UpdateMemoryInput } from "@/ipc/client";
+import { cn } from "@/lib/cn";
+
+function linkify(text: string) {
+  const parts = text.split(/(https?:\/\/[^\s]+)/g);
+  return parts.map((part, index) =>
+    /^https?:\/\//.test(part) ? (
+      <a
+        key={`${part}-${index}`}
+        href={part}
+        className="text-accent underline"
+        onClick={(e) => {
+          e.preventDefault();
+          void navigator.clipboard.writeText(part);
+        }}
+        title="点击复制链接"
+      >
+        {part}
+      </a>
+    ) : (
+      <span key={`${index}`}>{part}</span>
+    ),
+  );
+}
+
+function MemoryDetail({
+  memory,
+  onDeleted,
+}: {
+  memory: Memory | null;
+  onDeleted?: () => void;
+}) {
+  const queryClient = useQueryClient();
+  const [draft, setDraft] = useState<UpdateMemoryInput | null>(null);
+  const [tagText, setTagText] = useState("");
+  const [preview, setPreview] = useState(false);
+
+  useEffect(() => {
+    if (!memory) {
+      setDraft(null);
+      return;
+    }
+    setDraft({
+      id: memory.id,
+      title: memory.title,
+      body: memory.body,
+      pinned: memory.pinned,
+      archived: memory.archived,
+      tagNames: [...memory.tagNames],
+    });
+    setTagText(memory.tagNames.join(", "));
+  }, [memory]);
+
+  const saveMutation = useMutation({
+    mutationFn: (input: UpdateMemoryInput) => ipc.memoryUpdate(input),
+    onSuccess: () => void queryClient.invalidateQueries({ queryKey: ["memories"] }),
+  });
+
+  const deleteMutation = useMutation({
+    mutationFn: () => ipc.memoryDelete(memory!.id),
+    onSuccess: () => {
+      void queryClient.invalidateQueries({ queryKey: ["memories"] });
+      onDeleted?.();
+    },
+  });
+
+  const convertMutation = useMutation({
+    mutationFn: () => ipc.memoryConvertToTask(memory!.id),
+    onSuccess: () => {
+      void queryClient.invalidateQueries({ queryKey: ["memories"] });
+      void queryClient.invalidateQueries({ queryKey: ["tasks"] });
+      alert("已转为任务，原记忆已保留");
+    },
+  });
+
+  if (!memory || !draft) {
+    return (
+      <div className="flex h-full items-center justify-center p-6 text-[12px] text-muted">
+        选择一项查看详情
+      </div>
+    );
+  }
+
+  const save = () => {
+    const tagNames = tagText
+      .split(/[,，]/)
+      .map((t) => t.trim())
+      .filter(Boolean);
+    saveMutation.mutate({ ...draft, tagNames });
+  };
+
+  return (
+    <div className="flex h-full min-h-0 flex-col">
+      <div className="flex items-center justify-between border-b border-border px-3 py-2 text-[11px] text-muted">
+        <span>记忆 · {memory.updatedAt.slice(0, 16).replace("T", " ")}</span>
+        <Button size="sm" variant="ghost" onClick={() => setPreview((v) => !v)}>
+          {preview ? "编辑" : "预览"}
+        </Button>
+      </div>
+      <div className="min-h-0 flex-1 space-y-3 overflow-auto p-3">
+        <Input
+          value={draft.title}
+          onChange={(e) => setDraft({ ...draft, title: e.target.value })}
+          onBlur={save}
+          className="h-9 text-[14px] font-medium"
+        />
+        <label className="block space-y-1 text-[11px] text-muted">
+          标签
+          <Input
+            value={tagText}
+            onChange={(e) => setTagText(e.target.value)}
+            onBlur={save}
+            placeholder="工作, 灵感"
+          />
+        </label>
+        {preview ? (
+          <div className="whitespace-pre-wrap rounded-[var(--radius-control)] border border-border bg-surface p-3 text-[13px] leading-relaxed">
+            {linkify(draft.body || "（空）")}
+          </div>
+        ) : (
+          <textarea
+            value={draft.body}
+            onChange={(e) => setDraft({ ...draft, body: e.target.value })}
+            onBlur={save}
+            rows={14}
+            className="w-full resize-none rounded-[var(--radius-control)] border border-border bg-surface-raised p-2 font-mono text-[13px] text-foreground outline-none focus:ring-2 focus:ring-accent/35"
+            placeholder="支持基础 Markdown 文本…"
+          />
+        )}
+      </div>
+      <div className="flex items-center justify-between gap-2 border-t border-border p-3">
+        <div className="flex gap-1">
+          <Button
+            size="sm"
+            variant="ghost"
+            onClick={() => {
+              const next = { ...draft, pinned: !draft.pinned };
+              setDraft(next);
+              saveMutation.mutate({
+                ...next,
+                tagNames: tagText
+                  .split(/[,，]/)
+                  .map((t) => t.trim())
+                  .filter(Boolean),
+              });
+            }}
+          >
+            {draft.pinned ? "取消置顶" : "置顶"}
+          </Button>
+          <Button
+            size="sm"
+            variant="ghost"
+            onClick={() => void navigator.clipboard.writeText(draft.body)}
+          >
+            复制
+          </Button>
+          <Button
+            size="sm"
+            variant="ghost"
+            onClick={() => {
+              if (confirm("确认删除此记忆？")) deleteMutation.mutate();
+            }}
+          >
+            删除
+          </Button>
+        </div>
+        <Button
+          size="sm"
+          onClick={() => convertMutation.mutate()}
+          disabled={convertMutation.isPending}
+        >
+          转为任务
+        </Button>
+      </div>
+    </div>
+  );
+}
 
 export function MemoryPage() {
+  useDomainInvalidation();
+  const queryClient = useQueryClient();
+  const [selectedId, setSelectedId] = useState<string | null>(null);
+  const [pinnedOnly, setPinnedOnly] = useState(false);
+
+  const memoriesQuery = useQuery({
+    queryKey: ["memories", { pinnedOnly }],
+    queryFn: () => ipc.memoryQuery({ pinnedOnly }),
+  });
+
+  const createMutation = useMutation({
+    mutationFn: () => ipc.memoryCreate({ title: "新记忆", body: "" }),
+    onSuccess: (memory) => {
+      void queryClient.invalidateQueries({ queryKey: ["memories"] });
+      setSelectedId(memory.id);
+    },
+  });
+
+  const selected = useMemo(
+    () => memoriesQuery.data?.find((m) => m.id === selectedId) ?? null,
+    [memoriesQuery.data, selectedId],
+  );
+
   return (
-    <PageScaffold title="记忆" description="短小、可检索的信息片段">
-      <EmptyState title="还没有记忆" body="阶段 3 将支持 Markdown 片段、标签与一键转任务。" />
-    </PageScaffold>
+    <SplitTaskLayout
+      title="记忆"
+      description="短小、可检索的信息片段"
+      actions={
+        <>
+          <Button
+            size="sm"
+            variant={pinnedOnly ? "default" : "secondary"}
+            onClick={() => setPinnedOnly((v) => !v)}
+          >
+            仅置顶
+          </Button>
+          <NewTaskButton onClick={() => createMutation.mutate()} />
+        </>
+      }
+      list={
+        memoriesQuery.isLoading ? (
+          <div className="p-4 text-[12px] text-muted">加载中…</div>
+        ) : (memoriesQuery.data?.length ?? 0) === 0 ? (
+          <EmptyState
+            title="还没有记忆"
+            body="快速记录窗口可直接创建记忆，也支持转为任务。"
+          />
+        ) : (
+          <div>
+            {memoriesQuery.data?.map((memory) => (
+              <button
+                key={memory.id}
+                type="button"
+                onClick={() => setSelectedId(memory.id)}
+                className={cn(
+                  "flex w-full items-start gap-2 border-b border-border px-3 py-2 text-left hover:bg-row-hover",
+                  selectedId === memory.id && "bg-row-active",
+                )}
+              >
+                {memory.pinned ? (
+                  <Pin className="mt-0.5 h-3.5 w-3.5 shrink-0 text-accent" />
+                ) : (
+                  <span className="mt-0.5 h-3.5 w-3.5 shrink-0" />
+                )}
+                <div className="min-w-0 flex-1">
+                  <div className="truncate text-[13px] font-medium">{memory.title}</div>
+                  <div className="truncate text-[11px] text-muted">
+                    {memory.body || "（无正文）"}
+                  </div>
+                </div>
+              </button>
+            ))}
+          </div>
+        )
+      }
+      detail={
+        <MemoryDetail
+          memory={selected}
+          onDeleted={() => setSelectedId(null)}
+        />
+      }
+    />
   );
 }

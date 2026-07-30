@@ -13,6 +13,8 @@ export function useDomainInvalidation() {
       void queryClient.invalidateQueries({ queryKey: ["task-tags"] });
       void queryClient.invalidateQueries({ queryKey: ["task-counts"] });
       void queryClient.invalidateQueries({ queryKey: ["reminders"] });
+      void queryClient.invalidateQueries({ queryKey: ["memories"] });
+      void queryClient.invalidateQueries({ queryKey: ["search"] });
     }).then((fn) => {
       unlisten = fn;
     });

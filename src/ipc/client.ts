@@ -218,6 +218,62 @@ export type TaskCounts = {
   overdue: number;
 };
 
+export type Memory = {
+  id: string;
+  title: string;
+  body: string;
+  pinned: boolean;
+  archived: boolean;
+  tagIds: string[];
+  tagNames: string[];
+  createdAt: string;
+  updatedAt: string;
+  revision: number;
+};
+
+export type CreateMemoryInput = {
+  title: string;
+  body?: string;
+  pinned?: boolean;
+  tagNames?: string[];
+};
+
+export type UpdateMemoryInput = {
+  id: string;
+  title: string;
+  body: string;
+  pinned: boolean;
+  archived: boolean;
+  tagNames: string[];
+};
+
+export type MemoryQuery = {
+  pinnedOnly?: boolean;
+  includeArchived?: boolean;
+  tagId?: string;
+};
+
+export type SearchEntityType = "task" | "reminder" | "memory";
+
+export type SearchHit = {
+  entityType: SearchEntityType;
+  entityId: string;
+  title: string;
+  snippet: string;
+  updatedAt: string;
+};
+
+export type SearchResults = {
+  tasks: SearchHit[];
+  reminders: SearchHit[];
+  memories: SearchHit[];
+};
+
+export type ConvertMemoryToTaskResult = {
+  memory: Memory;
+  taskId: string;
+};
+
 export const ipc = {
   appHealth: () => invoke<AppHealth>("app_health"),
   settingsGet: () => invoke<AppSettings>("settings_get"),
@@ -254,6 +310,20 @@ export const ipc = {
     invoke<ReminderOccurrence>("reminder_complete", { occurrenceId }),
   reminderSnooze: (occurrenceId: string, preset: SnoozePreset) =>
     invoke<ReminderOccurrence>("reminder_snooze", { occurrenceId, preset }),
+  memoryCreate: (input: CreateMemoryInput) =>
+    invoke<Memory>("memory_create", { input }),
+  memoryUpdate: (input: UpdateMemoryInput) =>
+    invoke<Memory>("memory_update", { input }),
+  memoryGet: (id: string) => invoke<Memory>("memory_get", { id }),
+  memoryQuery: (query: MemoryQuery = {}) =>
+    invoke<Memory[]>("memory_query", { query }),
+  memoryDelete: (id: string) => invoke<void>("memory_delete", { id }),
+  memoryConvertToTask: (id: string) =>
+    invoke<ConvertMemoryToTaskResult>("memory_convert_to_task", { id }),
+  searchQuery: (query: string, types?: SearchEntityType[], limit?: number) =>
+    invoke<SearchResults>("search_query", {
+      query: { query, types, limit },
+    }),
   windowShowMain: () => invoke<void>("window_show_main"),
   windowShowQuick: (mode?: "capture" | "search" | "clip") =>
     invoke<void>("window_show_quick", { mode }),

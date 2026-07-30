@@ -2,9 +2,10 @@ use crate::app_state::AppState;
 use crate::application::smoke_notes::SmokeNote;
 use crate::application::tasks::TaskCounts;
 use crate::domain::{
-    AppError, CreateReminderInput, CreateTaskInput, EntityId, RecurrenceRule, Reminder,
-    ReminderOccurrence, SnoozePreset, Tag, Task, TaskList, TaskQuery, TodayTasks,
-    UpdateReminderInput, UpdateTaskInput,
+    AppError, ConvertMemoryToTaskResult, CreateMemoryInput, CreateReminderInput, CreateTaskInput,
+    EntityId, Memory, MemoryQuery, RecurrenceRule, Reminder, ReminderOccurrence, SearchEntityType,
+    SearchQuery, SearchResults, SnoozePreset, Tag, Task, TaskList, TaskQuery, TodayTasks,
+    UpdateMemoryInput, UpdateReminderInput, UpdateTaskInput,
 };
 use crate::infrastructure::db::DbHealth;
 use crate::infrastructure::settings::AppSettings;
@@ -39,6 +40,24 @@ fn emit_task_change(app: &AppHandle, task: &Task, change: &str) {
             change: change.into(),
             revision: task.revision,
         },
+    );
+}
+
+fn index_task(state: &AppState, task: &Task) {
+    let _ = state.search.upsert(
+        SearchEntityType::Task,
+        task.id,
+        &task.title,
+        &task.notes,
+    );
+}
+
+fn index_reminder(state: &AppState, reminder: &Reminder) {
+    let _ = state.search.upsert(
+        SearchEntityType::Reminder,
+        reminder.id,
+        &reminder.title,
+        &reminder.notes,
     );
 }
 
@@ -106,6 +125,7 @@ pub fn task_create(
     input: CreateTaskInput,
 ) -> Result<Task, AppError> {
     let task = state.tasks.create_task(input)?;
+    index_task(&state, &task);
     emit_task_change(&app, &task, "created");
     Ok(task)
 }
@@ -117,6 +137,7 @@ pub fn task_update(
     input: UpdateTaskInput,
 ) -> Result<Task, AppError> {
     let task = state.tasks.update_task(input)?;
+    index_task(&state, &task);
     emit_task_change(&app, &task, "updated");
     Ok(task)
 }
@@ -146,6 +167,7 @@ pub fn task_create_recurring(
     recurrence: RecurrenceRule,
 ) -> Result<Task, AppError> {
     let task = state.tasks.create_recurring_task(input, recurrence)?;
+    index_task(&state, &task);
     emit_task_change(&app, &task, "created");
     Ok(task)
 }
@@ -168,6 +190,7 @@ pub fn reminder_create(
     input: CreateReminderInput,
 ) -> Result<Reminder, AppError> {
     let reminder = state.reminders.create(input)?;
+    index_reminder(&state, &reminder);
     let _ = app.emit(
         "domain://changed",
         DomainChangeEvent {
@@ -187,6 +210,7 @@ pub fn reminder_update(
     input: UpdateReminderInput,
 ) -> Result<Reminder, AppError> {
     let reminder = state.reminders.update(input)?;
+    index_reminder(&state, &reminder);
     let _ = app.emit(
         "domain://changed",
         DomainChangeEvent {
@@ -206,6 +230,7 @@ pub fn reminder_delete(
     id: EntityId,
 ) -> Result<(), AppError> {
     state.reminders.delete(id)?;
+    let _ = state.search.remove(SearchEntityType::Reminder, id);
     let _ = app.emit(
         "domain://changed",
         DomainChangeEvent {
@@ -308,6 +333,7 @@ pub fn task_delete(
     id: EntityId,
 ) -> Result<(), AppError> {
     state.tasks.delete_task(id)?;
+    let _ = state.search.remove(SearchEntityType::Task, id);
     let _ = app.emit(
         "domain://changed",
         DomainChangeEvent {
@@ -349,6 +375,112 @@ pub fn task_list_tags(state: State<'_, AppState>) -> Result<Vec<Tag>, AppError> 
 #[tauri::command]
 pub fn task_counts(state: State<'_, AppState>) -> Result<TaskCounts, AppError> {
     state.tasks.counts().map_err(Into::into)
+}
+
+#[tauri::command]
+pub fn memory_create(
+    app: AppHandle,
+    state: State<'_, AppState>,
+    input: CreateMemoryInput,
+) -> Result<Memory, AppError> {
+    let memory = state.memories.create(input)?;
+    let _ = app.emit(
+        "domain://changed",
+        DomainChangeEvent {
+            entity_type: "memory".into(),
+            entity_id: memory.id.to_string(),
+            change: "created".into(),
+            revision: memory.revision,
+        },
+    );
+    Ok(memory)
+}
+
+#[tauri::command]
+pub fn memory_update(
+    app: AppHandle,
+    state: State<'_, AppState>,
+    input: UpdateMemoryInput,
+) -> Result<Memory, AppError> {
+    let memory = state.memories.update(input)?;
+    let _ = app.emit(
+        "domain://changed",
+        DomainChangeEvent {
+            entity_type: "memory".into(),
+            entity_id: memory.id.to_string(),
+            change: "updated".into(),
+            revision: memory.revision,
+        },
+    );
+    Ok(memory)
+}
+
+#[tauri::command]
+pub fn memory_get(state: State<'_, AppState>, id: EntityId) -> Result<Memory, AppError> {
+    state.memories.get(id).map_err(Into::into)
+}
+
+#[tauri::command]
+pub fn memory_query(
+    state: State<'_, AppState>,
+    query: MemoryQuery,
+) -> Result<Vec<Memory>, AppError> {
+    state.memories.query(query).map_err(Into::into)
+}
+
+#[tauri::command]
+pub fn memory_delete(
+    app: AppHandle,
+    state: State<'_, AppState>,
+    id: EntityId,
+) -> Result<(), AppError> {
+    state.memories.delete(id)?;
+    let _ = app.emit(
+        "domain://changed",
+        DomainChangeEvent {
+            entity_type: "memory".into(),
+            entity_id: id.to_string(),
+            change: "deleted".into(),
+            revision: 0,
+        },
+    );
+    Ok(())
+}
+
+#[tauri::command]
+pub fn memory_convert_to_task(
+    app: AppHandle,
+    state: State<'_, AppState>,
+    id: EntityId,
+) -> Result<ConvertMemoryToTaskResult, AppError> {
+    let result = state.memories.convert_to_task(id)?;
+    let _ = app.emit(
+        "domain://changed",
+        DomainChangeEvent {
+            entity_type: "memory".into(),
+            entity_id: id.to_string(),
+            change: "updated".into(),
+            revision: result.memory.revision,
+        },
+    );
+    let _ = app.emit(
+        "domain://changed",
+        DomainChangeEvent {
+            entity_type: "task".into(),
+            entity_id: result.task_id.to_string(),
+            change: "created".into(),
+            revision: 0,
+        },
+    );
+    Ok(result)
+}
+
+#[tauri::command]
+pub fn search_query(
+    state: State<'_, AppState>,
+    query: SearchQuery,
+) -> Result<SearchResults, AppError> {
+    state.search.query(query).map_err(Into::into)
 }
 
 #[tauri::command]

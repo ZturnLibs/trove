@@ -1,8 +1,14 @@
-import { useEffect, useRef, useState } from "react";
-import { listen } from "@tauri-apps/api/event";
+import { useEffect, useMemo, useRef, useState } from "react";
+import { emit, listen } from "@tauri-apps/api/event";
+import { useQuery } from "@tanstack/react-query";
 import { Button } from "@/design-system/primitives/Button";
 import { Input } from "@/design-system/primitives/Input";
-import { ipc, type TaskPriority } from "@/ipc/client";
+import {
+  ipc,
+  type SearchEntityType,
+  type SearchHit,
+  type TaskPriority,
+} from "@/ipc/client";
 import { useUiStore, type QuickMode } from "@/stores/ui";
 import { cn } from "@/lib/cn";
 
@@ -12,19 +18,28 @@ const modes: { id: QuickMode; label: string }[] = [
   { id: "clip", label: "剪切板" },
 ];
 
-type CaptureType = "task" | "reminder";
+type CaptureType = "task" | "reminder" | "memory";
+
+const typeLabel: Record<SearchEntityType, string> = {
+  task: "任务",
+  reminder: "提醒",
+  memory: "记忆",
+};
 
 export function QuickWindow() {
   const mode = useUiStore((s) => s.quickMode);
   const setQuickMode = useUiStore((s) => s.setQuickMode);
   const [captureType, setCaptureType] = useState<CaptureType>("task");
   const [title, setTitle] = useState("");
+  const [body, setBody] = useState("");
   const [dueDate, setDueDate] = useState("");
   const [fireAt, setFireAt] = useState("");
   const [priority, setPriority] = useState<TaskPriority>("none");
   const [daily, setDaily] = useState(false);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [searchText, setSearchText] = useState("");
+  const [selectedIndex, setSelectedIndex] = useState(0);
   const inputRef = useRef<HTMLInputElement>(null);
 
   useEffect(() => {
@@ -45,6 +60,34 @@ export function QuickWindow() {
     setError(null);
   }, [mode, captureType]);
 
+  const searchQuery = useQuery({
+    queryKey: ["search", searchText],
+    queryFn: () => ipc.searchQuery(searchText),
+    enabled: mode === "search" && searchText.trim().length > 0,
+  });
+
+  const flatResults = useMemo(() => {
+    const data = searchQuery.data;
+    if (!data) return [] as SearchHit[];
+    return [...data.tasks, ...data.reminders, ...data.memories];
+  }, [searchQuery.data]);
+
+  useEffect(() => {
+    setSelectedIndex(0);
+  }, [searchText, flatResults.length]);
+
+  const openHit = async (hit: SearchHit) => {
+    await ipc.windowShowMain();
+    const path =
+      hit.entityType === "task"
+        ? "/inbox"
+        : hit.entityType === "memory"
+          ? "/memory"
+          : "/today";
+    await emit("main://navigate", path);
+    await ipc.windowHideQuick();
+  };
+
   const submit = async () => {
     if (mode !== "capture") return;
     const value = title.trim();
@@ -58,7 +101,7 @@ export function QuickWindow() {
           dueDate: dueDate || null,
           priority: priority === "none" ? undefined : priority,
         });
-      } else {
+      } else if (captureType === "reminder") {
         if (!fireAt) throw new Error("请选择提醒时间");
         const normalized = fireAt.length === 16 ? `${fireAt}:00` : fireAt;
         await ipc.reminderCreate({
@@ -74,8 +117,14 @@ export function QuickWindow() {
               }
             : null,
         });
+      } else {
+        await ipc.memoryCreate({
+          title: value,
+          body: body || undefined,
+        });
       }
       setTitle("");
+      setBody("");
       setDueDate("");
       setFireAt("");
       setPriority("none");
@@ -115,7 +164,7 @@ export function QuickWindow() {
         {mode === "capture" ? (
           <>
             <div className="flex gap-1 text-[12px]">
-              {(["task", "reminder"] as const).map((type) => (
+              {(["task", "reminder", "memory"] as const).map((type) => (
                 <button
                   key={type}
                   type="button"
@@ -127,22 +176,27 @@ export function QuickWindow() {
                   )}
                   onClick={() => setCaptureType(type)}
                 >
-                  {type === "task" ? "任务" : "提醒"}
+                  {type === "task" ? "任务" : type === "reminder" ? "提醒" : "记忆"}
                 </button>
               ))}
-              <span className="px-2 py-0.5 text-muted">记忆 · 阶段 3</span>
             </div>
             <Input
               ref={inputRef}
               value={title}
               onChange={(event) => setTitle(event.target.value)}
               placeholder={
-                captureType === "task" ? "快速记录任务…" : "快速记录提醒…"
+                captureType === "task"
+                  ? "快速记录任务…"
+                  : captureType === "reminder"
+                    ? "快速记录提醒…"
+                    : "快速记录记忆标题…"
               }
               onKeyDown={(event) => {
                 if (event.key === "Escape") {
-                  if (title) setTitle("");
-                  else void ipc.windowHideQuick();
+                  if (title || body) {
+                    setTitle("");
+                    setBody("");
+                  } else void ipc.windowHideQuick();
                 }
                 if ((event.metaKey || event.ctrlKey) && event.key === "Enter") {
                   event.preventDefault();
@@ -174,7 +228,8 @@ export function QuickWindow() {
                   </select>
                 </label>
               </div>
-            ) : (
+            ) : null}
+            {captureType === "reminder" ? (
               <div className="grid grid-cols-2 gap-2">
                 <label className="space-y-1 text-[11px] text-muted">
                   提醒时间
@@ -193,7 +248,16 @@ export function QuickWindow() {
                   每天重复
                 </label>
               </div>
-            )}
+            ) : null}
+            {captureType === "memory" ? (
+              <textarea
+                value={body}
+                onChange={(e) => setBody(e.target.value)}
+                rows={6}
+                className="w-full resize-none rounded-[var(--radius-control)] border border-border bg-surface-raised p-2 text-[13px] outline-none focus:ring-2 focus:ring-accent/35"
+                placeholder="记忆正文（可选）…"
+              />
+            ) : null}
             {error ? <p className="text-[12px] text-danger">{error}</p> : null}
             <div className="mt-auto flex items-center justify-between text-[11px] text-muted">
               <span>⌘/Ctrl + Enter 创建 · Esc 取消</span>
@@ -206,20 +270,91 @@ export function QuickWindow() {
                 }
                 onClick={() => void submit()}
               >
-                {captureType === "task" ? "创建任务" : "创建提醒"}
+                {captureType === "task"
+                  ? "创建任务"
+                  : captureType === "reminder"
+                    ? "创建提醒"
+                    : "创建记忆"}
               </Button>
             </div>
           </>
-        ) : (
-          <div
-            className={cn(
-              "flex flex-1 items-center justify-center rounded-[var(--radius-panel)] border border-dashed border-border text-[12px] text-muted",
-            )}
-          >
-            {mode === "search" && "统一搜索将在阶段 3 接入"}
-            {mode === "clip" && "剪切板浮层将在阶段 4 接入"}
+        ) : null}
+
+        {mode === "search" ? (
+          <>
+            <Input
+              ref={inputRef}
+              value={searchText}
+              onChange={(e) => setSearchText(e.target.value)}
+              placeholder="搜索任务、提醒、记忆…"
+              onKeyDown={(e) => {
+                if (e.key === "Escape") {
+                  if (searchText) setSearchText("");
+                  else void ipc.windowHideQuick();
+                }
+                if (e.key === "ArrowDown") {
+                  e.preventDefault();
+                  setSelectedIndex((i) =>
+                    Math.min(i + 1, Math.max(flatResults.length - 1, 0)),
+                  );
+                }
+                if (e.key === "ArrowUp") {
+                  e.preventDefault();
+                  setSelectedIndex((i) => Math.max(i - 1, 0));
+                }
+                if (e.key === "Enter" && flatResults[selectedIndex]) {
+                  e.preventDefault();
+                  void openHit(flatResults[selectedIndex]);
+                }
+              }}
+            />
+            <div className="min-h-0 flex-1 overflow-auto rounded-[var(--radius-panel)] border border-border">
+              {!searchText.trim() ? (
+                <div className="p-4 text-center text-[12px] text-muted">
+                  输入关键词开始搜索
+                </div>
+              ) : searchQuery.isLoading ? (
+                <div className="p-4 text-[12px] text-muted">搜索中…</div>
+              ) : flatResults.length === 0 ? (
+                <div className="p-4 text-center text-[12px] text-muted">无结果</div>
+              ) : (
+                <ul>
+                  {flatResults.map((hit, index) => (
+                    <li key={`${hit.entityType}-${hit.entityId}`}>
+                      <button
+                        type="button"
+                        className={cn(
+                          "flex w-full flex-col gap-0.5 border-b border-border px-3 py-2 text-left hover:bg-row-hover",
+                          index === selectedIndex && "bg-row-active",
+                        )}
+                        onClick={() => void openHit(hit)}
+                        onMouseEnter={() => setSelectedIndex(index)}
+                      >
+                        <div className="flex items-center gap-2 text-[13px]">
+                          <span className="rounded bg-row-hover px-1.5 text-[10px] text-muted">
+                            {typeLabel[hit.entityType]}
+                          </span>
+                          <span className="truncate font-medium">{hit.title}</span>
+                        </div>
+                        {hit.snippet ? (
+                          <div className="truncate text-[11px] text-muted">
+                            {hit.snippet}
+                          </div>
+                        ) : null}
+                      </button>
+                    </li>
+                  ))}
+                </ul>
+              )}
+            </div>
+          </>
+        ) : null}
+
+        {mode === "clip" ? (
+          <div className="flex flex-1 items-center justify-center rounded-[var(--radius-panel)] border border-dashed border-border text-[12px] text-muted">
+            剪切板浮层将在阶段 4 接入
           </div>
-        )}
+        ) : null}
       </div>
     </div>
   );

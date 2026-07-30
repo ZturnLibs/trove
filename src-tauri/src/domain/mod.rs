@@ -1,7 +1,9 @@
+mod memory;
 mod recurrence;
 mod reminder;
 mod task;
 
+pub use memory::*;
 pub use recurrence::*;
 pub use reminder::*;
 pub use task::*;

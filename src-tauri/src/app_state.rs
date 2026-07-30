@@ -1,4 +1,6 @@
+use crate::application::memories::MemoryService;
 use crate::application::reminders::ReminderService;
+use crate::application::search::SearchService;
 use crate::application::smoke_notes::SmokeNoteService;
 use crate::application::tasks::TaskService;
 use crate::infrastructure::db::Database;
@@ -12,6 +14,8 @@ pub struct AppState {
     pub smoke_notes: Arc<SmokeNoteService>,
     pub tasks: Arc<TaskService>,
     pub reminders: Arc<ReminderService>,
+    pub memories: Arc<MemoryService>,
+    pub search: Arc<SearchService>,
 }
 
 impl AppState {
@@ -22,12 +26,20 @@ impl AppState {
             .ensure_seed_data()
             .map_err(|e| format!("seed task data: {e}"))?;
         let reminders = ReminderService::new(db.as_ref().clone());
-        Ok(Self {
+        let search = SearchService::new(db.as_ref().clone());
+        let memories = MemoryService::new(db.as_ref().clone());
+        let state = Self {
             settings: Arc::new(SettingsService::new(db.as_ref().clone())),
             smoke_notes: Arc::new(SmokeNoteService::new(db.as_ref().clone())),
             tasks: Arc::new(tasks),
             reminders: Arc::new(reminders),
+            memories: Arc::new(memories),
+            search: Arc::new(search),
             db,
-        })
+        };
+        if let Err(err) = state.search.rebuild_all() {
+            tracing::warn!(error = %err, "search index rebuild failed");
+        }
+        Ok(state)
     }
 }
