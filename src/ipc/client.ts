@@ -95,6 +95,7 @@ export type Task = {
   dueTime: string | null;
   completedAt: string | null;
   sortOrder: number;
+  seriesId: string | null;
   tagIds: string[];
   tagNames: string[];
   createdAt: string;
@@ -132,12 +133,85 @@ export type TaskQuery = {
   includeArchived?: boolean;
 };
 
+export type RecurrenceFrequency =
+  | "daily"
+  | "weekdays"
+  | "weekly"
+  | "monthly"
+  | "everyNDays"
+  | "everyNWeeks";
+
+export type RecurrenceRule = {
+  version: number;
+  frequency: RecurrenceFrequency;
+  interval: number;
+  weekdays?: number[];
+  monthday?: number;
+  timezone: string;
+  endAt?: string | null;
+};
+
+export type Reminder = {
+  id: string;
+  title: string;
+  notes: string;
+  taskId: string | null;
+  recurrence: RecurrenceRule | null;
+  timezone: string;
+  nextFireAt: string;
+  endAt: string | null;
+  enabled: boolean;
+  createdAt: string;
+  updatedAt: string;
+  revision: number;
+};
+
+export type ReminderOccurrence = {
+  id: string;
+  reminderId: string;
+  scheduledAt: string;
+  status:
+    | "pending"
+    | "scheduled"
+    | "actioned"
+    | "snoozed"
+    | "cancelled"
+    | "inferredMissed";
+  needsSchedule: boolean;
+  systemNotificationId: number | null;
+  actionedAt: string | null;
+  snoozeUntil: string | null;
+  title: string;
+  taskId: string | null;
+  createdAt: string;
+  updatedAt: string;
+  revision: number;
+};
+
+export type TodayReminderItem = {
+  occurrence: ReminderOccurrence;
+  reminder: Reminder;
+};
+
 export type TodayTasks = {
   overdue: Task[];
   dueToday: Task[];
   completedToday: Task[];
+  remindersToday: TodayReminderItem[];
   today: string;
 };
+
+export type CreateReminderInput = {
+  title: string;
+  notes?: string;
+  taskId?: string;
+  fireAt: string;
+  recurrence?: RecurrenceRule | null;
+  timezone?: string;
+  endAt?: string | null;
+};
+
+export type SnoozePreset = "minutes10" | "hour1" | "tomorrow";
 
 export type TaskCounts = {
   inbox: number;
@@ -156,6 +230,8 @@ export const ipc = {
   taskListLists: () => invoke<TaskList[]>("task_list_lists"),
   taskListCreate: (name: string) => invoke<TaskList>("task_list_create", { name }),
   taskCreate: (input: CreateTaskInput) => invoke<Task>("task_create", { input }),
+  taskCreateRecurring: (input: CreateTaskInput, recurrence: RecurrenceRule) =>
+    invoke<Task>("task_create_recurring", { input, recurrence }),
   taskUpdate: (input: UpdateTaskInput) => invoke<Task>("task_update", { input }),
   taskGet: (id: string) => invoke<Task>("task_get", { id }),
   taskQuery: (query: TaskQuery = {}) => invoke<Task[]>("task_query", { query }),
@@ -164,10 +240,20 @@ export const ipc = {
   taskUncomplete: (id: string) => invoke<Task>("task_uncomplete", { id }),
   taskArchive: (id: string) => invoke<Task>("task_archive", { id }),
   taskDelete: (id: string) => invoke<void>("task_delete", { id }),
+  taskSkip: (id: string) => invoke<Task>("task_skip", { id }),
   taskReorder: (orderedIds: string[]) =>
     invoke<void>("task_reorder", { orderedIds }),
   taskListTags: () => invoke<Tag[]>("task_list_tags"),
   taskCounts: () => invoke<TaskCounts>("task_counts"),
+  reminderCreate: (input: CreateReminderInput) =>
+    invoke<Reminder>("reminder_create", { input }),
+  reminderDelete: (id: string) => invoke<void>("reminder_delete", { id }),
+  reminderListForTask: (taskId: string) =>
+    invoke<Reminder[]>("reminder_list_for_task", { taskId }),
+  reminderComplete: (occurrenceId: string) =>
+    invoke<ReminderOccurrence>("reminder_complete", { occurrenceId }),
+  reminderSnooze: (occurrenceId: string, preset: SnoozePreset) =>
+    invoke<ReminderOccurrence>("reminder_snooze", { occurrenceId, preset }),
   windowShowMain: () => invoke<void>("window_show_main"),
   windowShowQuick: (mode?: "capture" | "search" | "clip") =>
     invoke<void>("window_show_quick", { mode }),

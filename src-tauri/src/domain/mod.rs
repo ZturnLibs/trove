@@ -1,5 +1,9 @@
+mod recurrence;
+mod reminder;
 mod task;
 
+pub use recurrence::*;
+pub use reminder::*;
 pub use task::*;
 
 use chrono::{DateTime, Utc};

@@ -186,12 +186,14 @@ pub fn run() {
             let db = Database::open(db_path).map_err(|e| e.to_string())?;
             let state = AppState::new(db)?;
             let _ = state.settings.get();
+            let reminders = state.reminders.clone();
             app.manage(state);
 
             setup_tray(app.handle())?;
             register_default_shortcuts(app.handle());
             hide_on_close(app.handle(), "main");
             hide_on_close(app.handle(), "quick");
+            application::scheduler::start(app.handle().clone(), reminders);
 
             Ok(())
         })
@@ -205,6 +207,7 @@ pub fn run() {
             commands::task_list_lists,
             commands::task_list_create,
             commands::task_create,
+            commands::task_create_recurring,
             commands::task_update,
             commands::task_get,
             commands::task_query,
@@ -213,9 +216,16 @@ pub fn run() {
             commands::task_uncomplete,
             commands::task_archive,
             commands::task_delete,
+            commands::task_skip,
             commands::task_reorder,
             commands::task_list_tags,
             commands::task_counts,
+            commands::reminder_create,
+            commands::reminder_update,
+            commands::reminder_delete,
+            commands::reminder_list_for_task,
+            commands::reminder_complete,
+            commands::reminder_snooze,
             commands::window_show_main,
             commands::window_show_quick,
             commands::window_hide_quick,

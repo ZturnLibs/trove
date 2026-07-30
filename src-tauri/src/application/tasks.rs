@@ -226,13 +226,222 @@ impl TaskService {
         }
         let conn = self.connect()?;
         let now = stamp(&self.clock);
-        conn.execute(
+        let tx = conn.unchecked_transaction().map_err(internal)?;
+        tx.execute(
             "UPDATE tasks SET status = 'completed', completed_at = ?1, updated_at = ?1, revision = revision + 1
              WHERE id = ?2 AND deleted_at IS NULL",
             params![now, id.to_string()],
         )
         .map_err(internal)?;
+
+        if let Some(series_id) = task.series_id {
+            self.spawn_next_series_instance(&tx, &task, series_id, &now)?;
+        }
+        tx.commit().map_err(internal)?;
         self.get_task(id)
+    }
+
+    pub fn skip_task_instance(&self, id: EntityId) -> Result<Task, DomainError> {
+        let task = self.get_task(id)?;
+        let series_id = task
+            .series_id
+            .ok_or_else(|| DomainError::Validation("不是周期任务实例".into()))?;
+        if task.status != TaskStatus::Todo {
+            return Err(DomainError::Validation("只能跳过待办实例".into()));
+        }
+        let conn = self.connect()?;
+        let now = stamp(&self.clock);
+        let tx = conn.unchecked_transaction().map_err(internal)?;
+        tx.execute(
+            "UPDATE tasks SET status = 'archived', updated_at = ?1, revision = revision + 1
+             WHERE id = ?2 AND deleted_at IS NULL",
+            params![now, id.to_string()],
+        )
+        .map_err(internal)?;
+        self.spawn_next_series_instance(&tx, &task, series_id, &now)?;
+        tx.commit().map_err(internal)?;
+        self.get_task(id)
+    }
+
+    fn spawn_next_series_instance(
+        &self,
+        conn: &Connection,
+        current: &Task,
+        series_id: EntityId,
+        now: &str,
+    ) -> Result<(), DomainError> {
+        let (recurrence_json, list_id, title, notes, priority, timezone, end_at): (
+            String,
+            String,
+            String,
+            String,
+            String,
+            String,
+            Option<String>,
+        ) = conn
+            .query_row(
+                "SELECT recurrence_json, list_id, title, notes, priority, timezone, end_at
+                 FROM task_series WHERE id = ?1 AND deleted_at IS NULL AND enabled = 1",
+                [series_id.to_string()],
+                |row| {
+                    Ok((
+                        row.get(0)?,
+                        row.get(1)?,
+                        row.get(2)?,
+                        row.get(3)?,
+                        row.get(4)?,
+                        row.get(5)?,
+                        row.get(6)?,
+                    ))
+                },
+            )
+            .optional()
+            .map_err(internal)?
+            .ok_or_else(|| DomainError::NotFound("周期任务模板不存在或已停用".into()))?;
+
+        let rule = crate::domain::RecurrenceRule::from_json(&recurrence_json)?;
+        let due_date = current.due_date.clone().ok_or_else(|| {
+            DomainError::Validation("周期任务实例缺少截止日期".into())
+        })?;
+        let due_time = current.due_time.clone().unwrap_or_else(|| "09:00".into());
+        let current_dt = crate::domain::combine_date_time(&due_date, &due_time)?;
+        let Some(next_dt) = crate::domain::next_after(&rule, current_dt)? else {
+            conn.execute(
+                "UPDATE task_series SET enabled = 0, updated_at = ?1, revision = revision + 1 WHERE id = ?2",
+                params![now, series_id.to_string()],
+            )
+            .map_err(internal)?;
+            return Ok(());
+        };
+
+        let next_date = next_dt.date().format("%Y-%m-%d").to_string();
+        let next_time = next_dt.time().format("%H:%M").to_string();
+        let new_id = new_id();
+        let sort_order: f64 = conn
+            .query_row(
+                "SELECT COALESCE(MAX(sort_order), 0) + 1 FROM tasks WHERE list_id = ?1 AND deleted_at IS NULL",
+                [&list_id],
+                |row| row.get(0),
+            )
+            .unwrap_or(1.0);
+
+        conn.execute(
+            "INSERT INTO tasks (
+                id, title, notes, status, priority, list_id, due_date, due_time,
+                completed_at, sort_order, series_id, created_at, updated_at, revision, deleted_at
+             ) VALUES (?1, ?2, ?3, 'todo', ?4, ?5, ?6, ?7, NULL, ?8, ?9, ?10, ?10, 1, NULL)",
+            params![
+                new_id.to_string(),
+                title,
+                notes,
+                priority,
+                list_id,
+                next_date,
+                next_time,
+                sort_order,
+                series_id.to_string(),
+                now,
+            ],
+        )
+        .map_err(internal)?;
+
+        conn.execute(
+            "UPDATE task_series SET next_due_date = ?1, updated_at = ?2, revision = revision + 1 WHERE id = ?3",
+            params![next_date, now, series_id.to_string()],
+        )
+        .map_err(internal)?;
+
+        let _ = timezone;
+        let _ = end_at;
+        Ok(())
+    }
+
+    pub fn create_recurring_task(
+        &self,
+        input: CreateTaskInput,
+        recurrence: crate::domain::RecurrenceRule,
+    ) -> Result<Task, DomainError> {
+        recurrence.validate()?;
+        let title = input.title.trim().to_string();
+        if title.is_empty() {
+            return Err(DomainError::Validation("标题不能为空".into()));
+        }
+        let due_date = input
+            .due_date
+            .clone()
+            .ok_or_else(|| DomainError::Validation("周期任务需要截止日期".into()))?;
+        crate::domain::validate_due_date(&due_date)?;
+        let due_time = input.due_time.clone().unwrap_or_else(|| "09:00".into());
+        crate::domain::validate_due_time(&due_time)?;
+
+        let list_id = match input.list_id {
+            Some(id) => {
+                let _ = self.get_list(id)?;
+                id
+            }
+            None => self.inbox_list_id()?,
+        };
+        let priority = input.priority.unwrap_or(TaskPriority::None);
+        let notes = input.notes.unwrap_or_default();
+        let series_id = new_id();
+        let task_id = new_id();
+        let now = stamp(&self.clock);
+        let timezone = chrono::Local::now().offset().to_string();
+        let conn = self.connect()?;
+        let sort_order: f64 = conn
+            .query_row(
+                "SELECT COALESCE(MAX(sort_order), 0) + 1 FROM tasks WHERE list_id = ?1 AND deleted_at IS NULL",
+                [list_id.to_string()],
+                |row| row.get(0),
+            )
+            .unwrap_or(1.0);
+
+        let tx = conn.unchecked_transaction().map_err(internal)?;
+        tx.execute(
+            "INSERT INTO task_series (
+                id, title, notes, priority, list_id, recurrence_json, timezone,
+                next_due_date, enabled, end_at, created_at, updated_at, revision, deleted_at
+             ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, 1, ?9, ?10, ?10, 1, NULL)",
+            params![
+                series_id.to_string(),
+                title,
+                notes,
+                priority.as_str(),
+                list_id.to_string(),
+                recurrence.to_json()?,
+                timezone,
+                due_date,
+                recurrence.end_at.clone(),
+                now,
+            ],
+        )
+        .map_err(internal)?;
+
+        tx.execute(
+            "INSERT INTO tasks (
+                id, title, notes, status, priority, list_id, due_date, due_time,
+                completed_at, sort_order, series_id, created_at, updated_at, revision, deleted_at
+             ) VALUES (?1, ?2, ?3, 'todo', ?4, ?5, ?6, ?7, NULL, ?8, ?9, ?10, ?10, 1, NULL)",
+            params![
+                task_id.to_string(),
+                title,
+                notes,
+                priority.as_str(),
+                list_id.to_string(),
+                due_date,
+                due_time,
+                sort_order,
+                series_id.to_string(),
+                now,
+            ],
+        )
+        .map_err(internal)?;
+
+        if let Some(tag_names) = input.tag_names {
+            self.replace_tags(&tx, task_id, &tag_names)?;
+        }
+        tx.commit().map_err(internal)?;
+        self.get_task(task_id)
     }
 
     pub fn uncomplete_task(&self, id: EntityId) -> Result<Task, DomainError> {
@@ -298,7 +507,7 @@ impl TaskService {
         let mut task = conn
             .query_row(
                 "SELECT t.id, t.title, t.notes, t.status, t.priority, t.list_id,
-                        l.name, l.kind, t.due_date, t.due_time, t.completed_at, t.sort_order,
+                        l.name, l.kind, t.due_date, t.due_time, t.completed_at, t.sort_order, t.series_id,
                         t.created_at, t.updated_at, t.revision
                  FROM tasks t
                  JOIN task_lists l ON l.id = t.list_id
@@ -317,7 +526,7 @@ impl TaskService {
         let conn = self.connect()?;
         let mut sql = String::from(
             "SELECT t.id, t.title, t.notes, t.status, t.priority, t.list_id,
-                    l.name, l.kind, t.due_date, t.due_time, t.completed_at, t.sort_order,
+                    l.name, l.kind, t.due_date, t.due_time, t.completed_at, t.sort_order, t.series_id,
                     t.created_at, t.updated_at, t.revision
              FROM tasks t
              JOIN task_lists l ON l.id = t.list_id
@@ -380,7 +589,7 @@ impl TaskService {
         )?;
         let mut completed_today = {
             let sql = "SELECT t.id, t.title, t.notes, t.status, t.priority, t.list_id,
-                    l.name, l.kind, t.due_date, t.due_time, t.completed_at, t.sort_order,
+                    l.name, l.kind, t.due_date, t.due_time, t.completed_at, t.sort_order, t.series_id,
                     t.created_at, t.updated_at, t.revision
              FROM tasks t
              JOIN task_lists l ON l.id = t.list_id
@@ -405,6 +614,7 @@ impl TaskService {
             overdue,
             due_today,
             completed_today,
+            reminders_today: Vec::new(),
             today,
         })
     }
@@ -463,7 +673,7 @@ impl TaskService {
     ) -> Result<Vec<Task>, DomainError> {
         let sql = format!(
             "SELECT t.id, t.title, t.notes, t.status, t.priority, t.list_id,
-                    l.name, l.kind, t.due_date, t.due_time, t.completed_at, t.sort_order,
+                    l.name, l.kind, t.due_date, t.due_time, t.completed_at, t.sort_order, t.series_id,
                     t.created_at, t.updated_at, t.revision
              FROM tasks t
              JOIN task_lists l ON l.id = t.list_id
@@ -599,11 +809,15 @@ fn map_task_row(row: &rusqlite::Row<'_>) -> Result<Task, rusqlite::Error> {
         due_time: row.get(9)?,
         completed_at: row.get(10)?,
         sort_order: row.get(11)?,
+        series_id: row
+            .get::<_, Option<String>>(12)?
+            .map(parse_id)
+            .transpose()?,
         tag_ids: Vec::new(),
         tag_names: Vec::new(),
-        created_at: row.get(12)?,
-        updated_at: row.get(13)?,
-        revision: row.get(14)?,
+        created_at: row.get(13)?,
+        updated_at: row.get(14)?,
+        revision: row.get(15)?,
     })
 }
 

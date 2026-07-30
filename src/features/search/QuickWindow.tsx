@@ -12,12 +12,17 @@ const modes: { id: QuickMode; label: string }[] = [
   { id: "clip", label: "剪切板" },
 ];
 
+type CaptureType = "task" | "reminder";
+
 export function QuickWindow() {
   const mode = useUiStore((s) => s.quickMode);
   const setQuickMode = useUiStore((s) => s.setQuickMode);
+  const [captureType, setCaptureType] = useState<CaptureType>("task");
   const [title, setTitle] = useState("");
   const [dueDate, setDueDate] = useState("");
+  const [fireAt, setFireAt] = useState("");
   const [priority, setPriority] = useState<TaskPriority>("none");
+  const [daily, setDaily] = useState(false);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const inputRef = useRef<HTMLInputElement>(null);
@@ -38,7 +43,7 @@ export function QuickWindow() {
   useEffect(() => {
     inputRef.current?.focus();
     setError(null);
-  }, [mode]);
+  }, [mode, captureType]);
 
   const submit = async () => {
     if (mode !== "capture") return;
@@ -47,14 +52,34 @@ export function QuickWindow() {
     setSaving(true);
     setError(null);
     try {
-      await ipc.taskCreate({
-        title: value,
-        dueDate: dueDate || null,
-        priority: priority === "none" ? undefined : priority,
-      });
+      if (captureType === "task") {
+        await ipc.taskCreate({
+          title: value,
+          dueDate: dueDate || null,
+          priority: priority === "none" ? undefined : priority,
+        });
+      } else {
+        if (!fireAt) throw new Error("请选择提醒时间");
+        const normalized = fireAt.length === 16 ? `${fireAt}:00` : fireAt;
+        await ipc.reminderCreate({
+          title: value,
+          fireAt: normalized.replace(" ", "T"),
+          timezone: Intl.DateTimeFormat().resolvedOptions().timeZone,
+          recurrence: daily
+            ? {
+                version: 1,
+                frequency: "daily",
+                interval: 1,
+                timezone: Intl.DateTimeFormat().resolvedOptions().timeZone,
+              }
+            : null,
+        });
+      }
       setTitle("");
       setDueDate("");
+      setFireAt("");
       setPriority("none");
+      setDaily(false);
       await ipc.windowHideQuick();
     } catch (err) {
       setError(err instanceof Error ? err.message : "创建失败");
@@ -89,17 +114,31 @@ export function QuickWindow() {
       <div className="flex flex-1 flex-col gap-3 p-3">
         {mode === "capture" ? (
           <>
-            <div className="flex gap-2 text-[12px] text-muted">
-              <span className="rounded-[var(--radius-control)] bg-row-active px-2 py-0.5 text-foreground">
-                任务
-              </span>
-              <span>提醒 / 记忆 · 后续阶段</span>
+            <div className="flex gap-1 text-[12px]">
+              {(["task", "reminder"] as const).map((type) => (
+                <button
+                  key={type}
+                  type="button"
+                  className={cn(
+                    "rounded-[var(--radius-control)] px-2 py-0.5",
+                    captureType === type
+                      ? "bg-row-active text-foreground"
+                      : "text-muted hover:bg-row-hover",
+                  )}
+                  onClick={() => setCaptureType(type)}
+                >
+                  {type === "task" ? "任务" : "提醒"}
+                </button>
+              ))}
+              <span className="px-2 py-0.5 text-muted">记忆 · 阶段 3</span>
             </div>
             <Input
               ref={inputRef}
               value={title}
               onChange={(event) => setTitle(event.target.value)}
-              placeholder="快速记录任务…"
+              placeholder={
+                captureType === "task" ? "快速记录任务…" : "快速记录提醒…"
+              }
               onKeyDown={(event) => {
                 if (event.key === "Escape") {
                   if (title) setTitle("");
@@ -111,34 +150,63 @@ export function QuickWindow() {
                 }
               }}
             />
-            <div className="grid grid-cols-2 gap-2">
-              <label className="space-y-1 text-[11px] text-muted">
-                截止日期
-                <Input
-                  type="date"
-                  value={dueDate}
-                  onChange={(e) => setDueDate(e.target.value)}
-                />
-              </label>
-              <label className="space-y-1 text-[11px] text-muted">
-                优先级
-                <select
-                  className="h-8 w-full rounded-[var(--radius-control)] border border-border bg-surface-raised px-2 text-[13px] text-foreground"
-                  value={priority}
-                  onChange={(e) => setPriority(e.target.value as TaskPriority)}
-                >
-                  <option value="none">无</option>
-                  <option value="low">低</option>
-                  <option value="medium">中</option>
-                  <option value="high">高</option>
-                </select>
-              </label>
-            </div>
+            {captureType === "task" ? (
+              <div className="grid grid-cols-2 gap-2">
+                <label className="space-y-1 text-[11px] text-muted">
+                  截止日期
+                  <Input
+                    type="date"
+                    value={dueDate}
+                    onChange={(e) => setDueDate(e.target.value)}
+                  />
+                </label>
+                <label className="space-y-1 text-[11px] text-muted">
+                  优先级
+                  <select
+                    className="h-8 w-full rounded-[var(--radius-control)] border border-border bg-surface-raised px-2 text-[13px] text-foreground"
+                    value={priority}
+                    onChange={(e) => setPriority(e.target.value as TaskPriority)}
+                  >
+                    <option value="none">无</option>
+                    <option value="low">低</option>
+                    <option value="medium">中</option>
+                    <option value="high">高</option>
+                  </select>
+                </label>
+              </div>
+            ) : (
+              <div className="grid grid-cols-2 gap-2">
+                <label className="space-y-1 text-[11px] text-muted">
+                  提醒时间
+                  <Input
+                    type="datetime-local"
+                    value={fireAt}
+                    onChange={(e) => setFireAt(e.target.value)}
+                  />
+                </label>
+                <label className="flex items-end gap-2 pb-1 text-[12px] text-muted">
+                  <input
+                    type="checkbox"
+                    checked={daily}
+                    onChange={(e) => setDaily(e.target.checked)}
+                  />
+                  每天重复
+                </label>
+              </div>
+            )}
             {error ? <p className="text-[12px] text-danger">{error}</p> : null}
             <div className="mt-auto flex items-center justify-between text-[11px] text-muted">
               <span>⌘/Ctrl + Enter 创建 · Esc 取消</span>
-              <Button size="sm" disabled={saving || !title.trim()} onClick={() => void submit()}>
-                创建任务
+              <Button
+                size="sm"
+                disabled={
+                  saving ||
+                  !title.trim() ||
+                  (captureType === "reminder" && !fireAt)
+                }
+                onClick={() => void submit()}
+              >
+                {captureType === "task" ? "创建任务" : "创建提醒"}
               </Button>
             </div>
           </>

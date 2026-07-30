@@ -70,6 +70,9 @@ export function TaskRow({
           {priorityLabel[task.priority]}
         </span>
       ) : null}
+      {task.seriesId ? (
+        <span className="shrink-0 text-[11px] text-muted">重复</span>
+      ) : null}
       {task.dueDate ? (
         <span
           className={cn(

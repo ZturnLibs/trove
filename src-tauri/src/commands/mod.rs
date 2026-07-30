@@ -2,8 +2,9 @@ use crate::app_state::AppState;
 use crate::application::smoke_notes::SmokeNote;
 use crate::application::tasks::TaskCounts;
 use crate::domain::{
-    AppError, CreateTaskInput, EntityId, Tag, Task, TaskList, TaskQuery, TodayTasks,
-    UpdateTaskInput,
+    AppError, CreateReminderInput, CreateTaskInput, EntityId, RecurrenceRule, Reminder,
+    ReminderOccurrence, SnoozePreset, Tag, Task, TaskList, TaskQuery, TodayTasks,
+    UpdateReminderInput, UpdateTaskInput,
 };
 use crate::infrastructure::db::DbHealth;
 use crate::infrastructure::settings::AppSettings;
@@ -132,7 +133,139 @@ pub fn task_query(state: State<'_, AppState>, query: TaskQuery) -> Result<Vec<Ta
 
 #[tauri::command]
 pub fn task_today(state: State<'_, AppState>) -> Result<TodayTasks, AppError> {
-    state.tasks.today_tasks().map_err(Into::into)
+    let mut today = state.tasks.today_tasks()?;
+    today.reminders_today = state.reminders.today_items()?;
+    Ok(today)
+}
+
+#[tauri::command]
+pub fn task_create_recurring(
+    app: AppHandle,
+    state: State<'_, AppState>,
+    input: CreateTaskInput,
+    recurrence: RecurrenceRule,
+) -> Result<Task, AppError> {
+    let task = state.tasks.create_recurring_task(input, recurrence)?;
+    emit_task_change(&app, &task, "created");
+    Ok(task)
+}
+
+#[tauri::command]
+pub fn task_skip(
+    app: AppHandle,
+    state: State<'_, AppState>,
+    id: EntityId,
+) -> Result<Task, AppError> {
+    let task = state.tasks.skip_task_instance(id)?;
+    emit_task_change(&app, &task, "updated");
+    Ok(task)
+}
+
+#[tauri::command]
+pub fn reminder_create(
+    app: AppHandle,
+    state: State<'_, AppState>,
+    input: CreateReminderInput,
+) -> Result<Reminder, AppError> {
+    let reminder = state.reminders.create(input)?;
+    let _ = app.emit(
+        "domain://changed",
+        DomainChangeEvent {
+            entity_type: "reminder".into(),
+            entity_id: reminder.id.to_string(),
+            change: "created".into(),
+            revision: reminder.revision,
+        },
+    );
+    Ok(reminder)
+}
+
+#[tauri::command]
+pub fn reminder_update(
+    app: AppHandle,
+    state: State<'_, AppState>,
+    input: UpdateReminderInput,
+) -> Result<Reminder, AppError> {
+    let reminder = state.reminders.update(input)?;
+    let _ = app.emit(
+        "domain://changed",
+        DomainChangeEvent {
+            entity_type: "reminder".into(),
+            entity_id: reminder.id.to_string(),
+            change: "updated".into(),
+            revision: reminder.revision,
+        },
+    );
+    Ok(reminder)
+}
+
+#[tauri::command]
+pub fn reminder_delete(
+    app: AppHandle,
+    state: State<'_, AppState>,
+    id: EntityId,
+) -> Result<(), AppError> {
+    state.reminders.delete(id)?;
+    let _ = app.emit(
+        "domain://changed",
+        DomainChangeEvent {
+            entity_type: "reminder".into(),
+            entity_id: id.to_string(),
+            change: "deleted".into(),
+            revision: 0,
+        },
+    );
+    Ok(())
+}
+
+#[tauri::command]
+pub fn reminder_list_for_task(
+    state: State<'_, AppState>,
+    task_id: EntityId,
+) -> Result<Vec<Reminder>, AppError> {
+    state.reminders.list_for_task(task_id).map_err(Into::into)
+}
+
+#[tauri::command]
+pub fn reminder_complete(
+    app: AppHandle,
+    state: State<'_, AppState>,
+    occurrence_id: EntityId,
+) -> Result<ReminderOccurrence, AppError> {
+    let occ = state.reminders.complete_occurrence(occurrence_id)?;
+    if let Some(task_id) = occ.task_id {
+        let _ = state.tasks.complete_task(task_id);
+    }
+    let _ = app.emit(
+        "domain://changed",
+        DomainChangeEvent {
+            entity_type: "reminder".into(),
+            entity_id: occ.id.to_string(),
+            change: "updated".into(),
+            revision: occ.revision,
+        },
+    );
+    Ok(occ)
+}
+
+#[tauri::command]
+pub fn reminder_snooze(
+    app: AppHandle,
+    state: State<'_, AppState>,
+    occurrence_id: EntityId,
+    preset: SnoozePreset,
+) -> Result<ReminderOccurrence, AppError> {
+    let occ = state.reminders.snooze_occurrence(occurrence_id, preset)?;
+    let _ = app.emit(
+        "domain://changed",
+        DomainChangeEvent {
+            entity_type: "reminder".into(),
+            entity_id: occ.id.to_string(),
+            change: "updated".into(),
+            revision: occ.revision,
+        },
+    );
+    Ok(occ)
 }
 
 #[tauri::command]

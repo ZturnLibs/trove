@@ -68,6 +68,11 @@ export function TaskDetailPanel({
     onSuccess: () => void queryClient.invalidateQueries({ queryKey: ["tasks"] }),
   });
 
+  const skipMutation = useMutation({
+    mutationFn: () => ipc.taskSkip(task!.id),
+    onSuccess: () => void queryClient.invalidateQueries({ queryKey: ["tasks"] }),
+  });
+
   const deleteMutation = useMutation({
     mutationFn: () => ipc.taskDelete(task!.id),
     onSuccess: () => {
@@ -202,16 +207,31 @@ export function TaskDetailPanel({
             value={draft.notes}
             onChange={(e) => setDraft({ ...draft, notes: e.target.value })}
             onBlur={save}
-            rows={8}
+            rows={6}
             className="w-full resize-none rounded-[var(--radius-control)] border border-border bg-surface-raised p-2 text-[13px] text-foreground outline-none focus:ring-2 focus:ring-accent/35"
           />
         </label>
+
+        <TaskRemindersSection taskId={task.id} />
 
         {error ? <p className="text-[12px] text-danger">{error}</p> : null}
       </div>
 
       <div className="flex items-center justify-between gap-2 border-t border-border p-3">
         <div className="flex gap-1">
+          {task.seriesId ? (
+            <Button
+              size="sm"
+              variant="ghost"
+              onClick={() => {
+                if (confirm("跳过当前周期实例并生成下一实例？")) {
+                  skipMutation.mutate();
+                }
+              }}
+            >
+              跳过本次
+            </Button>
+          ) : null}
           <Button
             size="sm"
             variant="ghost"
@@ -240,5 +260,105 @@ export function TaskDetailPanel({
         </Button>
       </div>
     </div>
+  );
+}
+
+function TaskRemindersSection({ taskId }: { taskId: string }) {
+  const queryClient = useQueryClient();
+  const [fireAt, setFireAt] = useState("");
+  const [recurring, setRecurring] = useState(false);
+
+  const remindersQuery = useQuery({
+    queryKey: ["reminders", "task", taskId],
+    queryFn: () => ipc.reminderListForTask(taskId),
+  });
+
+  const createMutation = useMutation({
+    mutationFn: async () => {
+      if (!fireAt) throw new Error("请选择提醒时间");
+      const normalized = fireAt.length === 16 ? `${fireAt}:00` : fireAt;
+      return ipc.reminderCreate({
+        title: "任务提醒",
+        taskId,
+        fireAt: normalized.replace(" ", "T"),
+        timezone: Intl.DateTimeFormat().resolvedOptions().timeZone,
+        recurrence: recurring
+          ? {
+              version: 1,
+              frequency: "daily",
+              interval: 1,
+              timezone: Intl.DateTimeFormat().resolvedOptions().timeZone,
+            }
+          : null,
+      });
+    },
+    onSuccess: () => {
+      setFireAt("");
+      void queryClient.invalidateQueries({ queryKey: ["reminders"] });
+      void queryClient.invalidateQueries({ queryKey: ["tasks"] });
+    },
+  });
+
+  const deleteMutation = useMutation({
+    mutationFn: (id: string) => ipc.reminderDelete(id),
+    onSuccess: () => {
+      void queryClient.invalidateQueries({ queryKey: ["reminders"] });
+      void queryClient.invalidateQueries({ queryKey: ["tasks"] });
+    },
+  });
+
+  return (
+    <section className="space-y-2 border-t border-border pt-3">
+      <div className="flex items-center justify-between">
+        <h3 className="text-[12px] font-medium">提醒</h3>
+        <label className="flex items-center gap-1 text-[11px] text-muted">
+          <input
+            type="checkbox"
+            checked={recurring}
+            onChange={(e) => setRecurring(e.target.checked)}
+          />
+          每天重复
+        </label>
+      </div>
+      <div className="flex gap-2">
+        <Input
+          type="datetime-local"
+          value={fireAt}
+          onChange={(e) => setFireAt(e.target.value)}
+        />
+        <Button
+          size="sm"
+          variant="secondary"
+          disabled={!fireAt || createMutation.isPending}
+          onClick={() => createMutation.mutate()}
+        >
+          添加
+        </Button>
+      </div>
+      <ul className="space-y-1">
+        {(remindersQuery.data ?? []).map((reminder) => (
+          <li
+            key={reminder.id}
+            className="flex items-center justify-between gap-2 text-[12px]"
+          >
+            <span className="truncate">
+              {reminder.nextFireAt.replace("T", " ")}
+              {reminder.recurrence ? " · 周期" : ""}
+              {!reminder.enabled ? " · 已停用" : ""}
+            </span>
+            <Button
+              size="sm"
+              variant="ghost"
+              onClick={() => deleteMutation.mutate(reminder.id)}
+            >
+              删除
+            </Button>
+          </li>
+        ))}
+        {(remindersQuery.data?.length ?? 0) === 0 ? (
+          <li className="text-[11px] text-muted">暂无提醒</li>
+        ) : null}
+      </ul>
+    </section>
   );
 }

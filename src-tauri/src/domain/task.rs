@@ -122,6 +122,7 @@ pub struct Task {
     pub due_time: Option<String>,
     pub completed_at: Option<String>,
     pub sort_order: f64,
+    pub series_id: Option<EntityId>,
     pub tag_ids: Vec<EntityId>,
     pub tag_names: Vec<String>,
     pub created_at: String,
@@ -171,6 +172,7 @@ pub struct TodayTasks {
     pub overdue: Vec<Task>,
     pub due_today: Vec<Task>,
     pub completed_today: Vec<Task>,
+    pub reminders_today: Vec<super::TodayReminderItem>,
     pub today: String,
 }
 
