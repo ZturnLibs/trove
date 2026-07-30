@@ -7,7 +7,7 @@ use crate::application::templates::{
     CreateTemplateInput, ItemTemplate, TemplatePreview, TemplateKind,
 };
 use crate::domain::{
-    parse_capture, AppError, ClipboardItem, ClipboardQuery, ConvertMemoryToTaskResult,
+    parse_capture, AppError, ClipboardItem, ClipboardKind, ClipboardQuery, ConvertMemoryToTaskResult,
     CreateMemoryInput, CreateReminderInput, CreateTaskInput, EntityId, Memory, MemoryQuery,
     ParsedCapture, RecurrenceRule, Reminder, ReminderOccurrence, SearchEntityType, SearchQuery,
     SearchResults, SmartListKind, SnoozePreset, Tag, Task, TaskList, TaskQuery, TodayTasks,
@@ -17,7 +17,7 @@ use crate::infrastructure::db::DbHealth;
 use crate::infrastructure::settings::{AppSettings, ShortcutSettings};
 use crate::platform::{detect_capabilities, PlatformCapabilities};
 use serde::Serialize;
-use tauri::{AppHandle, Emitter, State};
+use tauri::{image::Image, AppHandle, Emitter, State};
 use tauri_plugin_autostart::ManagerExt;
 use tauri_plugin_clipboard_manager::ClipboardExt;
 
@@ -670,13 +670,38 @@ pub fn clipboard_copy(
     id: EntityId,
 ) -> Result<ClipboardItem, AppError> {
     let item = state.clipboard.get(id)?;
-    state.clipboard.suppress_next(&item.content);
-    app.clipboard()
-        .write_text(item.content.clone())
-        .map_err(|e| AppError::new("clipboard_error", e.to_string()))?;
+    match item.kind {
+        ClipboardKind::Text => {
+            state.clipboard.suppress_next_text(&item.content);
+            app.clipboard()
+                .write_text(item.content.clone())
+                .map_err(|e| AppError::new("clipboard_error", e.to_string()))?;
+        }
+        ClipboardKind::Image => {
+            state.clipboard.suppress_next(&item.content_hash);
+            let payload = state.clipboard.image_copy_payload(id)?;
+            let image = Image::new_owned(payload.rgba, payload.width, payload.height);
+            app.clipboard()
+                .write_image(&image)
+                .map_err(|e| AppError::new("clipboard_error", e.to_string()))?;
+        }
+    }
     let item = state.clipboard.mark_used(id)?;
     emit_clipboard_change(&app, &item, "updated");
     Ok(item)
+}
+
+#[tauri::command]
+pub fn asset_read_thumb(
+    state: State<'_, AppState>,
+    id: EntityId,
+) -> Result<Option<String>, AppError> {
+    let asset = state.clipboard.assets().get(id)?;
+    state
+        .clipboard
+        .assets()
+        .thumb_base64(&asset)
+        .map_err(Into::into)
 }
 
 #[tauri::command]

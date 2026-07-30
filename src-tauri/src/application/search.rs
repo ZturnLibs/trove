@@ -247,7 +247,11 @@ impl SearchService {
         {
             let mut stmt = conn
                 .prepare(
-                    "SELECT id, substr(content, 1, 80), content FROM clipboard_items WHERE deleted_at IS NULL",
+                    "SELECT c.id, c.kind, c.content, c.asset_id,
+                            (SELECT d.text FROM derived_texts d
+                             WHERE d.asset_id = c.asset_id AND d.kind = 'ocr') AS ocr_text
+                     FROM clipboard_items c
+                     WHERE c.deleted_at IS NULL",
                 )
                 .map_err(internal)?;
             let rows = stmt
@@ -256,13 +260,37 @@ impl SearchService {
                         row.get::<_, String>(0)?,
                         row.get::<_, String>(1)?,
                         row.get::<_, String>(2)?,
+                        row.get::<_, Option<String>>(3)?,
+                        row.get::<_, Option<String>>(4)?,
                     ))
                 })
                 .map_err(internal)?;
             for row in rows {
-                let (id, title, body) = row.map_err(internal)?;
+                let (id, kind, content, _asset_id, ocr_text) = row.map_err(internal)?;
                 let entity_id: EntityId = id.parse().map_err(|e| DomainError::Internal(format!("{e}")))?;
-                let title = title.lines().next().unwrap_or("剪切板").to_string();
+                let (title, body) = if kind == "image" {
+                    let ocr = ocr_text.unwrap_or_default();
+                    let title = if content.trim().is_empty() {
+                        "图片".to_string()
+                    } else {
+                        content.lines().next().unwrap_or("图片").chars().take(80).collect()
+                    };
+                    let body = if ocr.is_empty() {
+                        content
+                    } else {
+                        format!("[来自图片识别]\n{ocr}")
+                    };
+                    (title, body)
+                } else {
+                    let title = content
+                        .lines()
+                        .next()
+                        .unwrap_or("剪切板")
+                        .chars()
+                        .take(80)
+                        .collect::<String>();
+                    (title, content)
+                };
                 self.upsert_conn(
                     &conn,
                     SearchEntityType::Clipboard,

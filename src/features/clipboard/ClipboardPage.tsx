@@ -9,8 +9,22 @@ import { useDomainInvalidation } from "@/features/tasks/useDomainInvalidation";
 import { ipc, type ClipboardItem } from "@/ipc/client";
 import { cn } from "@/lib/cn";
 
-function previewLine(content: string) {
-  return content.replace(/\s+/g, " ").trim().slice(0, 120) || "（空文本）";
+function previewLine(item: ClipboardItem) {
+  if (item.kind === "image") {
+    const text = item.content.replace(/\s+/g, " ").trim();
+    if (text.startsWith("[图片]") || text.length === 0) {
+      return item.width && item.height
+        ? `图片 ${item.width}×${item.height}`
+        : "图片";
+    }
+    return text.slice(0, 120);
+  }
+  return item.content.replace(/\s+/g, " ").trim().slice(0, 120) || "（空文本）";
+}
+
+function thumbSrc(item: ClipboardItem) {
+  if (!item.thumbBase64) return null;
+  return `data:image/png;base64,${item.thumbBase64}`;
 }
 
 function ClipboardDetail({
@@ -64,6 +78,10 @@ function ClipboardDetail({
     );
   }
 
+  const imageSrc = thumbSrc(item);
+  const isImage = item.kind === "image";
+  const ocrText = item.ocrText?.trim() ?? "";
+
   return (
     <div className="flex h-full flex-col gap-3 p-4">
       <div className="flex flex-wrap items-center gap-2">
@@ -109,6 +127,10 @@ function ClipboardDetail({
       </div>
       <dl className="grid grid-cols-2 gap-2 text-[11px] text-muted">
         <div>
+          <dt>类型</dt>
+          <dd className="text-foreground">{isImage ? "图片" : "文本"}</dd>
+        </div>
+        <div>
           <dt>复制时间</dt>
           <dd className="text-foreground">{item.createdAt}</dd>
         </div>
@@ -116,6 +138,14 @@ function ClipboardDetail({
           <dt>使用次数</dt>
           <dd className="text-foreground">{item.useCount}</dd>
         </div>
+        {isImage && item.width && item.height ? (
+          <div>
+            <dt>尺寸</dt>
+            <dd className="text-foreground">
+              {item.width}×{item.height}
+            </dd>
+          </div>
+        ) : null}
         {item.sourceApp ? (
           <div className="col-span-2">
             <dt>来源应用</dt>
@@ -123,9 +153,41 @@ function ClipboardDetail({
           </div>
         ) : null}
       </dl>
-      <pre className="min-h-0 flex-1 overflow-auto whitespace-pre-wrap break-words rounded-[var(--radius-panel)] border border-border bg-surface p-3 text-[13px] leading-relaxed">
-        {item.content}
-      </pre>
+      {isImage ? (
+        <div className="flex min-h-0 flex-1 flex-col gap-3 overflow-auto">
+          {imageSrc ? (
+            <img
+              src={imageSrc}
+              alt="剪切板图片预览"
+              className="max-h-64 w-fit max-w-full rounded-[var(--radius-panel)] border border-border object-contain"
+            />
+          ) : (
+            <div className="rounded-[var(--radius-panel)] border border-border bg-surface p-6 text-[12px] text-muted">
+              暂无缩略图
+            </div>
+          )}
+          <div>
+            <div className="mb-1 text-[11px] text-muted">识别文本（本地 OCR）</div>
+            <pre className="min-h-24 overflow-auto whitespace-pre-wrap break-words rounded-[var(--radius-panel)] border border-border bg-surface p-3 text-[13px] leading-relaxed">
+              {ocrText || "（未识别到文字，或 OCR 不可用）"}
+            </pre>
+            {ocrText ? (
+              <Button
+                size="sm"
+                variant="ghost"
+                className="mt-2"
+                onClick={() => void navigator.clipboard.writeText(ocrText)}
+              >
+                复制识别文本
+              </Button>
+            ) : null}
+          </div>
+        </div>
+      ) : (
+        <pre className="min-h-0 flex-1 overflow-auto whitespace-pre-wrap break-words rounded-[var(--radius-panel)] border border-border bg-surface p-3 text-[13px] leading-relaxed">
+          {item.content}
+        </pre>
+      )}
     </div>
   );
 }
@@ -235,37 +297,48 @@ export function ClipboardPage() {
             title={favoritesOnly ? "暂无收藏" : "暂无剪切板历史"}
             body={
               capturing
-                ? "复制任意文本后会出现在这里。密码管理器等应用默认已排除。"
+                ? "复制文本或图片后会出现在这里。密码管理器等应用默认已排除。"
                 : "采集已暂停。恢复后才会记录新的复制内容。"
             }
           />
         ) : (
           <ul>
-            {items.map((item) => (
-              <li key={item.id}>
-                <button
-                  type="button"
-                  className={cn(
-                    "flex w-full items-start gap-2 border-b border-border px-3 py-2.5 text-left hover:bg-row-hover",
-                    selectedId === item.id && "bg-row-active",
-                  )}
-                  onClick={() => setSelectedId(item.id)}
-                >
-                  {item.favorite ? (
-                    <Star className="mt-0.5 size-3.5 shrink-0 fill-current text-accent" />
-                  ) : (
-                    <span className="mt-0.5 size-3.5 shrink-0" />
-                  )}
-                  <div className="min-w-0 flex-1">
-                    <div className="truncate text-[13px]">{previewLine(item.content)}</div>
-                    <div className="mt-0.5 text-[11px] text-muted">
-                      {item.createdAt}
-                      {item.useCount > 0 ? ` · 用过 ${item.useCount} 次` : ""}
+            {items.map((item) => {
+              const src = thumbSrc(item);
+              return (
+                <li key={item.id}>
+                  <button
+                    type="button"
+                    className={cn(
+                      "flex w-full items-start gap-2 border-b border-border px-3 py-2.5 text-left hover:bg-row-hover",
+                      selectedId === item.id && "bg-row-active",
+                    )}
+                    onClick={() => setSelectedId(item.id)}
+                  >
+                    {item.favorite ? (
+                      <Star className="mt-0.5 size-3.5 shrink-0 fill-current text-accent" />
+                    ) : (
+                      <span className="mt-0.5 size-3.5 shrink-0" />
+                    )}
+                    {item.kind === "image" && src ? (
+                      <img
+                        src={src}
+                        alt=""
+                        className="mt-0.5 size-10 shrink-0 rounded border border-border object-cover"
+                      />
+                    ) : null}
+                    <div className="min-w-0 flex-1">
+                      <div className="truncate text-[13px]">{previewLine(item)}</div>
+                      <div className="mt-0.5 text-[11px] text-muted">
+                        {item.kind === "image" ? "图片 · " : ""}
+                        {item.createdAt}
+                        {item.useCount > 0 ? ` · 用过 ${item.useCount} 次` : ""}
+                      </div>
                     </div>
-                  </div>
-                </button>
-              </li>
-            ))}
+                  </button>
+                </li>
+              );
+            })}
           </ul>
         )
       }

@@ -36,6 +36,16 @@ fn resolve_backup_dir(app: &tauri::AppHandle) -> Result<std::path::PathBuf, Stri
     Ok(dir)
 }
 
+fn resolve_assets_dir(app: &tauri::AppHandle) -> Result<std::path::PathBuf, String> {
+    let dir = app
+        .path()
+        .app_data_dir()
+        .map_err(|e| format!("resolve app data dir: {e}"))?
+        .join("assets");
+    std::fs::create_dir_all(&dir).map_err(|e| format!("create assets dir: {e}"))?;
+    Ok(dir)
+}
+
 fn setup_tray(app: &tauri::AppHandle) -> tauri::Result<()> {
     let capture_enabled = app
         .try_state::<AppState>()
@@ -247,10 +257,11 @@ pub fn run() {
         .setup(|app| {
             let db_path = resolve_db_path(app.handle())?;
             let backup_dir = resolve_backup_dir(app.handle())?;
+            let assets_dir = resolve_assets_dir(app.handle())?;
             tracing::info!(path = %db_path.display(), "opening database");
             let db = Database::open_with_backup_dir(db_path, Some(backup_dir.clone()))
                 .map_err(|e| e.to_string())?;
-            let state = AppState::new(db, backup_dir)?;
+            let state = AppState::new(db, backup_dir, assets_dir)?;
             let settings = state.settings.get().unwrap_or_default();
             let reminders = state.reminders.clone();
             let clipboard = state.clipboard.clone();
@@ -335,6 +346,7 @@ pub fn run() {
             commands::clipboard_get,
             commands::clipboard_set_favorite,
             commands::clipboard_copy,
+            commands::asset_read_thumb,
             commands::clipboard_delete,
             commands::clipboard_clear_non_favorites,
             commands::clipboard_convert_to_task,

@@ -5414,9 +5414,11 @@ dependencies = [
 name = "workbench"
 version = "1.1.0"
 dependencies = [
+ "base64 0.22.1",
  "chrono",
  "directories",
  "hex",
+ "image",
  "parking_lot",
  "rusqlite",
  "serde",

@@ -1,3 +1,4 @@
+pub mod assets;
 pub mod backup;
 pub mod clipboard;
 pub mod clipboard_poller;

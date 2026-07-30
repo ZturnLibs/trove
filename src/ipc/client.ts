@@ -350,14 +350,22 @@ export type SearchResults = {
   clipboard: SearchHit[];
 };
 
+export type ClipboardKind = "text" | "image";
+
 export type ClipboardItem = {
   id: string;
+  kind: ClipboardKind;
   content: string;
   contentHash: string;
+  assetId: string | null;
   sourceApp: string | null;
   favorite: boolean;
   useCount: number;
   lastUsedAt: string | null;
+  width: number | null;
+  height: number | null;
+  thumbBase64: string | null;
+  ocrText: string | null;
   createdAt: string;
   updatedAt: string;
   revision: number;
@@ -367,6 +375,7 @@ export type ClipboardQuery = {
   favoritesOnly?: boolean;
   search?: string;
   limit?: number;
+  kind?: ClipboardKind;
 };
 
 export type ConvertMemoryToTaskResult = {
@@ -449,6 +458,8 @@ export const ipc = {
   clipboardSetFavorite: (id: string, favorite: boolean) =>
     invoke<ClipboardItem>("clipboard_set_favorite", { id, favorite }),
   clipboardCopy: (id: string) => invoke<ClipboardItem>("clipboard_copy", { id }),
+  assetReadThumb: (id: string) =>
+    invoke<string | null>("asset_read_thumb", { id }),
   clipboardDelete: (id: string) => invoke<void>("clipboard_delete", { id }),
   clipboardClearNonFavorites: () =>
     invoke<number>("clipboard_clear_non_favorites"),

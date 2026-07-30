@@ -2,16 +2,65 @@ use serde::{Deserialize, Serialize};
 
 use super::{DomainError, EntityId, Revision};
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub enum ClipboardKind {
+    Text,
+    Image,
+}
+
+impl ClipboardKind {
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::Text => "text",
+            Self::Image => "image",
+        }
+    }
+
+    pub fn parse(value: &str) -> Result<Self, DomainError> {
+        match value {
+            "text" => Ok(Self::Text),
+            "image" => Ok(Self::Image),
+            _ => Err(DomainError::Validation(format!(
+                "invalid clipboard kind: {value}"
+            ))),
+        }
+    }
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct ClipboardItem {
     pub id: EntityId,
+    pub kind: ClipboardKind,
     pub content: String,
     pub content_hash: String,
+    pub asset_id: Option<EntityId>,
     pub source_app: Option<String>,
     pub favorite: bool,
     pub use_count: i64,
     pub last_used_at: Option<String>,
+    pub width: Option<i64>,
+    pub height: Option<i64>,
+    pub thumb_base64: Option<String>,
+    pub ocr_text: Option<String>,
+    pub created_at: String,
+    pub updated_at: String,
+    pub revision: Revision,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct Asset {
+    pub id: EntityId,
+    pub kind: String,
+    pub content_hash: String,
+    pub relative_path: String,
+    pub thumb_path: Option<String>,
+    pub mime_type: String,
+    pub byte_size: i64,
+    pub width: Option<i64>,
+    pub height: Option<i64>,
     pub created_at: String,
     pub updated_at: String,
     pub revision: Revision,
@@ -23,6 +72,7 @@ pub struct ClipboardQuery {
     pub favorites_only: Option<bool>,
     pub search: Option<String>,
     pub limit: Option<i64>,
+    pub kind: Option<ClipboardKind>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

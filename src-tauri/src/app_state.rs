@@ -28,7 +28,7 @@ pub struct AppState {
 }
 
 impl AppState {
-    pub fn new(db: Database, backup_dir: PathBuf) -> Result<Self, String> {
+    pub fn new(db: Database, backup_dir: PathBuf, assets_root: PathBuf) -> Result<Self, String> {
         let db = Arc::new(db);
         let tasks = TaskService::new(db.as_ref().clone());
         tasks
@@ -37,7 +37,7 @@ impl AppState {
         let reminders = ReminderService::new(db.as_ref().clone());
         let search = SearchService::new(db.as_ref().clone());
         let memories = MemoryService::new(db.as_ref().clone());
-        let clipboard = ClipboardService::new(db.as_ref().clone());
+        let clipboard = ClipboardService::new(db.as_ref().clone(), assets_root);
         let backups = BackupService::new(db.as_ref().clone(), backup_dir);
         let data_port = DataPortService::new(db.as_ref().clone());
         let templates = TemplateService::new(db.as_ref().clone());

@@ -1,6 +1,6 @@
 //! Platform capability adapters.
-//! Stage 0 keeps stubs that report availability; concrete OS behavior
-//! is filled in as notification / paste / autostart features land.
+
+pub mod ocr;
 
 use serde::Serialize;
 
@@ -34,7 +34,7 @@ pub fn detect_capabilities() -> PlatformCapabilities {
         },
         clipboard_read: CapabilityStatus {
             available: true,
-            notes: "仅采集文本。可随时暂停；密码管理器等应用默认排除。正文不会写入日志。".into(),
+            notes: "采集文本与图片。可随时暂停；密码管理器等应用默认排除。正文不会写入日志。图片 OCR 仅本地执行。".into(),
         },
         direct_paste: CapabilityStatus {
             available: cfg!(any(target_os = "macos", target_os = "windows")),

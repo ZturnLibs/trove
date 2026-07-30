@@ -593,7 +593,10 @@ export function QuickWindow() {
                         </div>
                         {item.kind === "hit" && item.hit.snippet ? (
                           <div className="truncate text-[11px] text-muted">
-                            {item.hit.snippet}
+                            {item.hit.snippet.includes("[来自图片识别]")
+                              ? "来自图片识别 · "
+                              : ""}
+                            {item.hit.snippet.replace(/^\[来自图片识别\]\s*/u, "")}
                           </div>
                         ) : null}
                       </button>
@@ -641,7 +644,7 @@ export function QuickWindow() {
                 <div className="p-4 text-[12px] text-muted">加载中…</div>
               ) : clipItems.length === 0 ? (
                 <div className="p-4 text-center text-[12px] text-muted">
-                  暂无记录。复制文本后会出现在这里。
+                  暂无记录。复制文本或图片后会出现在这里。
                 </div>
               ) : (
                 <ul>
@@ -650,19 +653,32 @@ export function QuickWindow() {
                       <button
                         type="button"
                         className={cn(
-                          "flex w-full flex-col gap-0.5 border-b border-border px-3 py-2 text-left hover:bg-row-hover",
+                          "flex w-full items-center gap-2 border-b border-border px-3 py-2 text-left hover:bg-row-hover",
                           index === clipIndex && "bg-row-active",
                         )}
                         onClick={() => void reuseClip(item.id)}
                         onMouseEnter={() => setClipIndex(index)}
                       >
-                        <div className="truncate text-[13px] font-medium">
-                          {item.content.replace(/\s+/g, " ").trim().slice(0, 100)}
-                        </div>
-                        <div className="text-[11px] text-muted">
-                          {item.favorite ? "★ " : ""}
-                          {item.createdAt}
-                          {item.useCount > 0 ? ` · ${item.useCount} 次` : ""}
+                        {item.kind === "image" && item.thumbBase64 ? (
+                          <img
+                            src={`data:image/png;base64,${item.thumbBase64}`}
+                            alt=""
+                            className="size-9 shrink-0 rounded border border-border object-cover"
+                          />
+                        ) : null}
+                        <div className="min-w-0 flex-1">
+                          <div className="truncate text-[13px] font-medium">
+                            {item.kind === "image"
+                              ? item.content.replace(/\s+/g, " ").trim().slice(0, 100) ||
+                                "图片"
+                              : item.content.replace(/\s+/g, " ").trim().slice(0, 100)}
+                          </div>
+                          <div className="text-[11px] text-muted">
+                            {item.favorite ? "★ " : ""}
+                            {item.kind === "image" ? "图片 · " : ""}
+                            {item.createdAt}
+                            {item.useCount > 0 ? ` · ${item.useCount} 次` : ""}
+                          </div>
                         </div>
                       </button>
                     </li>
