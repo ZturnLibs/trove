@@ -1,7 +1,7 @@
 use crate::domain::{
     local_today, new_id, stamp, validate_due_date, validate_due_time, CreateTaskInput, DomainError,
-    EntityId, ListKind, SystemClock, Tag, Task, TaskList, TaskPriority, TaskQuery, TaskStatus,
-    TodayTasks, UpdateTaskInput,
+    EntityId, ListKind, SmartListKind, SystemClock, Tag, Task, TaskList, TaskPriority, TaskQuery,
+    TaskStatus, TodayTasks, UpdateTaskInput,
 };
 use crate::infrastructure::db::Database;
 use rusqlite::{params, Connection, OptionalExtension};
@@ -555,8 +555,29 @@ impl TaskService {
             sql.push_str(" AND EXISTS (SELECT 1 FROM task_tags tt WHERE tt.task_id = t.id AND tt.tag_id = ?)");
             values.push(Box::new(tag_id.to_string()));
         }
+        if query.due_null.unwrap_or(false) {
+            sql.push_str(" AND t.due_date IS NULL");
+        }
+        if let Some(ref from) = query.due_from {
+            sql.push_str(" AND t.due_date IS NOT NULL AND t.due_date >= ?");
+            values.push(Box::new(from.clone()));
+        }
+        if let Some(ref to) = query.due_to {
+            sql.push_str(" AND t.due_date IS NOT NULL AND t.due_date <= ?");
+            values.push(Box::new(to.clone()));
+        }
+        if let Some(ref since) = query.completed_since {
+            sql.push_str(
+                " AND t.status = 'completed' AND t.completed_at IS NOT NULL AND date(t.completed_at, 'localtime') >= ?",
+            );
+            values.push(Box::new(since.clone()));
+        }
 
-        sql.push_str(" ORDER BY t.sort_order ASC, t.created_at DESC");
+        if query.completed_since.is_some() {
+            sql.push_str(" ORDER BY t.completed_at DESC, t.updated_at DESC");
+        } else {
+            sql.push_str(" ORDER BY t.sort_order ASC, t.created_at DESC");
+        }
 
         let params_ref: Vec<&dyn rusqlite::types::ToSql> =
             values.iter().map(|v| v.as_ref()).collect();
@@ -569,6 +590,92 @@ impl TaskService {
             self.attach_tags(&conn, task)?;
         }
         Ok(tasks)
+    }
+
+    pub fn smart_list(&self, kind: SmartListKind) -> Result<Vec<Task>, DomainError> {
+        let today = local_today(&self.clock);
+        let today_date = chrono::NaiveDate::parse_from_str(&today, "%Y-%m-%d")
+            .map_err(|e| DomainError::Internal(e.to_string()))?;
+        let query = match kind {
+            SmartListKind::Tomorrow => {
+                let tomorrow = (today_date + chrono::Duration::days(1))
+                    .format("%Y-%m-%d")
+                    .to_string();
+                TaskQuery {
+                    status: Some(TaskStatus::Todo),
+                    due_from: Some(tomorrow.clone()),
+                    due_to: Some(tomorrow),
+                    ..Default::default()
+                }
+            }
+            SmartListKind::Next7Days => {
+                let end = (today_date + chrono::Duration::days(7))
+                    .format("%Y-%m-%d")
+                    .to_string();
+                TaskQuery {
+                    status: Some(TaskStatus::Todo),
+                    due_from: Some(today.clone()),
+                    due_to: Some(end),
+                    ..Default::default()
+                }
+            }
+            SmartListKind::Overdue => TaskQuery {
+                status: Some(TaskStatus::Todo),
+                due_to: Some(
+                    (today_date - chrono::Duration::days(1))
+                        .format("%Y-%m-%d")
+                        .to_string(),
+                ),
+                ..Default::default()
+            },
+            SmartListKind::HighPriority => TaskQuery {
+                status: Some(TaskStatus::Todo),
+                priority: Some(TaskPriority::High),
+                ..Default::default()
+            },
+            SmartListKind::NoDue => TaskQuery {
+                status: Some(TaskStatus::Todo),
+                due_null: Some(true),
+                ..Default::default()
+            },
+            SmartListKind::RecentCompleted => {
+                let since = (today_date - chrono::Duration::days(14))
+                    .format("%Y-%m-%d")
+                    .to_string();
+                TaskQuery {
+                    completed_since: Some(since),
+                    include_archived: Some(false),
+                    ..Default::default()
+                }
+            }
+        };
+        self.query_tasks(query)
+    }
+
+    pub fn postpone_task(&self, id: EntityId, days: i64) -> Result<Task, DomainError> {
+        let days = days.clamp(1, 365);
+        let task = self.get_task(id)?;
+        if task.status != TaskStatus::Todo {
+            return Err(DomainError::Validation("只能延期未完成任务".into()));
+        }
+        let base = task
+            .due_date
+            .as_deref()
+            .and_then(|d| chrono::NaiveDate::parse_from_str(d, "%Y-%m-%d").ok())
+            .unwrap_or_else(|| chrono::Local::now().date_naive());
+        let new_due = (base + chrono::Duration::days(days))
+            .format("%Y-%m-%d")
+            .to_string();
+        self.update_task(UpdateTaskInput {
+            id,
+            title: task.title,
+            notes: task.notes,
+            priority: task.priority,
+            list_id: task.list_id,
+            due_date: Some(new_due),
+            due_time: task.due_time,
+            tag_names: task.tag_names,
+        })
     }
 
     pub fn today_tasks(&self) -> Result<TodayTasks, DomainError> {

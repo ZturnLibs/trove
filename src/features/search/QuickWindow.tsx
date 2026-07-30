@@ -43,6 +43,8 @@ export function QuickWindow() {
   const [selectedIndex, setSelectedIndex] = useState(0);
   const [clipSearch, setClipSearch] = useState("");
   const [clipIndex, setClipIndex] = useState(0);
+  const [ambiguous, setAmbiguous] = useState<string[]>([]);
+  const [parsedHint, setParsedHint] = useState<string | null>(null);
   const inputRef = useRef<HTMLInputElement>(null);
 
   useEffect(() => {
@@ -62,6 +64,57 @@ export function QuickWindow() {
     inputRef.current?.focus();
     setError(null);
   }, [mode, captureType]);
+
+  useEffect(() => {
+    if (mode !== "capture" || captureType !== "task") {
+      setAmbiguous([]);
+      setParsedHint(null);
+      return;
+    }
+    const value = title.trim();
+    if (!value) {
+      setAmbiguous([]);
+      setParsedHint(null);
+      return;
+    }
+    let cancelled = false;
+    const timer = window.setTimeout(() => {
+      void ipc.nlParseCapture(value).then((parsed) => {
+        if (cancelled) return;
+        if (parsed.title !== value) {
+          // Keep raw input in the field; apply structured fields to controls.
+        }
+        if (parsed.dueDate) setDueDate(parsed.dueDate);
+        if (parsed.dueTime) {
+          // dueTime is HH:MM for tasks
+        }
+        setPriority(parsed.priority);
+        setDaily(parsed.recurrence?.frequency === "daily");
+        setAmbiguous(parsed.ambiguousFields);
+        const bits = [
+          parsed.dueDate ? `日期 ${parsed.dueDate}` : null,
+          parsed.dueTime ? `时间 ${parsed.dueTime}` : null,
+          parsed.priority !== "none" ? `优先级 ${parsed.priority}` : null,
+          parsed.recurrence ? `重复 ${parsed.recurrence.frequency}` : null,
+        ].filter(Boolean);
+        setParsedHint(
+          bits.length
+            ? `识别：${bits.join(" · ")}${parsed.ambiguousFields.length ? "（请确认高亮字段）" : ""}`
+            : null,
+        );
+      });
+    }, 250);
+    return () => {
+      cancelled = true;
+      window.clearTimeout(timer);
+    };
+  }, [title, mode, captureType]);
+
+  const templatesQuery = useQuery({
+    queryKey: ["templates"],
+    queryFn: () => ipc.templateList(),
+    enabled: mode === "search",
+  });
 
   const searchQuery = useQuery({
     queryKey: ["search", searchText],
@@ -92,19 +145,103 @@ export function QuickWindow() {
 
   const clipItems = clipQuery.data ?? [];
 
-  useEffect(() => {
-    setSelectedIndex(0);
-  }, [searchText, flatResults.length]);
+  type PaletteItem =
+    | { kind: "hit"; hit: SearchHit }
+    | { kind: "command"; id: string; label: string; run: () => Promise<void> };
+
+  const paletteItems = useMemo(() => {
+    const commandItems: Extract<PaletteItem, { kind: "command" }>[] = [
+      {
+        kind: "command",
+        id: "new-task",
+        label: "新建任务",
+        run: async () => {
+          setQuickMode("capture");
+          setCaptureType("task");
+        },
+      },
+      {
+        kind: "command",
+        id: "open-today",
+        label: "打开今日",
+        run: async () => {
+          await ipc.windowShowMain();
+          await emit("main://navigate", "/today");
+          await ipc.windowHideQuick();
+        },
+      },
+      {
+        kind: "command",
+        id: "open-settings",
+        label: "打开设置",
+        run: async () => {
+          await ipc.windowShowMain();
+          await emit("main://navigate", "/settings");
+          await ipc.windowHideQuick();
+        },
+      },
+      {
+        kind: "command",
+        id: "open-clipboard",
+        label: "打开剪切板浮层",
+        run: async () => setQuickMode("clip"),
+      },
+      {
+        kind: "command",
+        id: "toggle-clipboard",
+        label: "暂停/恢复剪切板采集",
+        run: async () => {
+          const settings = await ipc.settingsGet();
+          await ipc.clipboardSetCaptureEnabled(!settings.clipboardCaptureEnabled);
+          await ipc.windowHideQuick();
+        },
+      },
+    ];
+
+    for (const tpl of templatesQuery.data ?? []) {
+      commandItems.push({
+        kind: "command",
+        id: `tpl-${tpl.id}`,
+        label: `模板：${tpl.name}`,
+        run: async () => {
+          await ipc.templateApply(tpl.id);
+          await ipc.windowHideQuick();
+        },
+      });
+    }
+
+    const q = searchText.trim().toLowerCase();
+    const matchedCommands = q
+      ? commandItems.filter((c) => c.label.toLowerCase().includes(q))
+      : commandItems;
+    const hits: PaletteItem[] = flatResults.map((hit) => ({
+      kind: "hit" as const,
+      hit,
+    }));
+    return [...matchedCommands, ...hits];
+  }, [flatResults, searchText, templatesQuery.data, setQuickMode]);
 
   useEffect(() => {
-    setClipIndex(0);
-  }, [clipSearch, clipItems.length]);
+    setSelectedIndex(0);
+  }, [searchText, paletteItems.length]);
 
   const openHit = async (hit: SearchHit) => {
     if (hit.entityType === "clipboard") {
       await ipc.clipboardCopy(hit.entityId);
       await ipc.windowHideQuick();
       return;
+    }
+    if (hit.entityType === "memory") {
+      // Prefer copy for quick-insert style reuse.
+      const memories = await ipc.memoryQuery({ quickInsertOnly: true });
+      const snippet = memories.find((m) => m.id === hit.entityId);
+      if (snippet) {
+        await navigator.clipboard.writeText(
+          snippet.body || snippet.title,
+        );
+        await ipc.windowHideQuick();
+        return;
+      }
     }
     await ipc.windowShowMain();
     const path =
@@ -114,6 +251,32 @@ export function QuickWindow() {
           ? "/memory"
           : "/today";
     await emit("main://navigate", path);
+    await ipc.windowHideQuick();
+  };
+
+  const runPaletteItem = async (item: PaletteItem) => {
+    if (item.kind === "command") {
+      try {
+        await item.run();
+      } catch (err) {
+        setError(err instanceof Error ? err.message : "命令执行失败");
+      }
+      return;
+    }
+    await openHit(item.hit);
+  };
+
+  const completeSelectedTask = async () => {
+    const item = paletteItems[selectedIndex];
+    if (!item || item.kind !== "hit" || item.hit.entityType !== "task") return;
+    await ipc.taskComplete(item.hit.entityId);
+    await ipc.windowHideQuick();
+  };
+
+  const postponeSelectedTask = async () => {
+    const item = paletteItems[selectedIndex];
+    if (!item || item.kind !== "hit" || item.hit.entityType !== "task") return;
+    await ipc.taskPostpone(item.hit.entityId, 1);
     await ipc.windowHideQuick();
   };
 
@@ -130,11 +293,37 @@ export function QuickWindow() {
     setError(null);
     try {
       if (captureType === "task") {
-        await ipc.taskCreate({
-          title: value,
-          dueDate: dueDate || null,
-          priority: priority === "none" ? undefined : priority,
-        });
+        const parsed = await ipc.nlParseCapture(value);
+        const finalTitle = parsed.title.trim() || value;
+        const finalDue = dueDate || parsed.dueDate || null;
+        const finalPriority =
+          priority !== "none" ? priority : parsed.priority !== "none" ? parsed.priority : undefined;
+        const recurrence = daily
+          ? parsed.recurrence ?? {
+              version: 1,
+              frequency: "daily" as const,
+              interval: 1,
+              timezone: Intl.DateTimeFormat().resolvedOptions().timeZone,
+            }
+          : parsed.recurrence;
+        if (recurrence) {
+          await ipc.taskCreateRecurring(
+            {
+              title: finalTitle,
+              dueDate: finalDue,
+              dueTime: parsed.dueTime,
+              priority: finalPriority,
+            },
+            recurrence,
+          );
+        } else {
+          await ipc.taskCreate({
+            title: finalTitle,
+            dueDate: finalDue,
+            dueTime: parsed.dueTime,
+            priority: finalPriority,
+          });
+        }
       } else if (captureType === "reminder") {
         if (!fireAt) throw new Error("请选择提醒时间");
         const normalized = fireAt.length === 16 ? `${fireAt}:00` : fireAt;
@@ -163,6 +352,8 @@ export function QuickWindow() {
       setFireAt("");
       setPriority("none");
       setDaily(false);
+      setAmbiguous([]);
+      setParsedHint(null);
       await ipc.windowHideQuick();
     } catch (err) {
       setError(err instanceof Error ? err.message : "创建失败");
@@ -220,7 +411,7 @@ export function QuickWindow() {
               onChange={(event) => setTitle(event.target.value)}
               placeholder={
                 captureType === "task"
-                  ? "快速记录任务…"
+                  ? "如：明天下午三点回复客户…"
                   : captureType === "reminder"
                     ? "快速记录提醒…"
                     : "快速记录记忆标题…"
@@ -246,6 +437,11 @@ export function QuickWindow() {
                     type="date"
                     value={dueDate}
                     onChange={(e) => setDueDate(e.target.value)}
+                    className={
+                      ambiguous.includes("dueDate")
+                        ? "ring-2 ring-amber-400/60"
+                        : undefined
+                    }
                   />
                 </label>
                 <label className="space-y-1 text-[11px] text-muted">
@@ -262,6 +458,19 @@ export function QuickWindow() {
                   </select>
                 </label>
               </div>
+            ) : null}
+            {captureType === "task" && parsedHint ? (
+              <p className="text-[11px] text-muted">{parsedHint}</p>
+            ) : null}
+            {captureType === "task" ? (
+              <label className="flex items-center gap-2 text-[12px] text-muted">
+                <input
+                  type="checkbox"
+                  checked={daily}
+                  onChange={(e) => setDaily(e.target.checked)}
+                />
+                每天重复
+              </label>
             ) : null}
             {captureType === "reminder" ? (
               <div className="grid grid-cols-2 gap-2">
@@ -320,7 +529,7 @@ export function QuickWindow() {
               ref={inputRef}
               value={searchText}
               onChange={(e) => setSearchText(e.target.value)}
-              placeholder="搜索任务、提醒、记忆、剪切板…"
+              placeholder="搜索内容或输入命令…"
               onKeyDown={(e) => {
                 if (e.key === "Escape") {
                   if (searchText) setSearchText("");
@@ -329,50 +538,62 @@ export function QuickWindow() {
                 if (e.key === "ArrowDown") {
                   e.preventDefault();
                   setSelectedIndex((i) =>
-                    Math.min(i + 1, Math.max(flatResults.length - 1, 0)),
+                    Math.min(i + 1, Math.max(paletteItems.length - 1, 0)),
                   );
                 }
                 if (e.key === "ArrowUp") {
                   e.preventDefault();
                   setSelectedIndex((i) => Math.max(i - 1, 0));
                 }
-                if (e.key === "Enter" && flatResults[selectedIndex]) {
+                if (e.key === "Enter" && paletteItems[selectedIndex]) {
                   e.preventDefault();
-                  void openHit(flatResults[selectedIndex]);
+                  if ((e.metaKey || e.ctrlKey) && e.shiftKey) {
+                    void postponeSelectedTask();
+                  } else if (e.metaKey || e.ctrlKey) {
+                    void completeSelectedTask();
+                  } else {
+                    void runPaletteItem(paletteItems[selectedIndex]);
+                  }
                 }
               }}
             />
             <div className="min-h-0 flex-1 overflow-auto rounded-[var(--radius-panel)] border border-border">
-              {!searchText.trim() ? (
-                <div className="p-4 text-center text-[12px] text-muted">
-                  输入关键词开始搜索
-                </div>
-              ) : searchQuery.isLoading ? (
+              {searchText.trim() && searchQuery.isLoading ? (
                 <div className="p-4 text-[12px] text-muted">搜索中…</div>
-              ) : flatResults.length === 0 ? (
+              ) : paletteItems.length === 0 ? (
                 <div className="p-4 text-center text-[12px] text-muted">无结果</div>
               ) : (
                 <ul>
-                  {flatResults.map((hit, index) => (
-                    <li key={`${hit.entityType}-${hit.entityId}`}>
+                  {paletteItems.map((item, index) => (
+                    <li
+                      key={
+                        item.kind === "command"
+                          ? item.id
+                          : `${item.hit.entityType}-${item.hit.entityId}`
+                      }
+                    >
                       <button
                         type="button"
                         className={cn(
                           "flex w-full flex-col gap-0.5 border-b border-border px-3 py-2 text-left hover:bg-row-hover",
                           index === selectedIndex && "bg-row-active",
                         )}
-                        onClick={() => void openHit(hit)}
+                        onClick={() => void runPaletteItem(item)}
                         onMouseEnter={() => setSelectedIndex(index)}
                       >
                         <div className="flex items-center gap-2 text-[13px]">
                           <span className="rounded bg-row-hover px-1.5 text-[10px] text-muted">
-                            {typeLabel[hit.entityType]}
+                            {item.kind === "command"
+                              ? "命令"
+                              : typeLabel[item.hit.entityType]}
                           </span>
-                          <span className="truncate font-medium">{hit.title}</span>
+                          <span className="truncate font-medium">
+                            {item.kind === "command" ? item.label : item.hit.title}
+                          </span>
                         </div>
-                        {hit.snippet ? (
+                        {item.kind === "hit" && item.hit.snippet ? (
                           <div className="truncate text-[11px] text-muted">
-                            {hit.snippet}
+                            {item.hit.snippet}
                           </div>
                         ) : null}
                       </button>
@@ -380,6 +601,9 @@ export function QuickWindow() {
                   ))}
                 </ul>
               )}
+            </div>
+            <div className="text-[11px] text-muted">
+              Enter 执行 · ⌘/Ctrl+Enter 完成任务 · ⌘/Ctrl+Shift+Enter 延期
             </div>
           </>
         ) : null}

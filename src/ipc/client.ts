@@ -158,6 +158,10 @@ export type TaskQuery = {
   priority?: TaskPriority;
   tagId?: string;
   includeArchived?: boolean;
+  dueFrom?: string;
+  dueTo?: string;
+  dueNull?: boolean;
+  completedSince?: string;
 };
 
 export type RecurrenceFrequency =
@@ -251,6 +255,8 @@ export type Memory = {
   body: string;
   pinned: boolean;
   archived: boolean;
+  quickInsert: boolean;
+  triggerWord: string | null;
   tagIds: string[];
   tagNames: string[];
   createdAt: string;
@@ -262,6 +268,8 @@ export type CreateMemoryInput = {
   title: string;
   body?: string;
   pinned?: boolean;
+  quickInsert?: boolean;
+  triggerWord?: string | null;
   tagNames?: string[];
 };
 
@@ -271,6 +279,8 @@ export type UpdateMemoryInput = {
   body: string;
   pinned: boolean;
   archived: boolean;
+  quickInsert: boolean;
+  triggerWord: string | null;
   tagNames: string[];
 };
 
@@ -278,6 +288,49 @@ export type MemoryQuery = {
   pinnedOnly?: boolean;
   includeArchived?: boolean;
   tagId?: string;
+  quickInsertOnly?: boolean;
+};
+
+export type SmartListKind =
+  | "tomorrow"
+  | "next7Days"
+  | "overdue"
+  | "highPriority"
+  | "noDue"
+  | "recentCompleted";
+
+export type ParsedCapture = {
+  title: string;
+  dueDate: string | null;
+  dueTime: string | null;
+  priority: TaskPriority;
+  recurrence: RecurrenceRule | null;
+  ambiguousFields: string[];
+  raw: string;
+};
+
+export type TemplateKind = "task" | "reminder" | "memory";
+
+export type ItemTemplate = {
+  id: string;
+  kind: TemplateKind;
+  name: string;
+  payload: Record<string, unknown>;
+  createdAt: string;
+  updatedAt: string;
+  revision: number;
+};
+
+export type TemplatePreview = {
+  kind: TemplateKind;
+  title: string;
+  body: string;
+  dueDate: string | null;
+  dueTime: string | null;
+  fireAt: string | null;
+  priority: TaskPriority | null;
+  recurrence: RecurrenceRule | null;
+  tagNames: string[];
 };
 
 export type SearchEntityType = "task" | "reminder" | "memory" | "clipboard";
@@ -350,6 +403,23 @@ export const ipc = {
     invoke<void>("task_reorder", { orderedIds }),
   taskListTags: () => invoke<Tag[]>("task_list_tags"),
   taskCounts: () => invoke<TaskCounts>("task_counts"),
+  taskSmartList: (kind: SmartListKind) =>
+    invoke<Task[]>("task_smart_list", { kind }),
+  taskPostpone: (id: string, days = 1) =>
+    invoke<Task>("task_postpone", { id, days }),
+  nlParseCapture: (text: string) =>
+    invoke<ParsedCapture>("nl_parse_capture", { text }),
+  templateList: () => invoke<ItemTemplate[]>("template_list"),
+  templateCreate: (input: {
+    kind: TemplateKind;
+    name: string;
+    payload: Record<string, unknown>;
+  }) => invoke<ItemTemplate>("template_create", { input }),
+  templateDelete: (id: string) => invoke<void>("template_delete", { id }),
+  templatePreview: (id: string) =>
+    invoke<TemplatePreview>("template_preview", { id }),
+  templateApply: (id: string) =>
+    invoke<{ kind: string; id: string }>("template_apply", { id }),
   reminderCreate: (input: CreateReminderInput) =>
     invoke<Reminder>("reminder_create", { input }),
   reminderDelete: (id: string) => invoke<void>("reminder_delete", { id }),

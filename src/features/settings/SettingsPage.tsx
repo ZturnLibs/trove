@@ -30,6 +30,10 @@ export function SettingsPage() {
     queryKey: ["backups"],
     queryFn: () => ipc.backupList(),
   });
+  const templatesQuery = useQuery({
+    queryKey: ["templates"],
+    queryFn: () => ipc.templateList(),
+  });
 
   const [excludedText, setExcludedText] = useState("");
   const [retentionText, setRetentionText] = useState("");
@@ -280,6 +284,104 @@ export function SettingsPage() {
               </Button>
             </dl>
           ) : null}
+        </section>
+
+        <section className="rounded-[var(--radius-panel)] border border-border bg-surface-raised p-4">
+          <h2 className="text-[13px] font-semibold">模板</h2>
+          <p className="mt-1 text-[12px] text-muted">
+            在命令面板搜索「模板」可一键应用。相对日期在应用时解析为当天偏移。
+          </p>
+          <div className="mt-3 flex flex-wrap gap-2">
+            <Button
+              size="sm"
+              variant="secondary"
+              onClick={() =>
+                void ipc
+                  .templateCreate({
+                    kind: "task",
+                    name: "周报",
+                    payload: {
+                      title: "写周报",
+                      relativeDueDays: 0,
+                      priority: "medium",
+                    },
+                  })
+                  .then(() => {
+                    void queryClient.invalidateQueries({ queryKey: ["templates"] });
+                    setMessage("已创建「周报」任务模板");
+                  })
+              }
+            >
+              添加示例：周报
+            </Button>
+            <Button
+              size="sm"
+              variant="secondary"
+              onClick={() =>
+                void ipc
+                  .templateCreate({
+                    kind: "task",
+                    name: "报销",
+                    payload: {
+                      title: "提交报销",
+                      relativeDueDays: 2,
+                      priority: "low",
+                    },
+                  })
+                  .then(() => {
+                    void queryClient.invalidateQueries({ queryKey: ["templates"] });
+                    setMessage("已创建「报销」任务模板");
+                  })
+              }
+            >
+              添加示例：报销
+            </Button>
+          </div>
+          <ul className="mt-3 divide-y divide-border border-t border-border text-[12px]">
+            {(templatesQuery.data ?? []).map((tpl) => (
+              <li
+                key={tpl.id}
+                className="flex items-center justify-between gap-3 py-2"
+              >
+                <div>
+                  <span className="font-medium">{tpl.name}</span>
+                  <span className="ml-2 text-muted">{tpl.kind}</span>
+                </div>
+                <div className="flex gap-1">
+                  <Button
+                    size="sm"
+                    variant="ghost"
+                    onClick={() =>
+                      void ipc.templateApply(tpl.id).then(() => {
+                        setMessage(`已应用模板「${tpl.name}」`);
+                        void queryClient.invalidateQueries();
+                      })
+                    }
+                  >
+                    应用
+                  </Button>
+                  <Button
+                    size="sm"
+                    variant="ghost"
+                    onClick={() => {
+                      if (confirm(`删除模板「${tpl.name}」？`)) {
+                        void ipc.templateDelete(tpl.id).then(() => {
+                          void queryClient.invalidateQueries({
+                            queryKey: ["templates"],
+                          });
+                        });
+                      }
+                    }}
+                  >
+                    删除
+                  </Button>
+                </div>
+              </li>
+            ))}
+            {(templatesQuery.data ?? []).length === 0 ? (
+              <li className="py-3 text-muted">暂无模板，可添加示例</li>
+            ) : null}
+          </ul>
         </section>
 
         <section className="rounded-[var(--radius-panel)] border border-border bg-surface-raised p-4">

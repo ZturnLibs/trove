@@ -37,12 +37,28 @@ impl MemoryService {
         let id = new_id();
         let now = stamp(&self.clock);
         let pinned = input.pinned.unwrap_or(false);
+        let quick_insert = input.quick_insert.unwrap_or(false);
+        let trigger_word = input
+            .trigger_word
+            .as_ref()
+            .map(|s| s.trim().to_string())
+            .filter(|s| !s.is_empty());
         let conn = self.connect()?;
         let tx = conn.unchecked_transaction().map_err(internal)?;
         tx.execute(
-            "INSERT INTO memories (id, title, body, pinned, archived, created_at, updated_at, revision, deleted_at)
-             VALUES (?1, ?2, ?3, ?4, 0, ?5, ?5, 1, NULL)",
-            params![id.to_string(), title, body, if pinned { 1 } else { 0 }, now],
+            "INSERT INTO memories (
+                id, title, body, pinned, archived, quick_insert, trigger_word,
+                created_at, updated_at, revision, deleted_at
+             ) VALUES (?1, ?2, ?3, ?4, 0, ?5, ?6, ?7, ?7, 1, NULL)",
+            params![
+                id.to_string(),
+                title,
+                body,
+                if pinned { 1 } else { 0 },
+                if quick_insert { 1 } else { 0 },
+                trigger_word,
+                now
+            ],
         )
         .map_err(internal)?;
         if let Some(tag_names) = input.tag_names {
@@ -65,13 +81,20 @@ impl MemoryService {
         let tx = conn.unchecked_transaction().map_err(internal)?;
         tx.execute(
             "UPDATE memories SET title = ?1, body = ?2, pinned = ?3, archived = ?4,
-                updated_at = ?5, revision = revision + 1
-             WHERE id = ?6 AND deleted_at IS NULL",
+                quick_insert = ?5, trigger_word = ?6,
+                updated_at = ?7, revision = revision + 1
+             WHERE id = ?8 AND deleted_at IS NULL",
             params![
                 title,
                 input.body,
                 if input.pinned { 1 } else { 0 },
                 if input.archived { 1 } else { 0 },
+                if input.quick_insert { 1 } else { 0 },
+                input
+                    .trigger_word
+                    .as_ref()
+                    .map(|s| s.trim().to_string())
+                    .filter(|s| !s.is_empty()),
                 now,
                 input.id.to_string()
             ],
@@ -98,7 +121,8 @@ impl MemoryService {
         let conn = self.connect()?;
         let mut memory = conn
             .query_row(
-                "SELECT id, title, body, pinned, archived, created_at, updated_at, revision
+                "SELECT id, title, body, pinned, archived, quick_insert, trigger_word,
+                        created_at, updated_at, revision
                  FROM memories WHERE id = ?1 AND deleted_at IS NULL",
                 [id.to_string()],
                 map_memory_row,
@@ -113,7 +137,8 @@ impl MemoryService {
     pub fn query(&self, query: MemoryQuery) -> Result<Vec<Memory>, DomainError> {
         let conn = self.connect()?;
         let mut sql = String::from(
-            "SELECT id, title, body, pinned, archived, created_at, updated_at, revision
+            "SELECT id, title, body, pinned, archived, quick_insert, trigger_word,
+                    created_at, updated_at, revision
              FROM memories WHERE deleted_at IS NULL",
         );
         let mut values: Vec<Box<dyn rusqlite::types::ToSql>> = Vec::new();
@@ -122,6 +147,9 @@ impl MemoryService {
         }
         if query.pinned_only.unwrap_or(false) {
             sql.push_str(" AND pinned = 1");
+        }
+        if query.quick_insert_only.unwrap_or(false) {
+            sql.push_str(" AND quick_insert = 1");
         }
         if let Some(tag_id) = query.tag_id {
             sql.push_str(
@@ -280,11 +308,13 @@ fn map_memory_row(row: &rusqlite::Row<'_>) -> Result<Memory, rusqlite::Error> {
         body: row.get(2)?,
         pinned: row.get::<_, i64>(3)? == 1,
         archived: row.get::<_, i64>(4)? == 1,
+        quick_insert: row.get::<_, i64>(5)? == 1,
+        trigger_word: row.get(6)?,
         tag_ids: Vec::new(),
         tag_names: Vec::new(),
-        created_at: row.get(5)?,
-        updated_at: row.get(6)?,
-        revision: row.get(7)?,
+        created_at: row.get(7)?,
+        updated_at: row.get(8)?,
+        revision: row.get(9)?,
     })
 }
 
@@ -317,6 +347,8 @@ mod tests {
                 title: "API Key 备忘".into(),
                 body: Some("https://example.com/docs".into()),
                 pinned: Some(true),
+                quick_insert: None,
+                trigger_word: None,
                 tag_names: Some(vec!["work".into()]),
             })
             .unwrap();

@@ -10,6 +10,8 @@ pub struct Memory {
     pub body: String,
     pub pinned: bool,
     pub archived: bool,
+    pub quick_insert: bool,
+    pub trigger_word: Option<String>,
     pub tag_ids: Vec<EntityId>,
     pub tag_names: Vec<String>,
     pub created_at: String,
@@ -23,6 +25,8 @@ pub struct CreateMemoryInput {
     pub title: String,
     pub body: Option<String>,
     pub pinned: Option<bool>,
+    pub quick_insert: Option<bool>,
+    pub trigger_word: Option<String>,
     pub tag_names: Option<Vec<String>>,
 }
 
@@ -34,6 +38,8 @@ pub struct UpdateMemoryInput {
     pub body: String,
     pub pinned: bool,
     pub archived: bool,
+    pub quick_insert: bool,
+    pub trigger_word: Option<String>,
     pub tag_names: Vec<String>,
 }
 
@@ -43,6 +49,7 @@ pub struct MemoryQuery {
     pub pinned_only: Option<bool>,
     pub include_archived: Option<bool>,
     pub tag_id: Option<EntityId>,
+    pub quick_insert_only: Option<bool>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]

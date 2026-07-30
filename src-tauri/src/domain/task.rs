@@ -164,6 +164,24 @@ pub struct TaskQuery {
     pub priority: Option<TaskPriority>,
     pub tag_id: Option<EntityId>,
     pub include_archived: Option<bool>,
+    /// Inclusive YYYY-MM-DD
+    pub due_from: Option<String>,
+    /// Inclusive YYYY-MM-DD
+    pub due_to: Option<String>,
+    pub due_null: Option<bool>,
+    /// completed_at date >= YYYY-MM-DD (local)
+    pub completed_since: Option<String>,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub enum SmartListKind {
+    Tomorrow,
+    Next7Days,
+    Overdue,
+    HighPriority,
+    NoDue,
+    RecentCompleted,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

@@ -1,11 +1,13 @@
 mod clipboard;
 mod memory;
+mod nl_parse;
 mod recurrence;
 mod reminder;
 mod task;
 
 pub use clipboard::*;
 pub use memory::*;
+pub use nl_parse::*;
 pub use recurrence::*;
 pub use reminder::*;
 pub use task::*;

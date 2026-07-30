@@ -57,6 +57,8 @@ function MemoryDetail({
       body: memory.body,
       pinned: memory.pinned,
       archived: memory.archived,
+      quickInsert: memory.quickInsert,
+      triggerWord: memory.triggerWord,
       tagNames: [...memory.tagNames],
     });
     setTagText(memory.tagNames.join(", "));
@@ -124,6 +126,37 @@ function MemoryDetail({
             placeholder="工作, 灵感"
           />
         </label>
+        <label className="flex items-center gap-2 text-[12px] text-foreground">
+          <input
+            type="checkbox"
+            checked={draft.quickInsert}
+            onChange={(e) => {
+              const next = { ...draft, quickInsert: e.target.checked };
+              setDraft(next);
+              saveMutation.mutate({
+                ...next,
+                tagNames: tagText
+                  .split(/[,，]/)
+                  .map((t) => t.trim())
+                  .filter(Boolean),
+              });
+            }}
+          />
+          可快速插入（文本片段）
+        </label>
+        {draft.quickInsert ? (
+          <label className="block space-y-1 text-[11px] text-muted">
+            触发词
+            <Input
+              value={draft.triggerWord ?? ""}
+              onChange={(e) =>
+                setDraft({ ...draft, triggerWord: e.target.value || null })
+              }
+              onBlur={save}
+              placeholder="如 addr / 签名"
+            />
+          </label>
+        ) : null}
         {preview ? (
           <div className="whitespace-pre-wrap rounded-[var(--radius-control)] border border-border bg-surface p-3 text-[13px] leading-relaxed">
             {linkify(draft.body || "（空）")}

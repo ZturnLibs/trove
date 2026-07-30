@@ -22,6 +22,7 @@ const EXPORT_TABLES: &[&str] = &[
     "memory_tags",
     "clipboard_items",
     "entity_links",
+    "item_templates",
 ];
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -112,6 +113,7 @@ impl DataPortService {
             "entity_links",
             "clipboard_items",
             "memories",
+            "item_templates",
             "tasks",
             "task_series",
             "tags",

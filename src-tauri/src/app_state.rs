@@ -6,6 +6,7 @@ use crate::application::reminders::ReminderService;
 use crate::application::search::SearchService;
 use crate::application::smoke_notes::SmokeNoteService;
 use crate::application::tasks::TaskService;
+use crate::application::templates::TemplateService;
 use crate::infrastructure::db::Database;
 use crate::infrastructure::settings::SettingsService;
 use std::path::PathBuf;
@@ -23,6 +24,7 @@ pub struct AppState {
     pub clipboard: Arc<ClipboardService>,
     pub backups: Arc<BackupService>,
     pub data_port: Arc<DataPortService>,
+    pub templates: Arc<TemplateService>,
 }
 
 impl AppState {
@@ -38,6 +40,7 @@ impl AppState {
         let clipboard = ClipboardService::new(db.as_ref().clone());
         let backups = BackupService::new(db.as_ref().clone(), backup_dir);
         let data_port = DataPortService::new(db.as_ref().clone());
+        let templates = TemplateService::new(db.as_ref().clone());
         let state = Self {
             settings: Arc::new(SettingsService::new(db.as_ref().clone())),
             smoke_notes: Arc::new(SmokeNoteService::new(db.as_ref().clone())),
@@ -48,6 +51,7 @@ impl AppState {
             clipboard: Arc::new(clipboard),
             backups: Arc::new(backups),
             data_port: Arc::new(data_port),
+            templates: Arc::new(templates),
             db,
         };
         if let Err(err) = state.search.rebuild_all() {

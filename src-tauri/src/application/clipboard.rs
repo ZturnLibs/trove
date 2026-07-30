@@ -304,6 +304,8 @@ impl ClipboardService {
             title,
             body: Some(item.content),
             pinned: None,
+            quick_insert: None,
+            trigger_word: None,
             tag_names: None,
         })?;
         Ok(memory.id)

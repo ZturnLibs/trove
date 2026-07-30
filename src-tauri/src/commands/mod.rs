@@ -3,11 +3,15 @@ use crate::application::backup::{BackupInfo, BackupStatus};
 use crate::application::data_port::ImportResult;
 use crate::application::smoke_notes::SmokeNote;
 use crate::application::tasks::TaskCounts;
+use crate::application::templates::{
+    CreateTemplateInput, ItemTemplate, TemplatePreview, TemplateKind,
+};
 use crate::domain::{
-    AppError, ClipboardItem, ClipboardQuery, ConvertMemoryToTaskResult, CreateMemoryInput,
-    CreateReminderInput, CreateTaskInput, EntityId, Memory, MemoryQuery, RecurrenceRule, Reminder,
-    ReminderOccurrence, SearchEntityType, SearchQuery, SearchResults, SnoozePreset, Tag, Task,
-    TaskList, TaskQuery, TodayTasks, UpdateMemoryInput, UpdateReminderInput, UpdateTaskInput,
+    parse_capture, AppError, ClipboardItem, ClipboardQuery, ConvertMemoryToTaskResult,
+    CreateMemoryInput, CreateReminderInput, CreateTaskInput, EntityId, Memory, MemoryQuery,
+    ParsedCapture, RecurrenceRule, Reminder, ReminderOccurrence, SearchEntityType, SearchQuery,
+    SearchResults, SmartListKind, SnoozePreset, Tag, Task, TaskList, TaskQuery, TodayTasks,
+    UpdateMemoryInput, UpdateReminderInput, UpdateTaskInput,
 };
 use crate::infrastructure::db::DbHealth;
 use crate::infrastructure::settings::{AppSettings, ShortcutSettings};
@@ -408,6 +412,109 @@ pub fn task_list_tags(state: State<'_, AppState>) -> Result<Vec<Tag>, AppError> 
 #[tauri::command]
 pub fn task_counts(state: State<'_, AppState>) -> Result<TaskCounts, AppError> {
     state.tasks.counts().map_err(Into::into)
+}
+
+#[tauri::command]
+pub fn task_smart_list(
+    state: State<'_, AppState>,
+    kind: SmartListKind,
+) -> Result<Vec<Task>, AppError> {
+    state.tasks.smart_list(kind).map_err(Into::into)
+}
+
+#[tauri::command]
+pub fn task_postpone(
+    app: AppHandle,
+    state: State<'_, AppState>,
+    id: EntityId,
+    days: i64,
+) -> Result<Task, AppError> {
+    let task = state.tasks.postpone_task(id, days)?;
+    index_task(&state, &task);
+    emit_task_change(&app, &task, "updated");
+    Ok(task)
+}
+
+#[tauri::command]
+pub fn nl_parse_capture(text: String) -> ParsedCapture {
+    parse_capture(&text)
+}
+
+#[tauri::command]
+pub fn template_list(state: State<'_, AppState>) -> Result<Vec<ItemTemplate>, AppError> {
+    state.templates.list().map_err(Into::into)
+}
+
+#[tauri::command]
+pub fn template_create(
+    state: State<'_, AppState>,
+    input: CreateTemplateInput,
+) -> Result<ItemTemplate, AppError> {
+    state.templates.create(input).map_err(Into::into)
+}
+
+#[tauri::command]
+pub fn template_delete(state: State<'_, AppState>, id: EntityId) -> Result<(), AppError> {
+    state.templates.delete(id).map_err(Into::into)
+}
+
+#[tauri::command]
+pub fn template_preview(
+    state: State<'_, AppState>,
+    id: EntityId,
+) -> Result<TemplatePreview, AppError> {
+    state.templates.preview(id).map_err(Into::into)
+}
+
+#[tauri::command]
+pub fn template_apply(
+    app: AppHandle,
+    state: State<'_, AppState>,
+    id: EntityId,
+) -> Result<serde_json::Value, AppError> {
+    let preview = state.templates.preview(id)?;
+    match preview.kind {
+        TemplateKind::Task => {
+            let input = state.templates.to_task_input(id)?;
+            let task = if let Some(recurrence) = preview.recurrence.clone() {
+                state.tasks.create_recurring_task(input, recurrence)?
+            } else {
+                state.tasks.create_task(input)?
+            };
+            index_task(&state, &task);
+            emit_task_change(&app, &task, "created");
+            Ok(serde_json::json!({ "kind": "task", "id": task.id.to_string() }))
+        }
+        TemplateKind::Reminder => {
+            let input = state.templates.to_reminder_input(id)?;
+            let reminder = state.reminders.create(input)?;
+            index_reminder(&state, &reminder);
+            let _ = app.emit(
+                "domain://changed",
+                DomainChangeEvent {
+                    entity_type: "reminder".into(),
+                    entity_id: reminder.id.to_string(),
+                    change: "created".into(),
+                    revision: reminder.revision,
+                },
+            );
+            Ok(serde_json::json!({ "kind": "reminder", "id": reminder.id.to_string() }))
+        }
+        TemplateKind::Memory => {
+            let input = state.templates.to_memory_input(id)?;
+            let memory = state.memories.create(input)?;
+            let _ = app.emit(
+                "domain://changed",
+                DomainChangeEvent {
+                    entity_type: "memory".into(),
+                    entity_id: memory.id.to_string(),
+                    change: "created".into(),
+                    revision: memory.revision,
+                },
+            );
+            Ok(serde_json::json!({ "kind": "memory", "id": memory.id.to_string() }))
+        }
+    }
 }
 
 #[tauri::command]
