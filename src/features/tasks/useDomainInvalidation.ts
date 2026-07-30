@@ -15,6 +15,8 @@ export function useDomainInvalidation() {
       void queryClient.invalidateQueries({ queryKey: ["reminders"] });
       void queryClient.invalidateQueries({ queryKey: ["memories"] });
       void queryClient.invalidateQueries({ queryKey: ["search"] });
+      void queryClient.invalidateQueries({ queryKey: ["clipboard"] });
+      void queryClient.invalidateQueries({ queryKey: ["settings"] });
     }).then((fn) => {
       unlisten = fn;
     });

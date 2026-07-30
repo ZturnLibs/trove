@@ -1,3 +1,5 @@
+pub mod clipboard;
+pub mod clipboard_poller;
 pub mod memories;
 pub mod reminders;
 pub mod scheduler;

@@ -51,6 +51,7 @@ pub enum SearchEntityType {
     Task,
     Reminder,
     Memory,
+    Clipboard,
 }
 
 impl SearchEntityType {
@@ -59,6 +60,7 @@ impl SearchEntityType {
             Self::Task => "task",
             Self::Reminder => "reminder",
             Self::Memory => "memory",
+            Self::Clipboard => "clipboard",
         }
     }
 
@@ -67,6 +69,7 @@ impl SearchEntityType {
             "task" => Ok(Self::Task),
             "reminder" => Ok(Self::Reminder),
             "memory" => Ok(Self::Memory),
+            "clipboard" => Ok(Self::Clipboard),
             _ => Err(DomainError::Validation(format!(
                 "invalid search entity type: {value}"
             ))),
@@ -98,6 +101,7 @@ pub struct SearchResults {
     pub tasks: Vec<SearchHit>,
     pub reminders: Vec<SearchHit>,
     pub memories: Vec<SearchHit>,
+    pub clipboard: Vec<SearchHit>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

@@ -1,3 +1,4 @@
+use crate::application::clipboard::ClipboardService;
 use crate::application::memories::MemoryService;
 use crate::application::reminders::ReminderService;
 use crate::application::search::SearchService;
@@ -16,6 +17,7 @@ pub struct AppState {
     pub reminders: Arc<ReminderService>,
     pub memories: Arc<MemoryService>,
     pub search: Arc<SearchService>,
+    pub clipboard: Arc<ClipboardService>,
 }
 
 impl AppState {
@@ -28,6 +30,7 @@ impl AppState {
         let reminders = ReminderService::new(db.as_ref().clone());
         let search = SearchService::new(db.as_ref().clone());
         let memories = MemoryService::new(db.as_ref().clone());
+        let clipboard = ClipboardService::new(db.as_ref().clone());
         let state = Self {
             settings: Arc::new(SettingsService::new(db.as_ref().clone())),
             smoke_notes: Arc::new(SmokeNoteService::new(db.as_ref().clone())),
@@ -35,11 +38,13 @@ impl AppState {
             reminders: Arc::new(reminders),
             memories: Arc::new(memories),
             search: Arc::new(search),
+            clipboard: Arc::new(clipboard),
             db,
         };
         if let Err(err) = state.search.rebuild_all() {
             tracing::warn!(error = %err, "search index rebuild failed");
         }
+        let _ = state.clipboard.enforce_limits();
         Ok(state)
     }
 }

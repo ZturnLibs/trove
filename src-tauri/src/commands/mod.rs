@@ -2,16 +2,17 @@ use crate::app_state::AppState;
 use crate::application::smoke_notes::SmokeNote;
 use crate::application::tasks::TaskCounts;
 use crate::domain::{
-    AppError, ConvertMemoryToTaskResult, CreateMemoryInput, CreateReminderInput, CreateTaskInput,
-    EntityId, Memory, MemoryQuery, RecurrenceRule, Reminder, ReminderOccurrence, SearchEntityType,
-    SearchQuery, SearchResults, SnoozePreset, Tag, Task, TaskList, TaskQuery, TodayTasks,
-    UpdateMemoryInput, UpdateReminderInput, UpdateTaskInput,
+    AppError, ClipboardItem, ClipboardQuery, ConvertMemoryToTaskResult, CreateMemoryInput,
+    CreateReminderInput, CreateTaskInput, EntityId, Memory, MemoryQuery, RecurrenceRule, Reminder,
+    ReminderOccurrence, SearchEntityType, SearchQuery, SearchResults, SnoozePreset, Tag, Task,
+    TaskList, TaskQuery, TodayTasks, UpdateMemoryInput, UpdateReminderInput, UpdateTaskInput,
 };
 use crate::infrastructure::db::DbHealth;
 use crate::infrastructure::settings::AppSettings;
 use crate::platform::{detect_capabilities, PlatformCapabilities};
 use serde::Serialize;
 use tauri::{AppHandle, Emitter, State};
+use tauri_plugin_clipboard_manager::ClipboardExt;
 
 #[derive(Debug, Serialize, Clone)]
 #[serde(rename_all = "camelCase")]
@@ -86,6 +87,12 @@ pub fn settings_save(
     state: State<'_, AppState>,
     settings: AppSettings,
 ) -> Result<AppSettings, AppError> {
+    crate::domain::validate_clipboard_settings(&crate::domain::ClipboardCaptureSettings {
+        enabled: settings.clipboard_capture_enabled,
+        retention_days: settings.clipboard_retention_days,
+        max_items: settings.clipboard_max_items,
+        excluded_apps: settings.clipboard_excluded_apps.clone(),
+    })?;
     state.settings.save(&settings)?;
     Ok(settings)
 }
@@ -481,6 +488,158 @@ pub fn search_query(
     query: SearchQuery,
 ) -> Result<SearchResults, AppError> {
     state.search.query(query).map_err(Into::into)
+}
+
+fn emit_clipboard_change(app: &AppHandle, item: &ClipboardItem, change: &str) {
+    let _ = app.emit(
+        "domain://changed",
+        DomainChangeEvent {
+            entity_type: "clipboard".into(),
+            entity_id: item.id.to_string(),
+            change: change.into(),
+            revision: item.revision,
+        },
+    );
+}
+
+#[tauri::command]
+pub fn clipboard_query(
+    state: State<'_, AppState>,
+    query: ClipboardQuery,
+) -> Result<Vec<ClipboardItem>, AppError> {
+    state.clipboard.query(query).map_err(Into::into)
+}
+
+#[tauri::command]
+pub fn clipboard_get(
+    state: State<'_, AppState>,
+    id: EntityId,
+) -> Result<ClipboardItem, AppError> {
+    state.clipboard.get(id).map_err(Into::into)
+}
+
+#[tauri::command]
+pub fn clipboard_set_favorite(
+    app: AppHandle,
+    state: State<'_, AppState>,
+    id: EntityId,
+    favorite: bool,
+) -> Result<ClipboardItem, AppError> {
+    let item = state.clipboard.set_favorite(id, favorite)?;
+    emit_clipboard_change(&app, &item, "updated");
+    Ok(item)
+}
+
+#[tauri::command]
+pub fn clipboard_copy(
+    app: AppHandle,
+    state: State<'_, AppState>,
+    id: EntityId,
+) -> Result<ClipboardItem, AppError> {
+    let item = state.clipboard.get(id)?;
+    state.clipboard.suppress_next(&item.content);
+    app.clipboard()
+        .write_text(item.content.clone())
+        .map_err(|e| AppError::new("clipboard_error", e.to_string()))?;
+    let item = state.clipboard.mark_used(id)?;
+    emit_clipboard_change(&app, &item, "updated");
+    Ok(item)
+}
+
+#[tauri::command]
+pub fn clipboard_delete(
+    app: AppHandle,
+    state: State<'_, AppState>,
+    id: EntityId,
+) -> Result<(), AppError> {
+    state.clipboard.delete(id)?;
+    let _ = app.emit(
+        "domain://changed",
+        DomainChangeEvent {
+            entity_type: "clipboard".into(),
+            entity_id: id.to_string(),
+            change: "deleted".into(),
+            revision: 0,
+        },
+    );
+    Ok(())
+}
+
+#[tauri::command]
+pub fn clipboard_clear_non_favorites(
+    app: AppHandle,
+    state: State<'_, AppState>,
+) -> Result<u64, AppError> {
+    let count = state.clipboard.clear_non_favorites()?;
+    let _ = app.emit(
+        "domain://changed",
+        DomainChangeEvent {
+            entity_type: "clipboard".into(),
+            entity_id: "*".into(),
+            change: "cleared".into(),
+            revision: 0,
+        },
+    );
+    Ok(count)
+}
+
+#[tauri::command]
+pub fn clipboard_convert_to_task(
+    app: AppHandle,
+    state: State<'_, AppState>,
+    id: EntityId,
+) -> Result<EntityId, AppError> {
+    let task_id = state.clipboard.convert_to_task(id)?;
+    let _ = app.emit(
+        "domain://changed",
+        DomainChangeEvent {
+            entity_type: "task".into(),
+            entity_id: task_id.to_string(),
+            change: "created".into(),
+            revision: 0,
+        },
+    );
+    Ok(task_id)
+}
+
+#[tauri::command]
+pub fn clipboard_convert_to_memory(
+    app: AppHandle,
+    state: State<'_, AppState>,
+    id: EntityId,
+) -> Result<EntityId, AppError> {
+    let memory_id = state.clipboard.convert_to_memory(id)?;
+    let _ = app.emit(
+        "domain://changed",
+        DomainChangeEvent {
+            entity_type: "memory".into(),
+            entity_id: memory_id.to_string(),
+            change: "created".into(),
+            revision: 0,
+        },
+    );
+    Ok(memory_id)
+}
+
+#[tauri::command]
+pub fn clipboard_set_capture_enabled(
+    app: AppHandle,
+    state: State<'_, AppState>,
+    enabled: bool,
+) -> Result<AppSettings, AppError> {
+    let mut settings = state.settings.get()?;
+    settings.clipboard_capture_enabled = enabled;
+    state.settings.save(&settings)?;
+    let _ = app.emit(
+        "domain://changed",
+        DomainChangeEvent {
+            entity_type: "settings".into(),
+            entity_id: "clipboard_capture".into(),
+            change: if enabled { "resumed" } else { "paused" }.into(),
+            revision: 0,
+        },
+    );
+    Ok(settings)
 }
 
 #[tauri::command]

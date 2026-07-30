@@ -21,6 +21,9 @@ export type AppSettings = {
   launchAtLogin: boolean;
   shortcuts: ShortcutSettings;
   clipboardCaptureEnabled: boolean;
+  clipboardRetentionDays: number;
+  clipboardMaxItems: number;
+  clipboardExcludedApps: string[];
 };
 
 export type DbHealth = {
@@ -253,7 +256,7 @@ export type MemoryQuery = {
   tagId?: string;
 };
 
-export type SearchEntityType = "task" | "reminder" | "memory";
+export type SearchEntityType = "task" | "reminder" | "memory" | "clipboard";
 
 export type SearchHit = {
   entityType: SearchEntityType;
@@ -267,6 +270,26 @@ export type SearchResults = {
   tasks: SearchHit[];
   reminders: SearchHit[];
   memories: SearchHit[];
+  clipboard: SearchHit[];
+};
+
+export type ClipboardItem = {
+  id: string;
+  content: string;
+  contentHash: string;
+  sourceApp: string | null;
+  favorite: boolean;
+  useCount: number;
+  lastUsedAt: string | null;
+  createdAt: string;
+  updatedAt: string;
+  revision: number;
+};
+
+export type ClipboardQuery = {
+  favoritesOnly?: boolean;
+  search?: string;
+  limit?: number;
 };
 
 export type ConvertMemoryToTaskResult = {
@@ -324,6 +347,21 @@ export const ipc = {
     invoke<SearchResults>("search_query", {
       query: { query, types, limit },
     }),
+  clipboardQuery: (query: ClipboardQuery = {}) =>
+    invoke<ClipboardItem[]>("clipboard_query", { query }),
+  clipboardGet: (id: string) => invoke<ClipboardItem>("clipboard_get", { id }),
+  clipboardSetFavorite: (id: string, favorite: boolean) =>
+    invoke<ClipboardItem>("clipboard_set_favorite", { id, favorite }),
+  clipboardCopy: (id: string) => invoke<ClipboardItem>("clipboard_copy", { id }),
+  clipboardDelete: (id: string) => invoke<void>("clipboard_delete", { id }),
+  clipboardClearNonFavorites: () =>
+    invoke<number>("clipboard_clear_non_favorites"),
+  clipboardConvertToTask: (id: string) =>
+    invoke<string>("clipboard_convert_to_task", { id }),
+  clipboardConvertToMemory: (id: string) =>
+    invoke<string>("clipboard_convert_to_memory", { id }),
+  clipboardSetCaptureEnabled: (enabled: boolean) =>
+    invoke<AppSettings>("clipboard_set_capture_enabled", { enabled }),
   windowShowMain: () => invoke<void>("window_show_main"),
   windowShowQuick: (mode?: "capture" | "search" | "clip") =>
     invoke<void>("window_show_quick", { mode }),

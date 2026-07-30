@@ -24,6 +24,7 @@ const typeLabel: Record<SearchEntityType, string> = {
   task: "任务",
   reminder: "提醒",
   memory: "记忆",
+  clipboard: "剪切板",
 };
 
 export function QuickWindow() {
@@ -40,6 +41,8 @@ export function QuickWindow() {
   const [error, setError] = useState<string | null>(null);
   const [searchText, setSearchText] = useState("");
   const [selectedIndex, setSelectedIndex] = useState(0);
+  const [clipSearch, setClipSearch] = useState("");
+  const [clipIndex, setClipIndex] = useState(0);
   const inputRef = useRef<HTMLInputElement>(null);
 
   useEffect(() => {
@@ -66,17 +69,43 @@ export function QuickWindow() {
     enabled: mode === "search" && searchText.trim().length > 0,
   });
 
+  const clipQuery = useQuery({
+    queryKey: ["clipboard", "quick", clipSearch],
+    queryFn: () =>
+      ipc.clipboardQuery({
+        search: clipSearch.trim() || undefined,
+        limit: 40,
+      }),
+    enabled: mode === "clip",
+  });
+
   const flatResults = useMemo(() => {
     const data = searchQuery.data;
     if (!data) return [] as SearchHit[];
-    return [...data.tasks, ...data.reminders, ...data.memories];
+    return [
+      ...data.tasks,
+      ...data.reminders,
+      ...data.memories,
+      ...data.clipboard,
+    ];
   }, [searchQuery.data]);
+
+  const clipItems = clipQuery.data ?? [];
 
   useEffect(() => {
     setSelectedIndex(0);
   }, [searchText, flatResults.length]);
 
+  useEffect(() => {
+    setClipIndex(0);
+  }, [clipSearch, clipItems.length]);
+
   const openHit = async (hit: SearchHit) => {
+    if (hit.entityType === "clipboard") {
+      await ipc.clipboardCopy(hit.entityId);
+      await ipc.windowHideQuick();
+      return;
+    }
     await ipc.windowShowMain();
     const path =
       hit.entityType === "task"
@@ -85,6 +114,11 @@ export function QuickWindow() {
           ? "/memory"
           : "/today";
     await emit("main://navigate", path);
+    await ipc.windowHideQuick();
+  };
+
+  const reuseClip = async (id: string) => {
+    await ipc.clipboardCopy(id);
     await ipc.windowHideQuick();
   };
 
@@ -286,7 +320,7 @@ export function QuickWindow() {
               ref={inputRef}
               value={searchText}
               onChange={(e) => setSearchText(e.target.value)}
-              placeholder="搜索任务、提醒、记忆…"
+              placeholder="搜索任务、提醒、记忆、剪切板…"
               onKeyDown={(e) => {
                 if (e.key === "Escape") {
                   if (searchText) setSearchText("");
@@ -351,9 +385,82 @@ export function QuickWindow() {
         ) : null}
 
         {mode === "clip" ? (
-          <div className="flex flex-1 items-center justify-center rounded-[var(--radius-panel)] border border-dashed border-border text-[12px] text-muted">
-            剪切板浮层将在阶段 4 接入
-          </div>
+          <>
+            <Input
+              ref={inputRef}
+              value={clipSearch}
+              onChange={(e) => setClipSearch(e.target.value)}
+              placeholder="筛选剪切板历史…"
+              onKeyDown={(e) => {
+                if (e.key === "Escape") {
+                  if (clipSearch) setClipSearch("");
+                  else void ipc.windowHideQuick();
+                }
+                if (e.key === "ArrowDown") {
+                  e.preventDefault();
+                  setClipIndex((i) =>
+                    Math.min(i + 1, Math.max(clipItems.length - 1, 0)),
+                  );
+                }
+                if (e.key === "ArrowUp") {
+                  e.preventDefault();
+                  setClipIndex((i) => Math.max(i - 1, 0));
+                }
+                if (e.key === "Enter" && clipItems[clipIndex]) {
+                  e.preventDefault();
+                  void reuseClip(clipItems[clipIndex].id);
+                }
+              }}
+            />
+            <div className="min-h-0 flex-1 overflow-auto rounded-[var(--radius-panel)] border border-border">
+              {clipQuery.isLoading ? (
+                <div className="p-4 text-[12px] text-muted">加载中…</div>
+              ) : clipItems.length === 0 ? (
+                <div className="p-4 text-center text-[12px] text-muted">
+                  暂无记录。复制文本后会出现在这里。
+                </div>
+              ) : (
+                <ul>
+                  {clipItems.map((item, index) => (
+                    <li key={item.id}>
+                      <button
+                        type="button"
+                        className={cn(
+                          "flex w-full flex-col gap-0.5 border-b border-border px-3 py-2 text-left hover:bg-row-hover",
+                          index === clipIndex && "bg-row-active",
+                        )}
+                        onClick={() => void reuseClip(item.id)}
+                        onMouseEnter={() => setClipIndex(index)}
+                      >
+                        <div className="truncate text-[13px] font-medium">
+                          {item.content.replace(/\s+/g, " ").trim().slice(0, 100)}
+                        </div>
+                        <div className="text-[11px] text-muted">
+                          {item.favorite ? "★ " : ""}
+                          {item.createdAt}
+                          {item.useCount > 0 ? ` · ${item.useCount} 次` : ""}
+                        </div>
+                      </button>
+                    </li>
+                  ))}
+                </ul>
+              )}
+            </div>
+            <div className="flex items-center justify-between text-[11px] text-muted">
+              <span>Enter 再次复制 · Esc 关闭</span>
+              <Button
+                size="sm"
+                variant="ghost"
+                onClick={async () => {
+                  await ipc.windowShowMain();
+                  await emit("main://navigate", "/clipboard");
+                  await ipc.windowHideQuick();
+                }}
+              >
+                打开主窗
+              </Button>
+            </div>
+          </>
         ) : null}
       </div>
     </div>

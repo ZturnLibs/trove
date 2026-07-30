@@ -119,6 +119,7 @@ impl SearchService {
                 tasks: Vec::new(),
                 reminders: Vec::new(),
                 memories: Vec::new(),
+                clipboard: Vec::new(),
             });
         }
         if q.chars().count() > 200 {
@@ -141,12 +142,14 @@ impl SearchService {
                 SearchEntityType::Task,
                 SearchEntityType::Reminder,
                 SearchEntityType::Memory,
+                SearchEntityType::Clipboard,
             ]
         });
 
         let mut tasks = Vec::new();
         let mut reminders = Vec::new();
         let mut memories = Vec::new();
+        let mut clipboard = Vec::new();
         for hit in hits {
             if !allowed.contains(&hit.entity_type) {
                 continue;
@@ -155,12 +158,14 @@ impl SearchService {
                 SearchEntityType::Task => tasks.push(hit),
                 SearchEntityType::Reminder => reminders.push(hit),
                 SearchEntityType::Memory => memories.push(hit),
+                SearchEntityType::Clipboard => clipboard.push(hit),
             }
         }
         Ok(SearchResults {
             tasks,
             reminders,
             memories,
+            clipboard,
         })
     }
 
@@ -236,6 +241,35 @@ impl SearchService {
                 let (id, title, body) = row.map_err(internal)?;
                 let entity_id: EntityId = id.parse().map_err(|e| DomainError::Internal(format!("{e}")))?;
                 self.upsert_conn(&conn, SearchEntityType::Memory, entity_id, &title, &body)?;
+                count += 1;
+            }
+        }
+        {
+            let mut stmt = conn
+                .prepare(
+                    "SELECT id, substr(content, 1, 80), content FROM clipboard_items WHERE deleted_at IS NULL",
+                )
+                .map_err(internal)?;
+            let rows = stmt
+                .query_map([], |row| {
+                    Ok((
+                        row.get::<_, String>(0)?,
+                        row.get::<_, String>(1)?,
+                        row.get::<_, String>(2)?,
+                    ))
+                })
+                .map_err(internal)?;
+            for row in rows {
+                let (id, title, body) = row.map_err(internal)?;
+                let entity_id: EntityId = id.parse().map_err(|e| DomainError::Internal(format!("{e}")))?;
+                let title = title.lines().next().unwrap_or("剪切板").to_string();
+                self.upsert_conn(
+                    &conn,
+                    SearchEntityType::Clipboard,
+                    entity_id,
+                    &title,
+                    &body,
+                )?;
                 count += 1;
             }
         }

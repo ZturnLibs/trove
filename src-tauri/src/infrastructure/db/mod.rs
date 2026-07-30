@@ -7,6 +7,7 @@ const MIGRATIONS: &[(i64, &str)] = &[
     (2, include_str!("../../../migrations/0002_tasks.sql")),
     (3, include_str!("../../../migrations/0003_reminders.sql")),
     (4, include_str!("../../../migrations/0004_memory_search.sql")),
+    (5, include_str!("../../../migrations/0005_clipboard.sql")),
 ];
 
 #[derive(Debug, Error)]
@@ -142,7 +143,7 @@ mod tests {
         let db_path = dir.path().join("workbench.db");
         let db = Database::open(&db_path).unwrap();
         let health = db.health_check().unwrap();
-        assert_eq!(health.schema_version, 4);
+        assert_eq!(health.schema_version, 5);
         assert_eq!(health.journal_mode.to_lowercase(), "wal");
         assert!(health.fts5_available);
     }
@@ -154,6 +155,6 @@ mod tests {
         let db = Database::open(&db_path).unwrap();
         db.migrate().unwrap();
         db.migrate().unwrap();
-        assert_eq!(db.health_check().unwrap().schema_version, 4);
+        assert_eq!(db.health_check().unwrap().schema_version, 5);
     }
 }

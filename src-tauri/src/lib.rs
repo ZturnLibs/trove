@@ -27,23 +27,77 @@ fn resolve_db_path(app: &tauri::AppHandle) -> Result<std::path::PathBuf, String>
 }
 
 fn setup_tray(app: &tauri::AppHandle) -> tauri::Result<()> {
+    let capture_enabled = app
+        .try_state::<AppState>()
+        .and_then(|state| state.settings.get().ok())
+        .map(|s| s.clipboard_capture_enabled)
+        .unwrap_or(true);
+    let pause_label = if capture_enabled {
+        "暂停剪切板记录"
+    } else {
+        "恢复剪切板记录"
+    };
+
     let show_main = MenuItem::with_id(app, "show_main", "打开主窗口", true, None::<&str>)?;
     let quick_capture = MenuItem::with_id(app, "quick_capture", "快速记录", true, None::<&str>)?;
+    let clipboard = MenuItem::with_id(app, "clipboard", "剪切板历史…", true, None::<&str>)?;
+    let toggle_clipboard =
+        MenuItem::with_id(app, "toggle_clipboard", pause_label, true, None::<&str>)?;
     let settings = MenuItem::with_id(app, "settings", "设置", true, None::<&str>)?;
     let quit = MenuItem::with_id(app, "quit", "退出", true, None::<&str>)?;
 
-    let menu = Menu::with_items(app, &[&show_main, &quick_capture, &settings, &quit])?;
+    let menu = Menu::with_items(
+        app,
+        &[
+            &show_main,
+            &quick_capture,
+            &clipboard,
+            &toggle_clipboard,
+            &settings,
+            &quit,
+        ],
+    )?;
 
+    let toggle_item = toggle_clipboard.clone();
     let _tray = TrayIconBuilder::new()
         .icon(app.default_window_icon().unwrap().clone())
         .menu(&menu)
         .show_menu_on_left_click(cfg!(target_os = "macos"))
-        .on_menu_event(|app, event| match event.id.as_ref() {
+        .on_menu_event(move |app, event| match event.id.as_ref() {
             "show_main" => {
                 let _ = commands::window_show_main(app.clone());
             }
             "quick_capture" => {
                 let _ = commands::window_show_quick(app.clone(), Some("capture".into()));
+            }
+            "clipboard" => {
+                let _ = commands::window_show_quick(app.clone(), Some("clip".into()));
+            }
+            "toggle_clipboard" => {
+                if let Some(state) = app.try_state::<AppState>() {
+                    if let Ok(current) = state.settings.get() {
+                        let enabled = !current.clipboard_capture_enabled;
+                        let mut next = current;
+                        next.clipboard_capture_enabled = enabled;
+                        if state.settings.save(&next).is_ok() {
+                            let label = if enabled {
+                                "暂停剪切板记录"
+                            } else {
+                                "恢复剪切板记录"
+                            };
+                            let _ = toggle_item.set_text(label);
+                            let _ = app.emit(
+                                "domain://changed",
+                                serde_json::json!({
+                                    "entityType": "settings",
+                                    "entityId": "clipboard_capture",
+                                    "change": if enabled { "resumed" } else { "paused" },
+                                    "revision": 0,
+                                }),
+                            );
+                        }
+                    }
+                }
             }
             "settings" => {
                 if let Some(window) = app.get_webview_window("main") {
@@ -187,6 +241,7 @@ pub fn run() {
             let state = AppState::new(db)?;
             let _ = state.settings.get();
             let reminders = state.reminders.clone();
+            let clipboard = state.clipboard.clone();
             app.manage(state);
 
             setup_tray(app.handle())?;
@@ -194,6 +249,7 @@ pub fn run() {
             hide_on_close(app.handle(), "main");
             hide_on_close(app.handle(), "quick");
             application::scheduler::start(app.handle().clone(), reminders);
+            application::clipboard_poller::start(app.handle().clone(), clipboard);
 
             Ok(())
         })
@@ -227,6 +283,15 @@ pub fn run() {
             commands::memory_delete,
             commands::memory_convert_to_task,
             commands::search_query,
+            commands::clipboard_query,
+            commands::clipboard_get,
+            commands::clipboard_set_favorite,
+            commands::clipboard_copy,
+            commands::clipboard_delete,
+            commands::clipboard_clear_non_favorites,
+            commands::clipboard_convert_to_task,
+            commands::clipboard_convert_to_memory,
+            commands::clipboard_set_capture_enabled,
             commands::reminder_create,
             commands::reminder_update,
             commands::reminder_delete,

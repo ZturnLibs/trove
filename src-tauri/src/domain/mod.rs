@@ -1,8 +1,10 @@
+mod clipboard;
 mod memory;
 mod recurrence;
 mod reminder;
 mod task;
 
+pub use clipboard::*;
 pub use memory::*;
 pub use recurrence::*;
 pub use reminder::*;

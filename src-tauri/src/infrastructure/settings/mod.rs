@@ -11,6 +11,20 @@ pub struct AppSettings {
     pub launch_at_login: bool,
     pub shortcuts: ShortcutSettings,
     pub clipboard_capture_enabled: bool,
+    #[serde(default = "default_retention_days")]
+    pub clipboard_retention_days: u32,
+    #[serde(default = "default_max_items")]
+    pub clipboard_max_items: u32,
+    #[serde(default = "crate::domain::default_excluded_apps")]
+    pub clipboard_excluded_apps: Vec<String>,
+}
+
+fn default_max_items() -> u32 {
+    500
+}
+
+fn default_retention_days() -> u32 {
+    30
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
@@ -37,6 +51,9 @@ impl Default for AppSettings {
             launch_at_login: false,
             shortcuts: ShortcutSettings::default(),
             clipboard_capture_enabled: true,
+            clipboard_retention_days: 30,
+            clipboard_max_items: 500,
+            clipboard_excluded_apps: crate::domain::default_excluded_apps(),
         }
     }
 }
