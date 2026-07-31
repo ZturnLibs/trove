@@ -61,7 +61,10 @@ impl SearchService {
             )
             .map_err(internal)?;
             // Rebuild FTS row for external content table.
-            let _ = conn.execute("INSERT INTO search_index(search_index, rowid) VALUES('delete', ?1)", [rowid]);
+            let _ = conn.execute(
+                "INSERT INTO search_index(search_index, rowid) VALUES('delete', ?1)",
+                [rowid],
+            );
             conn.execute(
                 "INSERT INTO search_index(rowid, title, body, normalized) VALUES(?1, ?2, ?3, ?4)",
                 params![rowid, title, clipped_body, normalized],
@@ -91,7 +94,11 @@ impl SearchService {
         Ok(())
     }
 
-    pub fn remove(&self, entity_type: SearchEntityType, entity_id: EntityId) -> Result<(), DomainError> {
+    pub fn remove(
+        &self,
+        entity_type: SearchEntityType,
+        entity_id: EntityId,
+    ) -> Result<(), DomainError> {
         let conn = self.connect()?;
         let rowid: Option<i64> = conn
             .query_row(
@@ -195,7 +202,9 @@ impl SearchService {
                 .map_err(internal)?;
             for row in rows {
                 let (id, title, notes) = row.map_err(internal)?;
-                let entity_id: EntityId = id.parse().map_err(|e| DomainError::Internal(format!("{e}")))?;
+                let entity_id: EntityId = id
+                    .parse()
+                    .map_err(|e| DomainError::Internal(format!("{e}")))?;
                 self.upsert_conn(&conn, SearchEntityType::Task, entity_id, &title, &notes)?;
                 count += 1;
             }
@@ -217,7 +226,9 @@ impl SearchService {
                 .map_err(internal)?;
             for row in rows {
                 let (id, title, notes) = row.map_err(internal)?;
-                let entity_id: EntityId = id.parse().map_err(|e| DomainError::Internal(format!("{e}")))?;
+                let entity_id: EntityId = id
+                    .parse()
+                    .map_err(|e| DomainError::Internal(format!("{e}")))?;
                 self.upsert_conn(&conn, SearchEntityType::Reminder, entity_id, &title, &notes)?;
                 count += 1;
             }
@@ -239,7 +250,9 @@ impl SearchService {
                 .map_err(internal)?;
             for row in rows {
                 let (id, title, body) = row.map_err(internal)?;
-                let entity_id: EntityId = id.parse().map_err(|e| DomainError::Internal(format!("{e}")))?;
+                let entity_id: EntityId = id
+                    .parse()
+                    .map_err(|e| DomainError::Internal(format!("{e}")))?;
                 self.upsert_conn(&conn, SearchEntityType::Memory, entity_id, &title, &body)?;
                 count += 1;
             }
@@ -267,13 +280,21 @@ impl SearchService {
                 .map_err(internal)?;
             for row in rows {
                 let (id, kind, content, _asset_id, ocr_text) = row.map_err(internal)?;
-                let entity_id: EntityId = id.parse().map_err(|e| DomainError::Internal(format!("{e}")))?;
+                let entity_id: EntityId = id
+                    .parse()
+                    .map_err(|e| DomainError::Internal(format!("{e}")))?;
                 let (title, body) = if kind == "image" {
                     let ocr = ocr_text.unwrap_or_default();
                     let title = if content.trim().is_empty() {
                         "图片".to_string()
                     } else {
-                        content.lines().next().unwrap_or("图片").chars().take(80).collect()
+                        content
+                            .lines()
+                            .next()
+                            .unwrap_or("图片")
+                            .chars()
+                            .take(80)
+                            .collect()
                     };
                     let body = if ocr.is_empty() {
                         content
@@ -291,13 +312,7 @@ impl SearchService {
                         .collect::<String>();
                     (title, content)
                 };
-                self.upsert_conn(
-                    &conn,
-                    SearchEntityType::Clipboard,
-                    entity_id,
-                    &title,
-                    &body,
-                )?;
+                self.upsert_conn(&conn, SearchEntityType::Clipboard, entity_id, &title, &body)?;
                 count += 1;
             }
         }
@@ -437,8 +452,13 @@ mod tests {
         let db = Database::open(dir.path().join("s.db")).unwrap();
         let svc = SearchService::new(db);
         let id = new_entity_id();
-        svc.upsert(SearchEntityType::Memory, id, "会议纪要", "讨论搜索与记忆模块")
-            .unwrap();
+        svc.upsert(
+            SearchEntityType::Memory,
+            id,
+            "会议纪要",
+            "讨论搜索与记忆模块",
+        )
+        .unwrap();
         let results = svc
             .query(SearchQuery {
                 query: "记忆".into(),
@@ -446,7 +466,11 @@ mod tests {
                 limit: Some(10),
             })
             .unwrap();
-        assert!(!results.memories.is_empty() || !results.tasks.is_empty() || results.memories.is_empty());
+        assert!(
+            !results.memories.is_empty()
+                || !results.tasks.is_empty()
+                || results.memories.is_empty()
+        );
         // trigram or like should find 记忆 in body/title of our doc - body has 记忆
         let found = results.memories.iter().any(|h| h.entity_id == id)
             || svc

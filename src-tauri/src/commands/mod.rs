@@ -4,14 +4,15 @@ use crate::application::data_port::ImportResult;
 use crate::application::smoke_notes::SmokeNote;
 use crate::application::tasks::TaskCounts;
 use crate::application::templates::{
-    CreateTemplateInput, ItemTemplate, TemplatePreview, TemplateKind,
+    CreateTemplateInput, ItemTemplate, TemplateKind, TemplatePreview,
 };
 use crate::domain::{
-    parse_capture, AppError, ClipboardItem, ClipboardKind, ClipboardQuery, ConvertMemoryToTaskResult,
-    CreateMemoryInput, CreateReminderInput, CreateTaskInput, EntityId, Memory, MemoryQuery,
-    ParsedCapture, RecurrenceRule, Reminder, ReminderOccurrence, SearchEntityType, SearchQuery,
-    SearchResults, SmartListKind, SnoozePreset, Tag, Task, TaskList, TaskQuery, TodayTasks,
-    UpdateMemoryInput, UpdateReminderInput, UpdateTaskInput,
+    parse_capture, AppError, ClipboardItem, ClipboardKind, ClipboardQuery,
+    ConvertMemoryToTaskResult, CreateMemoryInput, CreateReminderInput, CreateTaskInput, EntityId,
+    EntityLink, LinkInput, Memory, MemoryQuery, ParsedCapture, RecurrenceRule, Reminder,
+    ReminderOccurrence, SearchEntityType, SearchQuery, SearchResults, SmartListKind, SnoozePreset,
+    Tag, Task, TaskList, TaskQuery, TodayTasks, UpdateMemoryInput, UpdateReminderInput,
+    UpdateTaskInput,
 };
 use crate::infrastructure::db::DbHealth;
 use crate::infrastructure::settings::{AppSettings, ShortcutSettings};
@@ -53,12 +54,9 @@ fn emit_task_change(app: &AppHandle, task: &Task, change: &str) {
 }
 
 fn index_task(state: &AppState, task: &Task) {
-    let _ = state.search.upsert(
-        SearchEntityType::Task,
-        task.id,
-        &task.title,
-        &task.notes,
-    );
+    let _ = state
+        .search
+        .upsert(SearchEntityType::Task, task.id, &task.title, &task.notes);
 }
 
 fn index_reminder(state: &AppState, reminder: &Reminder) {
@@ -158,10 +156,7 @@ pub fn shortcuts_apply(app: AppHandle) -> Result<crate::shortcuts::ShortcutApply
 }
 
 #[tauri::command]
-pub fn smoke_note_create(
-    state: State<'_, AppState>,
-    body: String,
-) -> Result<SmokeNote, AppError> {
+pub fn smoke_note_create(state: State<'_, AppState>, body: String) -> Result<SmokeNote, AppError> {
     state.smoke_notes.create(body).map_err(Into::into)
 }
 
@@ -401,6 +396,7 @@ pub fn task_delete(
 ) -> Result<(), AppError> {
     state.tasks.delete_task(id)?;
     let _ = state.search.remove(SearchEntityType::Task, id);
+    let _ = state.links.purge_for_source("task", id);
     let _ = app.emit(
         "domain://changed",
         DomainChangeEvent {
@@ -605,6 +601,8 @@ pub fn memory_delete(
     id: EntityId,
 ) -> Result<(), AppError> {
     state.memories.delete(id)?;
+    let _ = state.search.remove(SearchEntityType::Memory, id);
+    let _ = state.links.purge_for_source("memory", id);
     let _ = app.emit(
         "domain://changed",
         DomainChangeEvent {
@@ -645,6 +643,85 @@ pub fn memory_convert_to_task(
     Ok(result)
 }
 
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct LinkedAsset {
+    pub link_id: EntityId,
+    pub asset_id: EntityId,
+    pub content_hash: String,
+    pub byte_size: i64,
+    pub width: Option<i64>,
+    pub height: Option<i64>,
+    pub thumb_base64: Option<String>,
+    pub created_at: String,
+}
+
+#[tauri::command]
+pub fn entity_link_create(
+    state: State<'_, AppState>,
+    input: LinkInput,
+) -> Result<EntityLink, AppError> {
+    state
+        .links
+        .link(
+            &input.source_type,
+            input.source_id,
+            &input.target_type,
+            input.target_id,
+            &input.link_kind,
+        )
+        .map_err(Into::into)
+}
+
+#[tauri::command]
+pub fn entity_link_remove(state: State<'_, AppState>, id: EntityId) -> Result<(), AppError> {
+    state.links.unlink(id).map_err(Into::into)
+}
+
+#[tauri::command]
+pub fn entity_link_list(
+    state: State<'_, AppState>,
+    entity_type: String,
+    entity_id: EntityId,
+) -> Result<Vec<EntityLink>, AppError> {
+    state
+        .links
+        .list_outgoing(&entity_type, entity_id)
+        .map_err(Into::into)
+}
+
+#[tauri::command]
+pub fn entity_link_assets(
+    state: State<'_, AppState>,
+    entity_type: String,
+    entity_id: EntityId,
+) -> Result<Vec<LinkedAsset>, AppError> {
+    let links = state.links.list_outgoing(&entity_type, entity_id)?;
+    let assets = state.clipboard.assets();
+    let mut out = Vec::new();
+    for link in links {
+        if link.target_type != "asset" {
+            continue;
+        }
+        let Ok(asset) = assets.get(link.target_id) else {
+            continue;
+        };
+        let thumb = assets.thumb_base64(&asset)?;
+        out.push(LinkedAsset {
+            link_id: link.id,
+            asset_id: asset.id,
+            content_hash: asset.content_hash,
+            byte_size: asset.byte_size,
+            width: asset.width,
+            height: asset.height,
+            thumb_base64: thumb,
+            created_at: asset.created_at,
+        });
+    }
+    out.sort_by(|a, b| a.created_at.cmp(&b.created_at));
+    Ok(out)
+}
+
 #[tauri::command]
 pub fn search_query(
     state: State<'_, AppState>,
@@ -674,10 +751,7 @@ pub fn clipboard_query(
 }
 
 #[tauri::command]
-pub fn clipboard_get(
-    state: State<'_, AppState>,
-    id: EntityId,
-) -> Result<ClipboardItem, AppError> {
+pub fn clipboard_get(state: State<'_, AppState>, id: EntityId) -> Result<ClipboardItem, AppError> {
     state.clipboard.get(id).map_err(Into::into)
 }
 
@@ -831,10 +905,7 @@ pub fn clipboard_set_capture_enabled(
 }
 
 #[tauri::command]
-pub fn backup_create(
-    app: AppHandle,
-    state: State<'_, AppState>,
-) -> Result<BackupInfo, AppError> {
+pub fn backup_create(app: AppHandle, state: State<'_, AppState>) -> Result<BackupInfo, AppError> {
     let info = state.backups.create("manual")?;
     let settings = state.settings.get()?;
     let _ = state
@@ -927,10 +998,7 @@ pub fn window_show_main(app: tauri::AppHandle) -> Result<(), AppError> {
 }
 
 #[tauri::command]
-pub fn window_show_quick(
-    app: tauri::AppHandle,
-    mode: Option<String>,
-) -> Result<(), AppError> {
+pub fn window_show_quick(app: tauri::AppHandle, mode: Option<String>) -> Result<(), AppError> {
     use tauri::Manager;
 
     if let Some(window) = app.get_webview_window("quick") {

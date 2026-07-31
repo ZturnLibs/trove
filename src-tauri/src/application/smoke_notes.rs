@@ -1,4 +1,6 @@
-use crate::domain::{format_utc, new_entity_id, Clock, DomainError, EntityId, Revision, SystemClock};
+use crate::domain::{
+    format_utc, new_entity_id, Clock, DomainError, EntityId, Revision, SystemClock,
+};
 use crate::infrastructure::db::Database;
 use rusqlite::OptionalExtension;
 use serde::{Deserialize, Serialize};

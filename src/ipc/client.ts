@@ -383,6 +383,42 @@ export type ConvertMemoryToTaskResult = {
   taskId: string;
 };
 
+export type LinkEntityType =
+  | "task"
+  | "reminder"
+  | "memory"
+  | "clipboard"
+  | "asset";
+
+export type EntityLink = {
+  id: string;
+  sourceType: string;
+  sourceId: string;
+  targetType: string;
+  targetId: string;
+  linkKind: string;
+  createdAt: string;
+};
+
+export type LinkInput = {
+  sourceType: LinkEntityType;
+  sourceId: string;
+  targetType: LinkEntityType;
+  targetId: string;
+  linkKind: "attachment" | "converted_to";
+};
+
+export type LinkedAsset = {
+  linkId: string;
+  assetId: string;
+  contentHash: string;
+  byteSize: number;
+  width: number | null;
+  height: number | null;
+  thumbBase64: string | null;
+  createdAt: string;
+};
+
 export const ipc = {
   appHealth: () => invoke<AppHealth>("app_health"),
   settingsGet: () => invoke<AppSettings>("settings_get"),
@@ -450,6 +486,14 @@ export const ipc = {
   memoryDelete: (id: string) => invoke<void>("memory_delete", { id }),
   memoryConvertToTask: (id: string) =>
     invoke<ConvertMemoryToTaskResult>("memory_convert_to_task", { id }),
+  entityLinkCreate: (input: LinkInput) =>
+    invoke<EntityLink>("entity_link_create", { input }),
+  entityLinkRemove: (id: string) =>
+    invoke<void>("entity_link_remove", { id }),
+  entityLinkList: (entityType: string, entityId: string) =>
+    invoke<EntityLink[]>("entity_link_list", { entityType, entityId }),
+  entityLinkAssets: (entityType: string, entityId: string) =>
+    invoke<LinkedAsset[]>("entity_link_assets", { entityType, entityId }),
   searchQuery: (query: string, types?: SearchEntityType[], limit?: number) =>
     invoke<SearchResults>("search_query", {
       query: { query, types, limit },

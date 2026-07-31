@@ -112,9 +112,7 @@ impl TemplateService {
                  ORDER BY updated_at DESC",
             )
             .map_err(internal)?;
-        let rows = stmt
-            .query_map([], map_template)
-            .map_err(internal)?;
+        let rows = stmt.query_map([], map_template).map_err(internal)?;
         let mut out = Vec::new();
         for row in rows {
             out.push(row.map_err(internal)?);
@@ -240,7 +238,11 @@ fn resolve_preview(template: &ItemTemplate) -> Result<TemplatePreview, DomainErr
 
     let today = chrono::Local::now().date_naive();
     let due_date = match payload.get("relativeDueDays").and_then(|v| v.as_i64()) {
-        Some(days) => Some((today + chrono::Duration::days(days)).format("%Y-%m-%d").to_string()),
+        Some(days) => Some(
+            (today + chrono::Duration::days(days))
+                .format("%Y-%m-%d")
+                .to_string(),
+        ),
         None => payload
             .get("dueDate")
             .and_then(|v| v.as_str())
@@ -285,7 +287,8 @@ fn map_template(row: &rusqlite::Row<'_>) -> Result<ItemTemplate, rusqlite::Error
         rusqlite::Error::FromSqlConversionFailure(1, rusqlite::types::Type::Text, Box::new(e))
     })?;
     let payload_raw: String = row.get(3)?;
-    let payload: Value = serde_json::from_str(&payload_raw).unwrap_or(Value::Object(Default::default()));
+    let payload: Value =
+        serde_json::from_str(&payload_raw).unwrap_or(Value::Object(Default::default()));
     Ok(ItemTemplate {
         id: row.get::<_, String>(0)?.parse().map_err(|e| {
             rusqlite::Error::FromSqlConversionFailure(0, rusqlite::types::Type::Text, Box::new(e))

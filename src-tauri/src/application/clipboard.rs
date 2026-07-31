@@ -1,10 +1,11 @@
 use crate::application::assets::AssetStore;
+use crate::application::links::EntityLinkService;
 use crate::application::memories::MemoryService;
 use crate::application::search::SearchService;
 use crate::application::tasks::TaskService;
 use crate::domain::{
-    new_id, stamp, ClipboardItem, ClipboardKind, ClipboardQuery, CreateMemoryInput, CreateTaskInput,
-    DomainError, EntityId, SearchEntityType, SystemClock,
+    new_id, stamp, ClipboardItem, ClipboardKind, ClipboardQuery, CreateMemoryInput,
+    CreateTaskInput, DomainError, EntityId, SearchEntityType, SystemClock,
 };
 use crate::infrastructure::db::Database;
 use crate::infrastructure::settings::SettingsService;
@@ -23,6 +24,7 @@ pub struct ClipboardService {
     memories: MemoryService,
     settings: SettingsService,
     assets: AssetStore,
+    links: EntityLinkService,
     suppress_until: Mutex<Option<(String, Instant)>>,
 }
 
@@ -40,6 +42,7 @@ impl ClipboardService {
             memories: MemoryService::new(db.clone()),
             settings: SettingsService::new(db.clone()),
             assets: AssetStore::new(db.clone(), assets_root),
+            links: EntityLinkService::new(db.clone()),
             db,
             clock: SystemClock,
             suppress_until: Mutex::new(None),
@@ -85,7 +88,10 @@ impl ClipboardService {
         }
     }
 
-    fn excluded(source_app: &Option<String>, settings: &crate::infrastructure::settings::AppSettings) -> bool {
+    fn excluded(
+        source_app: &Option<String>,
+        settings: &crate::infrastructure::settings::AppSettings,
+    ) -> bool {
         let Some(ref app) = source_app else {
             return false;
         };
@@ -229,7 +235,13 @@ impl ClipboardService {
         let summary = if ocr.text.trim().is_empty() {
             format!("图片 {width}×{height}")
         } else {
-            ocr.text.lines().next().unwrap_or("图片").chars().take(80).collect()
+            ocr.text
+                .lines()
+                .next()
+                .unwrap_or("图片")
+                .chars()
+                .take(80)
+                .collect()
         };
         conn.execute(
             "INSERT INTO clipboard_items (
@@ -446,7 +458,8 @@ impl ClipboardService {
         let now = stamp(&self.clock);
         let conn = self.connect()?;
         conn.execute(
-            "UPDATE clipboard_items SET deleted_at = ?1, updated_at = ?1, revision = revision + 1 WHERE id = ?2",
+            "UPDATE clipboard_items SET deleted_at = ?1, updated_at = ?1, revision = revision + 1,
+                    asset_id = NULL WHERE id = ?2",
             params![now, id.to_string()],
         )
         .map_err(internal)?;
@@ -459,16 +472,15 @@ impl ClipboardService {
         let conn = self.connect()?;
         let ids: Vec<String> = {
             let mut stmt = conn
-                .prepare(
-                    "SELECT id FROM clipboard_items WHERE deleted_at IS NULL AND favorite = 0",
-                )
+                .prepare("SELECT id FROM clipboard_items WHERE deleted_at IS NULL AND favorite = 0")
                 .map_err(internal)?;
             let rows = stmt.query_map([], |row| row.get(0)).map_err(internal)?;
             collect(rows)?
         };
         let count = ids.len() as u64;
         conn.execute(
-            "UPDATE clipboard_items SET deleted_at = ?1, updated_at = ?1, revision = revision + 1
+            "UPDATE clipboard_items SET deleted_at = ?1, updated_at = ?1, revision = revision + 1,
+                    asset_id = NULL
              WHERE deleted_at IS NULL AND favorite = 0",
             params![now],
         )
@@ -551,33 +563,17 @@ impl ClipboardService {
         })?;
 
         if let Some(asset_id) = item.asset_id {
-            let now = stamp(&self.clock);
-            let conn = self.connect()?;
-            conn.execute(
-                "INSERT INTO entity_links (id, source_type, source_id, target_type, target_id, link_kind, created_at)
-                 VALUES (?1, 'memory', ?2, 'asset', ?3, 'attachment', ?4)",
-                params![
-                    new_id().to_string(),
-                    memory.id.to_string(),
-                    asset_id.to_string(),
-                    now
-                ],
-            )
-            .map_err(internal)?;
+            self.links
+                .link("memory", memory.id, "asset", asset_id, "attachment")?;
         }
         Ok(memory.id)
     }
 
-    fn is_asset_linked(&self, conn: &Connection, asset_id: &str) -> Result<bool, DomainError> {
-        let count: i64 = conn
-            .query_row(
-                "SELECT COUNT(*) FROM entity_links
-                 WHERE target_type = 'asset' AND target_id = ?1",
-                [asset_id],
-                |row| row.get(0),
-            )
-            .map_err(internal)?;
-        Ok(count > 0)
+    fn is_asset_linked(&self, asset_id: &str) -> Result<bool, DomainError> {
+        asset_id
+            .parse()
+            .map_err(|e| DomainError::Internal(format!("{e}")))
+            .and_then(|id: EntityId| self.links.is_referenced("asset", id))
     }
 
     pub fn enforce_limits(&self) -> Result<(), DomainError> {
@@ -604,12 +600,13 @@ impl ClipboardService {
         };
         for (id, asset_id) in candidates {
             if let Some(ref aid) = asset_id {
-                if self.is_asset_linked(&conn, aid)? {
+                if self.is_asset_linked(aid)? {
                     continue;
                 }
             }
             conn.execute(
-                "UPDATE clipboard_items SET deleted_at = ?1, updated_at = ?1, revision = revision + 1 WHERE id = ?2",
+                "UPDATE clipboard_items SET deleted_at = ?1, updated_at = ?1, revision = revision + 1,
+                        asset_id = NULL WHERE id = ?2",
                 params![now, id],
             )
             .map_err(internal)?;
@@ -648,12 +645,13 @@ impl ClipboardService {
                     break;
                 }
                 if let Some(ref aid) = asset_id {
-                    if self.is_asset_linked(&conn, aid)? {
+                    if self.is_asset_linked(aid)? {
                         continue;
                     }
                 }
                 conn.execute(
-                    "UPDATE clipboard_items SET deleted_at = ?1, updated_at = ?1, revision = revision + 1 WHERE id = ?2",
+                    "UPDATE clipboard_items SET deleted_at = ?1, updated_at = ?1, revision = revision + 1,
+                            asset_id = NULL WHERE id = ?2",
                     params![now, id],
                 )
                 .map_err(internal)?;
@@ -663,6 +661,9 @@ impl ClipboardService {
                 removed += 1;
             }
         }
+        let _ = self
+            .assets
+            .collect_garbage(settings.clipboard_retention_days);
         Ok(())
     }
 }
@@ -750,15 +751,11 @@ mod tests {
     fn image_dedupe_and_linked_survives_expire() {
         let dir = tempdir().unwrap();
         let svc = svc(dir.path());
-        let rgba = vec![10u8, 20, 30, 255, 40, 50, 60, 255, 70, 80, 90, 255, 100, 110, 120, 255];
-        let a = svc
-            .capture_image(2, 2, &rgba, None)
-            .unwrap()
-            .unwrap();
-        let b = svc
-            .capture_image(2, 2, &rgba, None)
-            .unwrap()
-            .unwrap();
+        let rgba = vec![
+            10u8, 20, 30, 255, 40, 50, 60, 255, 70, 80, 90, 255, 100, 110, 120, 255,
+        ];
+        let a = svc.capture_image(2, 2, &rgba, None).unwrap().unwrap();
+        let b = svc.capture_image(2, 2, &rgba, None).unwrap().unwrap();
         assert_eq!(a.id, b.id);
         assert_eq!(a.kind, ClipboardKind::Image);
         assert!(a.asset_id.is_some());
@@ -781,5 +778,49 @@ mod tests {
         svc.enforce_limits().unwrap();
         // Linked image clipboard row should still exist.
         assert!(svc.get(a.id).is_ok());
+        // The attachment link is present and protects the asset.
+        assert!(svc
+            .links
+            .is_referenced("asset", a.asset_id.unwrap())
+            .unwrap());
+    }
+
+    #[test]
+    fn soft_deleted_unlinked_image_is_reclaimed_by_gc() {
+        let dir = tempdir().unwrap();
+        let svc = svc(dir.path());
+        let rgba = vec![
+            200u8, 30, 30, 255, 40, 250, 60, 255, 70, 80, 190, 255, 100, 110, 120, 255,
+        ];
+        let a = svc.capture_image(2, 2, &rgba, None).unwrap().unwrap();
+        let asset_id = a.asset_id.unwrap();
+        let asset = svc.assets().get(asset_id).unwrap();
+        let file = svc.assets().absolute_path(&asset);
+        assert!(file.exists());
+
+        // Soft delete the clipboard row; asset_id is detached.
+        svc.delete(a.id).unwrap();
+        {
+            let conn = svc.connect().unwrap();
+            let asset_id_str = asset_id.to_string();
+            conn.execute(
+                "UPDATE assets SET created_at = '2000-01-01T00:00:00' WHERE id = ?1",
+                [asset_id_str],
+            )
+            .unwrap();
+            let retained: bool = conn
+                .query_row(
+                    "SELECT asset_id IS NOT NULL FROM clipboard_items WHERE id = ?1",
+                    [a.id.to_string()],
+                    |row| row.get(0),
+                )
+                .unwrap();
+            assert!(!retained);
+        }
+
+        svc.enforce_limits().unwrap();
+
+        assert!(svc.assets().get(asset_id).is_err());
+        assert!(!file.exists());
     }
 }

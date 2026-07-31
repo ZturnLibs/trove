@@ -2,6 +2,7 @@ import { useEffect, useMemo, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Pin } from "lucide-react";
 import { EmptyState } from "@/components/PageScaffold";
+import { AttachmentsSection } from "@/design-system/patterns/AttachmentsSection";
 import { Button } from "@/design-system/primitives/Button";
 import { Input } from "@/design-system/primitives/Input";
 import {
@@ -84,6 +85,12 @@ function MemoryDetail({
       void queryClient.invalidateQueries({ queryKey: ["tasks"] });
       alert("已转为任务，原记忆已保留");
     },
+  });
+
+  const linksQuery = useQuery({
+    queryKey: ["links", "memory", memory?.id],
+    queryFn: () => ipc.entityLinkList("memory", memory!.id),
+    enabled: !!memory,
   });
 
   if (!memory || !draft) {
@@ -171,6 +178,8 @@ function MemoryDetail({
             placeholder="支持基础 Markdown 文本…"
           />
         )}
+
+        <AttachmentsSection entityType="memory" entityId={memory.id} />
       </div>
       <div className="flex items-center justify-between gap-2 border-t border-border p-3">
         <div className="flex gap-1">
@@ -202,7 +211,12 @@ function MemoryDetail({
             size="sm"
             variant="ghost"
             onClick={() => {
-              if (confirm("确认删除此记忆？")) deleteMutation.mutate();
+              const count = (linksQuery.data ?? []).length;
+              const message =
+                count > 0
+                  ? `确认删除此记忆？\n将移除 ${count} 个关联资源；资源文件按保留规则保留。`
+                  : "确认删除此记忆？";
+              if (confirm(message)) deleteMutation.mutate();
             }}
           >
             删除

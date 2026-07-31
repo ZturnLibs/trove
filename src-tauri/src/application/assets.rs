@@ -51,13 +51,16 @@ impl AssetStore {
         if width == 0 || height == 0 {
             return Err(DomainError::Validation("无效图片尺寸".into()));
         }
-        let expected = (width as usize).saturating_mul(height as usize).saturating_mul(4);
+        let expected = (width as usize)
+            .saturating_mul(height as usize)
+            .saturating_mul(4);
         if rgba.len() < expected {
             return Err(DomainError::Validation("图片像素数据不完整".into()));
         }
 
-        let img: RgbaImage = ImageBuffer::<Rgba<u8>, _>::from_raw(width, height, rgba[..expected].to_vec())
-            .ok_or_else(|| DomainError::Internal("无法构建图片缓冲".into()))?;
+        let img: RgbaImage =
+            ImageBuffer::<Rgba<u8>, _>::from_raw(width, height, rgba[..expected].to_vec())
+                .ok_or_else(|| DomainError::Internal("无法构建图片缓冲".into()))?;
 
         let mut png_bytes = Vec::new();
         {
@@ -182,6 +185,60 @@ impl AssetStore {
             base64::Engine::encode(&base64::engine::general_purpose::STANDARD, bytes)
         )))
     }
+
+    pub fn collect_garbage(&self, retention_days: u32) -> Result<GcSummary, DomainError> {
+        let cutoff = (chrono::Local::now() - chrono::Duration::days(retention_days as i64))
+            .format("%Y-%m-%dT%H:%M:%S")
+            .to_string();
+        let conn = self.connect()?;
+        let candidates: Vec<(String, String, Option<String>, i64)> = {
+            let mut stmt = conn
+                .prepare(
+                    "SELECT a.id, a.relative_path, a.thumb_path, a.byte_size FROM assets a
+                     WHERE a.deleted_at IS NULL
+                       AND a.created_at < ?1
+                       AND NOT EXISTS (SELECT 1 FROM entity_links el
+                                       WHERE el.target_type = 'asset' AND el.target_id = a.id)
+                       AND NOT EXISTS (SELECT 1 FROM clipboard_items ci
+                                       WHERE ci.asset_id = a.id)",
+                )
+                .map_err(internal)?;
+            let rows = stmt
+                .query_map([&cutoff], |row| {
+                    Ok((row.get(0)?, row.get(1)?, row.get(2)?, row.get(3)?))
+                })
+                .map_err(internal)?;
+            let mut out = Vec::new();
+            for row in rows {
+                out.push(row.map_err(internal)?);
+            }
+            out
+        };
+
+        let mut removed = 0usize;
+        let mut freed_bytes = 0i64;
+        for (id, rel, thumb_rel, byte_size) in candidates {
+            conn.execute("DELETE FROM assets WHERE id = ?1", [&id])
+                .map_err(internal)?;
+            let _ = std::fs::remove_file(self.root.join(&rel));
+            if let Some(thumb_rel) = thumb_rel {
+                let _ = std::fs::remove_file(self.root.join(&thumb_rel));
+            }
+            removed += 1;
+            freed_bytes += byte_size;
+        }
+        Ok(GcSummary {
+            removed,
+            freed_bytes,
+        })
+    }
+}
+
+#[derive(Debug, Clone, Default, serde::Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct GcSummary {
+    pub removed: usize,
+    pub freed_bytes: i64,
 }
 
 fn resize_thumb(img: &RgbaImage) -> RgbaImage {
@@ -228,15 +285,106 @@ mod tests {
     use super::*;
     use tempfile::tempdir;
 
+    fn store(dir: &std::path::Path) -> AssetStore {
+        let db = Database::open(dir.join("a.db")).unwrap();
+        AssetStore::new(db, dir.join("assets"))
+    }
+
+    fn rgba() -> Vec<u8> {
+        vec![
+            255u8, 0, 0, 255, 0, 255, 0, 255, 0, 0, 255, 255, 255, 255, 0, 255,
+        ]
+    }
+
+    fn age_asset(db_path: &std::path::Path, asset_id: &str) {
+        let db = Database::open(db_path).unwrap();
+        let conn = db.connect().unwrap();
+        conn.execute(
+            "UPDATE assets SET created_at = '2000-01-01T00:00:00' WHERE id = ?1",
+            [asset_id],
+        )
+        .unwrap();
+    }
+
     #[test]
     fn dedupes_identical_png() {
         let dir = tempdir().unwrap();
-        let db = Database::open(dir.path().join("a.db")).unwrap();
-        let store = AssetStore::new(db, dir.path().join("assets"));
-        let rgba = vec![255u8, 0, 0, 255, 0, 255, 0, 255, 0, 0, 255, 255, 255, 255, 0, 255];
-        let a = store.store_rgba_image(2, 2, &rgba).unwrap();
-        let b = store.store_rgba_image(2, 2, &rgba).unwrap();
+        let store = store(dir.path());
+        let a = store.store_rgba_image(2, 2, &rgba()).unwrap();
+        let b = store.store_rgba_image(2, 2, &rgba()).unwrap();
         assert_eq!(a.asset.id, b.asset.id);
         assert!(store.absolute_path(&a.asset).exists());
+    }
+
+    #[test]
+    fn gc_removes_orphan_asset_past_retention() {
+        let dir = tempdir().unwrap();
+        let store = store(dir.path());
+        let a = store.store_rgba_image(2, 2, &rgba()).unwrap();
+        age_asset(&dir.path().join("a.db"), &a.asset.id.to_string());
+        let abs = store.absolute_path(&a.asset);
+        assert!(abs.exists());
+
+        let summary = store.collect_garbage(30).unwrap();
+        assert_eq!(summary.removed, 1);
+        assert!(summary.freed_bytes > 0);
+        assert!(store.get(a.asset.id).is_err());
+        assert!(!abs.exists());
+    }
+
+    #[test]
+    fn gc_keeps_asset_within_retention() {
+        let dir = tempdir().unwrap();
+        let store = store(dir.path());
+        let a = store.store_rgba_image(2, 2, &rgba()).unwrap();
+        let summary = store.collect_garbage(30).unwrap();
+        assert_eq!(summary.removed, 0);
+        assert!(store.get(a.asset.id).is_ok());
+    }
+
+    #[test]
+    fn gc_keeps_asset_referenced_by_entity_link() {
+        let dir = tempdir().unwrap();
+        let store = store(dir.path());
+        let a = store.store_rgba_image(2, 2, &rgba()).unwrap();
+        age_asset(&dir.path().join("a.db"), &a.asset.id.to_string());
+
+        let db = Database::open(dir.path().join("a.db")).unwrap();
+        let conn = db.connect().unwrap();
+        conn.execute(
+            "INSERT INTO entity_links
+                (id, source_type, source_id, target_type, target_id, link_kind, created_at)
+             VALUES ('l1', 'memory', 'm1', 'asset', ?1, 'attachment', '2026-01-01T00:00:00')",
+            [a.asset.id.to_string()],
+        )
+        .unwrap();
+
+        let summary = store.collect_garbage(30).unwrap();
+        assert_eq!(summary.removed, 0);
+        assert!(store.get(a.asset.id).is_ok());
+    }
+
+    #[test]
+    fn gc_keeps_asset_referenced_by_active_clipboard_item() {
+        let dir = tempdir().unwrap();
+        let store = store(dir.path());
+        let a = store.store_rgba_image(2, 2, &rgba()).unwrap();
+        age_asset(&dir.path().join("a.db"), &a.asset.id.to_string());
+
+        let db = Database::open(dir.path().join("a.db")).unwrap();
+        let conn = db.connect().unwrap();
+        conn.execute(
+            "INSERT INTO clipboard_items
+                (id, content, content_hash, source_app, favorite, use_count, last_used_at,
+                 created_at, updated_at, revision, deleted_at, kind, asset_id)
+             VALUES ('c1', '[图片]', 'h', NULL, 0, 0, NULL,
+                     '2026-01-01T00:00:00', '2026-01-01T00:00:00', 1, NULL, 'image', ?1)",
+            [a.asset.id.to_string()],
+        )
+        .unwrap();
+
+        let summary = store.collect_garbage(30).unwrap();
+        assert_eq!(summary.removed, 0);
+        assert!(store.get(a.asset.id).is_ok());
     }
 }

@@ -1,6 +1,7 @@
 use crate::application::backup::BackupService;
 use crate::application::clipboard::ClipboardService;
 use crate::application::data_port::DataPortService;
+use crate::application::links::EntityLinkService;
 use crate::application::memories::MemoryService;
 use crate::application::reminders::ReminderService;
 use crate::application::search::SearchService;
@@ -25,6 +26,7 @@ pub struct AppState {
     pub backups: Arc<BackupService>,
     pub data_port: Arc<DataPortService>,
     pub templates: Arc<TemplateService>,
+    pub links: Arc<EntityLinkService>,
 }
 
 impl AppState {
@@ -41,6 +43,7 @@ impl AppState {
         let backups = BackupService::new(db.as_ref().clone(), backup_dir);
         let data_port = DataPortService::new(db.as_ref().clone());
         let templates = TemplateService::new(db.as_ref().clone());
+        let links = EntityLinkService::new(db.as_ref().clone());
         let state = Self {
             settings: Arc::new(SettingsService::new(db.as_ref().clone())),
             smoke_notes: Arc::new(SmokeNoteService::new(db.as_ref().clone())),
@@ -52,6 +55,7 @@ impl AppState {
             backups: Arc::new(backups),
             data_port: Arc::new(data_port),
             templates: Arc::new(templates),
+            links: Arc::new(links),
             db,
         };
         if let Err(err) = state.search.rebuild_all() {

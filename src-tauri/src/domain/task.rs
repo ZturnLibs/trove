@@ -56,7 +56,9 @@ impl TaskPriority {
             "low" => Ok(Self::Low),
             "medium" => Ok(Self::Medium),
             "high" => Ok(Self::High),
-            _ => Err(DomainError::Validation(format!("invalid priority: {value}"))),
+            _ => Err(DomainError::Validation(format!(
+                "invalid priority: {value}"
+            ))),
         }
     }
 }
@@ -80,7 +82,9 @@ impl ListKind {
         match value {
             "inbox" => Ok(Self::Inbox),
             "custom" => Ok(Self::Custom),
-            _ => Err(DomainError::Validation(format!("invalid list kind: {value}"))),
+            _ => Err(DomainError::Validation(format!(
+                "invalid list kind: {value}"
+            ))),
         }
     }
 }

@@ -140,9 +140,7 @@ impl DataPortService {
                 continue;
             };
             let Value::Array(items) = value else {
-                return Err(DomainError::Validation(format!(
-                    "表 {table} 数据格式错误"
-                )));
+                return Err(DomainError::Validation(format!("表 {table} 数据格式错误")));
             };
             tables += 1;
             for item in items {
@@ -170,18 +168,17 @@ fn dump_table(conn: &Connection, table: &str) -> Result<Vec<Value>, DomainError>
     while let Some(row) = rows.next().map_err(internal)? {
         let mut obj = Map::new();
         for (idx, name) in column_names.iter().enumerate() {
-            obj.insert(name.clone(), sql_to_json(row.get_ref(idx).map_err(internal)?));
+            obj.insert(
+                name.clone(),
+                sql_to_json(row.get_ref(idx).map_err(internal)?),
+            );
         }
         out.push(Value::Object(obj));
     }
     Ok(out)
 }
 
-fn insert_row(
-    conn: &Connection,
-    table: &str,
-    obj: &Map<String, Value>,
-) -> Result<(), DomainError> {
+fn insert_row(conn: &Connection, table: &str, obj: &Map<String, Value>) -> Result<(), DomainError> {
     if obj.is_empty() {
         return Ok(());
     }
@@ -196,8 +193,10 @@ fn insert_row(
         .iter()
         .map(|col| json_to_sql(obj.get(*col).unwrap_or(&Value::Null)))
         .collect();
-    let params_as_refs: Vec<&dyn rusqlite::types::ToSql> =
-        values.iter().map(|v| v as &dyn rusqlite::types::ToSql).collect();
+    let params_as_refs: Vec<&dyn rusqlite::types::ToSql> = values
+        .iter()
+        .map(|v| v as &dyn rusqlite::types::ToSql)
+        .collect();
     conn.execute(&sql, params_as_refs.as_slice())
         .map_err(|e| DomainError::Internal(format!("导入 {table} 失败: {e}")))?;
     Ok(())
@@ -255,6 +254,13 @@ mod tests {
                 [],
             )
             .unwrap();
+            conn.execute(
+                "INSERT INTO entity_links
+                    (id, source_type, source_id, target_type, target_id, link_kind, created_at)
+                 VALUES ('l1', 'memory', 'm1', 'task', 't1', 'converted_to', '2026-01-01T00:00:00')",
+                [],
+            )
+            .unwrap();
         }
 
         let json = port.export_json().unwrap();
@@ -269,12 +275,21 @@ mod tests {
         let body: String = db2
             .connect()
             .unwrap()
+            .query_row("SELECT body FROM smoke_notes WHERE id = 'e1'", [], |row| {
+                row.get(0)
+            })
+            .unwrap();
+        assert_eq!(body, "export-me");
+
+        let links: i64 = db2
+            .connect()
+            .unwrap()
             .query_row(
-                "SELECT body FROM smoke_notes WHERE id = 'e1'",
+                "SELECT COUNT(*) FROM entity_links WHERE id = 'l1'",
                 [],
                 |row| row.get(0),
             )
             .unwrap();
-        assert_eq!(body, "export-me");
+        assert_eq!(links, 1);
     }
 }

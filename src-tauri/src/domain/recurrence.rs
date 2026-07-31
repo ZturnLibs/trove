@@ -45,7 +45,9 @@ pub struct RecurrenceRule {
 impl RecurrenceRule {
     pub fn validate(&self) -> Result<(), DomainError> {
         if self.version != 1 {
-            return Err(DomainError::Validation("unsupported recurrence version".into()));
+            return Err(DomainError::Validation(
+                "unsupported recurrence version".into(),
+            ));
         }
         if self.interval == 0 {
             return Err(DomainError::Validation("interval must be >= 1".into()));
@@ -129,7 +131,9 @@ pub fn next_after(
         }
         return Ok(Some(candidate));
     }
-    Err(DomainError::Internal("failed to compute next recurrence".into()))
+    Err(DomainError::Internal(
+        "failed to compute next recurrence".into(),
+    ))
 }
 
 fn next_weekday(from: NaiveDate) -> NaiveDate {
@@ -253,7 +257,8 @@ mod tests {
             timezone: "Asia/Shanghai".into(),
             end_at: None,
         };
-        let after = NaiveDateTime::parse_from_str("2026-07-29T09:00:00", "%Y-%m-%dT%H:%M:%S").unwrap();
+        let after =
+            NaiveDateTime::parse_from_str("2026-07-29T09:00:00", "%Y-%m-%dT%H:%M:%S").unwrap();
         let next = next_after(&rule, after).unwrap().unwrap();
         assert_eq!(next.to_string(), "2026-07-30 09:00:00");
     }
@@ -270,7 +275,8 @@ mod tests {
             end_at: None,
         };
         // Friday
-        let after = NaiveDateTime::parse_from_str("2026-07-31T09:00:00", "%Y-%m-%dT%H:%M:%S").unwrap();
+        let after =
+            NaiveDateTime::parse_from_str("2026-07-31T09:00:00", "%Y-%m-%dT%H:%M:%S").unwrap();
         let next = next_after(&rule, after).unwrap().unwrap();
         assert_eq!(next.date().weekday(), Weekday::Mon);
         assert_eq!(next.to_string(), "2026-08-03 09:00:00");
@@ -287,7 +293,8 @@ mod tests {
             timezone: "Asia/Shanghai".into(),
             end_at: None,
         };
-        let after = NaiveDateTime::parse_from_str("2026-01-31T08:00:00", "%Y-%m-%dT%H:%M:%S").unwrap();
+        let after =
+            NaiveDateTime::parse_from_str("2026-01-31T08:00:00", "%Y-%m-%dT%H:%M:%S").unwrap();
         let next = next_after(&rule, after).unwrap().unwrap();
         assert_eq!(next.to_string(), "2026-02-28 08:00:00");
     }
@@ -303,7 +310,8 @@ mod tests {
             timezone: "Asia/Shanghai".into(),
             end_at: Some("2026-07-29".into()),
         };
-        let after = NaiveDateTime::parse_from_str("2026-07-29T09:00:00", "%Y-%m-%dT%H:%M:%S").unwrap();
+        let after =
+            NaiveDateTime::parse_from_str("2026-07-29T09:00:00", "%Y-%m-%dT%H:%M:%S").unwrap();
         assert!(next_after(&rule, after).unwrap().is_none());
     }
 }

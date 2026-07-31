@@ -44,11 +44,7 @@ impl ReminderService {
 
         let id = new_id();
         let now = stamp(&self.clock);
-        let recurrence_json = input
-            .recurrence
-            .as_ref()
-            .map(|r| r.to_json())
-            .transpose()?;
+        let recurrence_json = input.recurrence.as_ref().map(|r| r.to_json()).transpose()?;
 
         let conn = self.connect()?;
         let tx = conn.unchecked_transaction().map_err(internal)?;
@@ -86,11 +82,7 @@ impl ReminderService {
         if let Some(ref rule) = input.recurrence {
             rule.validate()?;
         }
-        let recurrence_json = input
-            .recurrence
-            .as_ref()
-            .map(|r| r.to_json())
-            .transpose()?;
+        let recurrence_json = input.recurrence.as_ref().map(|r| r.to_json()).transpose()?;
         let now = stamp(&self.clock);
         let conn = self.connect()?;
         let tx = conn.unchecked_transaction().map_err(internal)?;
@@ -250,7 +242,10 @@ impl ReminderService {
         collect(rows)
     }
 
-    pub fn due_occurrences(&self, now: NaiveDateTime) -> Result<Vec<ReminderOccurrence>, DomainError> {
+    pub fn due_occurrences(
+        &self,
+        now: NaiveDateTime,
+    ) -> Result<Vec<ReminderOccurrence>, DomainError> {
         let now_s = format_local_datetime(now);
         let conn = self.connect()?;
         let mut stmt = conn
@@ -387,11 +382,7 @@ impl ReminderService {
                 updated_at = ?2,
                 revision = revision + 1
              WHERE id = ?3",
-            params![
-                format_local_datetime(until),
-                now,
-                occurrence_id.to_string()
-            ],
+            params![format_local_datetime(until), now, occurrence_id.to_string()],
         )
         .map_err(internal)?;
         self.get_occurrence(occurrence_id)
@@ -418,9 +409,7 @@ impl ReminderService {
             )
             .map_err(internal)?;
         let rows: Vec<(String, String, String)> = stmt
-            .query_map([&now_s], |row| {
-                Ok((row.get(0)?, row.get(1)?, row.get(2)?))
-            })
+            .query_map([&now_s], |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)))
             .map_err(internal)?
             .collect::<Result<_, _>>()
             .map_err(internal)?;
@@ -547,10 +536,7 @@ fn map_reminder_row(row: &rusqlite::Row<'_>) -> Result<Reminder, rusqlite::Error
         id: parse_id(row.get(0)?)?,
         title: row.get(1)?,
         notes: row.get(2)?,
-        task_id: row
-            .get::<_, Option<String>>(3)?
-            .map(parse_id)
-            .transpose()?,
+        task_id: row.get::<_, Option<String>>(3)?.map(parse_id).transpose()?,
         recurrence: row
             .get::<_, Option<String>>(4)?
             .map(|s| crate::domain::RecurrenceRule::from_json(&s))
@@ -632,7 +618,8 @@ mod tests {
     #[test]
     fn recurring_advances_on_complete() {
         let svc = service();
-        let fire = NaiveDateTime::parse_from_str("2026-07-29T09:00:00", "%Y-%m-%dT%H:%M:%S").unwrap();
+        let fire =
+            NaiveDateTime::parse_from_str("2026-07-29T09:00:00", "%Y-%m-%dT%H:%M:%S").unwrap();
         let reminder = svc
             .create(CreateReminderInput {
                 title: "daily".into(),

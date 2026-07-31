@@ -3,9 +3,7 @@ use crate::commands;
 use crate::infrastructure::settings::ShortcutSettings;
 use serde::Serialize;
 use tauri::{AppHandle, Manager};
-use tauri_plugin_global_shortcut::{
-    Code, GlobalShortcutExt, Modifiers, Shortcut, ShortcutState,
-};
+use tauri_plugin_global_shortcut::{Code, GlobalShortcutExt, Modifiers, Shortcut, ShortcutState};
 
 #[derive(Debug, Clone, Serialize, Default)]
 #[serde(rename_all = "camelCase")]
@@ -76,9 +74,9 @@ pub fn apply_shortcuts(app: &AppHandle) -> ShortcutApplyResult {
             Ok(s) => s,
             Err(err) => {
                 result.ok = false;
-                result.errors.push(format!(
-                    "无法解析「{raw}」（{kind}）: {err}，已用默认值"
-                ));
+                result
+                    .errors
+                    .push(format!("无法解析「{raw}」（{kind}）: {err}，已用默认值"));
                 default_fallback(kind)
             }
         };

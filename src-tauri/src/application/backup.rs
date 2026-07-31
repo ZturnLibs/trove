@@ -244,11 +244,9 @@ mod tests {
         let body: String = db
             .connect()
             .unwrap()
-            .query_row(
-                "SELECT body FROM smoke_notes WHERE id = 'n1'",
-                [],
-                |row| row.get(0),
-            )
+            .query_row("SELECT body FROM smoke_notes WHERE id = 'n1'", [], |row| {
+                row.get(0)
+            })
             .unwrap();
         assert_eq!(body, "hello-backup");
     }

@@ -145,8 +145,8 @@ impl SettingsService {
             .db
             .connect()
             .map_err(|e| DomainError::Internal(e.to_string()))?;
-        let json = serde_json::to_string(settings)
-            .map_err(|e| DomainError::Internal(e.to_string()))?;
+        let json =
+            serde_json::to_string(settings).map_err(|e| DomainError::Internal(e.to_string()))?;
         let now = format_utc(self.clock.now());
         conn.execute(
             "INSERT INTO settings (key, value_json, updated_at)

@@ -1,8 +1,6 @@
 use crate::app_state::AppState;
 use crate::commands;
-use crate::domain::{
-    CreateMemoryInput, CreateReminderInput, CreateTaskInput, SearchEntityType,
-};
+use crate::domain::{CreateMemoryInput, CreateReminderInput, CreateTaskInput, SearchEntityType};
 use chrono::Local;
 use tauri::{
     menu::{Menu, MenuItem, PredefinedMenuItem, Submenu},
@@ -54,12 +52,9 @@ fn menu_new_task(app: &AppHandle) {
         tag_names: None,
     }) {
         Ok(task) => {
-            let _ = state.search.upsert(
-                SearchEntityType::Task,
-                task.id,
-                &task.title,
-                &task.notes,
-            );
+            let _ = state
+                .search
+                .upsert(SearchEntityType::Task, task.id, &task.title, &task.notes);
             emit_domain(app, "task", &task.id.to_string(), "created", task.revision);
             show_and_navigate(app, "/inbox");
         }
@@ -244,11 +239,22 @@ pub fn setup_app_menu(app: &AppHandle) -> tauri::Result<()> {
     let view_tasks = MenuItem::with_id(app, "menu.view.tasks", "任务", true, Some("CmdOrCtrl+3"))?;
     let view_memory =
         MenuItem::with_id(app, "menu.view.memory", "记忆", true, Some("CmdOrCtrl+4"))?;
-    let view_clipboard =
-        MenuItem::with_id(app, "menu.view.clipboard", "剪切板", true, Some("CmdOrCtrl+5"))?;
-    let show_main = MenuItem::with_id(app, "menu.view.show_main", "显示主窗口", true, None::<&str>)?;
-    let show_quick =
-        MenuItem::with_id(app, "menu.view.show_quick", "显示快捷窗口", true, None::<&str>)?;
+    let view_clipboard = MenuItem::with_id(
+        app,
+        "menu.view.clipboard",
+        "剪切板",
+        true,
+        Some("CmdOrCtrl+5"),
+    )?;
+    let show_main =
+        MenuItem::with_id(app, "menu.view.show_main", "显示主窗口", true, None::<&str>)?;
+    let show_quick = MenuItem::with_id(
+        app,
+        "menu.view.show_quick",
+        "显示快捷窗口",
+        true,
+        None::<&str>,
+    )?;
 
     let view_menu = Submenu::with_items(
         app,
@@ -286,20 +292,20 @@ pub fn setup_app_menu(app: &AppHandle) -> tauri::Result<()> {
 
     let help_shortcuts =
         MenuItem::with_id(app, "menu.help.shortcuts", "快捷键一览", true, None::<&str>)?;
-    let help_privacy =
-        MenuItem::with_id(app, "menu.help.privacy", "隐私与数据说明", true, None::<&str>)?;
+    let help_privacy = MenuItem::with_id(
+        app,
+        "menu.help.privacy",
+        "隐私与数据说明",
+        true,
+        None::<&str>,
+    )?;
     let help_menu = Submenu::with_items(app, "帮助", true, &[&help_shortcuts, &help_privacy])?;
 
     #[cfg(target_os = "macos")]
     let menu = {
         let about = PredefinedMenuItem::about(app, Some("关于工作台"), None)?;
-        let settings = MenuItem::with_id(
-            app,
-            "menu.app.settings",
-            "设置…",
-            true,
-            Some("CmdOrCtrl+,"),
-        )?;
+        let settings =
+            MenuItem::with_id(app, "menu.app.settings", "设置…", true, Some("CmdOrCtrl+,"))?;
         let app_menu = Submenu::with_items(
             app,
             "工作台",

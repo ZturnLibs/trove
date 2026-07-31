@@ -22,9 +22,7 @@ pub fn start(app: AppHandle, reminders: Arc<ReminderService>) {
 
 fn tick(app: &AppHandle, reminders: &ReminderService) -> Result<(), String> {
     let now = local_now_naive();
-    let due = reminders
-        .due_occurrences(now)
-        .map_err(|e| e.to_string())?;
+    let due = reminders.due_occurrences(now).map_err(|e| e.to_string())?;
 
     for occ in due {
         let body = if occ.task_id.is_some() {

@@ -57,9 +57,7 @@ impl TaskService {
                  ORDER BY CASE kind WHEN 'inbox' THEN 0 ELSE 1 END, sort_order, name",
             )
             .map_err(internal)?;
-        let rows = stmt
-            .query_map([], map_list_row)
-            .map_err(internal)?;
+        let rows = stmt.query_map([], map_list_row).map_err(internal)?;
         collect_rows(rows)
     }
 
@@ -300,9 +298,10 @@ impl TaskService {
             .ok_or_else(|| DomainError::NotFound("周期任务模板不存在或已停用".into()))?;
 
         let rule = crate::domain::RecurrenceRule::from_json(&recurrence_json)?;
-        let due_date = current.due_date.clone().ok_or_else(|| {
-            DomainError::Validation("周期任务实例缺少截止日期".into())
-        })?;
+        let due_date = current
+            .due_date
+            .clone()
+            .ok_or_else(|| DomainError::Validation("周期任务实例缺少截止日期".into()))?;
         let due_time = current.due_time.clone().unwrap_or_else(|| "09:00".into());
         let current_dt = crate::domain::combine_date_time(&due_date, &due_time)?;
         let Some(next_dt) = crate::domain::next_after(&rule, current_dt)? else {
@@ -787,9 +786,7 @@ impl TaskService {
              WHERE t.deleted_at IS NULL {extra}"
         );
         let mut stmt = conn.prepare(&sql).map_err(internal)?;
-        let rows = stmt
-            .query_map([today], map_task_row)
-            .map_err(internal)?;
+        let rows = stmt.query_map([today], map_task_row).map_err(internal)?;
         collect_rows(rows)
     }
 
@@ -890,8 +887,9 @@ fn map_list_row(row: &rusqlite::Row<'_>) -> Result<TaskList, rusqlite::Error> {
     Ok(TaskList {
         id: parse_id(row.get(0)?)?,
         name: row.get(1)?,
-        kind: ListKind::parse(&row.get::<_, String>(2)?)
-            .map_err(|e| rusqlite::Error::ToSqlConversionFailure(Box::new(std::io::Error::other(e.to_string()))))?,
+        kind: ListKind::parse(&row.get::<_, String>(2)?).map_err(|e| {
+            rusqlite::Error::ToSqlConversionFailure(Box::new(std::io::Error::other(e.to_string())))
+        })?,
         sort_order: row.get(3)?,
         created_at: row.get(4)?,
         updated_at: row.get(5)?,
@@ -932,9 +930,7 @@ fn map_domain_sql(err: DomainError) -> rusqlite::Error {
     rusqlite::Error::ToSqlConversionFailure(Box::new(std::io::Error::other(err.to_string())))
 }
 
-fn collect_rows<T, E>(
-    rows: impl IntoIterator<Item = Result<T, E>>,
-) -> Result<Vec<T>, DomainError>
+fn collect_rows<T, E>(rows: impl IntoIterator<Item = Result<T, E>>) -> Result<Vec<T>, DomainError>
 where
     E: std::fmt::Display,
 {

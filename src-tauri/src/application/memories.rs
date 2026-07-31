@@ -1,3 +1,4 @@
+use crate::application::links::EntityLinkService;
 use crate::application::search::SearchService;
 use crate::application::tasks::TaskService;
 use crate::domain::{
@@ -12,6 +13,7 @@ pub struct MemoryService {
     clock: SystemClock,
     search: SearchService,
     tasks: TaskService,
+    links: EntityLinkService,
 }
 
 impl MemoryService {
@@ -19,6 +21,7 @@ impl MemoryService {
         Self {
             search: SearchService::new(db.clone()),
             tasks: TaskService::new(db.clone()),
+            links: EntityLinkService::new(db.clone()),
             db,
             clock: SystemClock,
         }
@@ -181,6 +184,7 @@ impl MemoryService {
         )
         .map_err(internal)?;
         self.search.remove(SearchEntityType::Memory, id)?;
+        let _ = self.links.purge_for_source("memory", id);
         Ok(())
     }
 
@@ -196,22 +200,12 @@ impl MemoryService {
             tag_names: Some(memory.tag_names.clone()),
         })?;
         // Index task
-        self.search.upsert(
-            SearchEntityType::Task,
-            task.id,
-            &task.title,
-            &task.notes,
-        )?;
+        self.search
+            .upsert(SearchEntityType::Task, task.id, &task.title, &task.notes)?;
 
-        let link_id = new_id();
-        let now = stamp(&self.clock);
-        let conn = self.connect()?;
-        conn.execute(
-            "INSERT INTO entity_links (id, source_type, source_id, target_type, target_id, link_kind, created_at)
-             VALUES (?1, 'memory', ?2, 'task', ?3, 'converted_to', ?4)",
-            params![link_id.to_string(), id.to_string(), task.id.to_string(), now],
-        )
-        .map_err(internal)?;
+        // Record the conversion relationship.
+        self.links
+            .link("memory", id, "task", task.id, "converted_to")?;
 
         Ok(ConvertMemoryToTaskResult {
             memory,
@@ -359,5 +353,11 @@ mod tests {
         assert_eq!(still.title, "API Key 备忘");
         let task = tasks.get_task(converted.task_id).unwrap();
         assert_eq!(task.title, "API Key 备忘");
+
+        let links = svc.links.list_outgoing("memory", memory.id).unwrap();
+        assert_eq!(links.len(), 1);
+        assert_eq!(links[0].link_kind, "converted_to");
+        assert_eq!(links[0].target_type, "task");
+        assert_eq!(links[0].target_id, converted.task_id);
     }
 }

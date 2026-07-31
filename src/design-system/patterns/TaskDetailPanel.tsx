@@ -1,5 +1,6 @@
 import { useEffect, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import { AttachmentsSection } from "@/design-system/patterns/AttachmentsSection";
 import { Button } from "@/design-system/primitives/Button";
 import { Input } from "@/design-system/primitives/Input";
 import {
@@ -79,6 +80,12 @@ export function TaskDetailPanel({
       void queryClient.invalidateQueries({ queryKey: ["tasks"] });
       onDeleted?.();
     },
+  });
+
+  const linksQuery = useQuery({
+    queryKey: ["links", "task", task?.id],
+    queryFn: () => ipc.entityLinkList("task", task!.id),
+    enabled: !!task,
   });
 
   if (!task || !draft) {
@@ -214,6 +221,8 @@ export function TaskDetailPanel({
 
         <TaskRemindersSection taskId={task.id} />
 
+        <AttachmentsSection entityType="task" entityId={task.id} />
+
         {error ? <p className="text-[12px] text-danger">{error}</p> : null}
       </div>
 
@@ -245,7 +254,12 @@ export function TaskDetailPanel({
             size="sm"
             variant="ghost"
             onClick={() => {
-              if (confirm("确认删除此任务？")) deleteMutation.mutate();
+              const count = (linksQuery.data ?? []).length;
+              const message =
+                count > 0
+                  ? `确认删除此任务？\n将移除 ${count} 个关联资源；资源文件按保留规则保留。`
+                  : "确认删除此任务？";
+              if (confirm(message)) deleteMutation.mutate();
             }}
           >
             删除

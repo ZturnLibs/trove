@@ -7,10 +7,17 @@ const MIGRATIONS: &[(i64, &str)] = &[
     (1, include_str!("../../../migrations/0001_init.sql")),
     (2, include_str!("../../../migrations/0002_tasks.sql")),
     (3, include_str!("../../../migrations/0003_reminders.sql")),
-    (4, include_str!("../../../migrations/0004_memory_search.sql")),
+    (
+        4,
+        include_str!("../../../migrations/0004_memory_search.sql"),
+    ),
     (5, include_str!("../../../migrations/0005_clipboard.sql")),
-    (6, include_str!("../../../migrations/0006_v11_efficiency.sql")),
+    (
+        6,
+        include_str!("../../../migrations/0006_v11_efficiency.sql"),
+    ),
     (7, include_str!("../../../migrations/0007_assets_ocr.sql")),
+    (8, include_str!("../../../migrations/0008_entity_links.sql")),
 ];
 
 #[derive(Debug, Error)]
@@ -181,7 +188,7 @@ mod tests {
         let db_path = dir.path().join("workbench.db");
         let db = Database::open(&db_path).unwrap();
         let health = db.health_check().unwrap();
-        assert_eq!(health.schema_version, 7);
+        assert_eq!(health.schema_version, 8);
         assert_eq!(health.journal_mode.to_lowercase(), "wal");
         assert!(health.fts5_available);
     }
@@ -193,6 +200,6 @@ mod tests {
         let db = Database::open(&db_path).unwrap();
         db.migrate(None).unwrap();
         db.migrate(None).unwrap();
-        assert_eq!(db.health_check().unwrap().schema_version, 7);
+        assert_eq!(db.health_check().unwrap().schema_version, 8);
     }
 }
