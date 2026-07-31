@@ -103,6 +103,7 @@ pub fn settings_save(
         max_items: settings.clipboard_max_items,
         excluded_apps: settings.clipboard_excluded_apps.clone(),
     })?;
+    let previous = state.settings.get().unwrap_or_default();
     state.settings.save(&settings)?;
 
     // Sync launch-at-login with OS.
@@ -116,15 +117,44 @@ pub fn settings_save(
         tracing::warn!(error = %err, "failed to update launch at login");
     }
 
+    if previous.shortcuts.quick_capture != settings.shortcuts.quick_capture
+        || previous.shortcuts.search != settings.shortcuts.search
+        || previous.shortcuts.clipboard != settings.shortcuts.clipboard
+        || previous.shortcuts.focus_main != settings.shortcuts.focus_main
+    {
+        let apply = crate::shortcuts::apply_shortcuts(&app);
+        if !apply.ok {
+            return Err(AppError::new(
+                "shortcut_register_failed",
+                apply.errors.join("；"),
+            ));
+        }
+    }
+
     Ok(settings)
 }
 
 #[tauri::command]
-pub fn settings_reset_shortcuts(state: State<'_, AppState>) -> Result<AppSettings, AppError> {
+pub fn settings_reset_shortcuts(
+    app: AppHandle,
+    state: State<'_, AppState>,
+) -> Result<AppSettings, AppError> {
     let mut settings = state.settings.get()?;
     settings.shortcuts = ShortcutSettings::default();
     state.settings.save(&settings)?;
+    let apply = crate::shortcuts::apply_shortcuts(&app);
+    if !apply.ok {
+        return Err(AppError::new(
+            "shortcut_register_failed",
+            apply.errors.join("；"),
+        ));
+    }
     Ok(settings)
+}
+
+#[tauri::command]
+pub fn shortcuts_apply(app: AppHandle) -> Result<crate::shortcuts::ShortcutApplyResult, AppError> {
+    Ok(crate::shortcuts::apply_shortcuts(&app))
 }
 
 #[tauri::command]

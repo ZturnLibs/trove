@@ -390,6 +390,8 @@ export const ipc = {
     invoke<AppSettings>("settings_save", { settings }),
   settingsResetShortcuts: () =>
     invoke<AppSettings>("settings_reset_shortcuts"),
+  shortcutsApply: () =>
+    invoke<{ ok: boolean; errors: string[] }>("shortcuts_apply"),
   smokeNoteCreate: (body: string) =>
     invoke<SmokeNote>("smoke_note_create", { body }),
   smokeNoteList: () => invoke<SmokeNote[]>("smoke_note_list"),

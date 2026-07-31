@@ -5,7 +5,8 @@
 - [技术设计](./technical-design.md)：Tauri、React、Tailwind CSS 跨端架构，SQLite 混合存储、系统适配、安全和测试方案。
 - [UI 布局与交互](./ui-layout-interaction.md)：主窗口 / 快捷窗口 / 托盘的信息架构、页面骨架、键盘模型与交互约定。
 - [应用菜单](./app-menu-design.md)：菜单栏、托盘菜单、上下文菜单的信息架构、启用规则与快捷键归属。
-
+- [快捷键一览](./keyboard-shortcuts.md)：全局 / 应用内 / 快捷窗口键位定稿、设置页交互与实现对照。
+- [空状态与权限文案](./empty-states-and-permissions.md)：空状态、权限横幅、确认框、引导与错误提示文案。
 - [隐私与数据说明](./privacy-and-data.md)：数据存放位置、权限用途、剪切板隐私与备份恢复说明。
 
 ## 实现进度

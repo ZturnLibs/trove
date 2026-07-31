@@ -3,6 +3,7 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { PageScaffold } from "@/components/PageScaffold";
 import { Button } from "@/design-system/primitives/Button";
 import { Input } from "@/design-system/primitives/Input";
+import { ShortcutRow } from "@/features/settings/ShortcutRow";
 import {
   ipc,
   type AppSettings,
@@ -68,9 +69,30 @@ export function SettingsPage() {
     mutationFn: () => ipc.settingsResetShortcuts(),
     onSuccess: () => {
       void queryClient.invalidateQueries({ queryKey: ["settings"] });
-      setMessage("快捷键已恢复默认（需重启应用后全局快捷键生效）");
+      setMessage("快捷键已恢复默认并重新注册");
+    },
+    onError: (err) => {
+      setMessage(err instanceof Error ? err.message : "恢复快捷键失败");
     },
   });
+
+  const saveShortcut = (key: keyof AppSettings["shortcuts"], value: string) => {
+    if (!settings) return;
+    const next = {
+      ...settings,
+      shortcuts: { ...settings.shortcuts, [key]: value },
+    };
+    saveSettings.mutate(next, {
+      onSuccess: () => setMessage("快捷键已保存并重新注册"),
+      onError: (err) => {
+        setMessage(
+          err instanceof Error
+            ? err.message
+            : "快捷键注册失败，请更换组合或恢复默认",
+        );
+      },
+    });
+  };
 
   const createBackup = useMutation({
     mutationFn: () => ipc.backupCreate(),
@@ -254,35 +276,36 @@ export function SettingsPage() {
         <section className="rounded-[var(--radius-panel)] border border-border bg-surface-raised p-4">
           <h2 className="text-[13px] font-semibold">快捷键</h2>
           <p className="mt-1 text-[12px] text-muted">
-            全局快捷键在启动时注册。若与其他应用冲突，请先关闭冲突应用或恢复默认后重启。
+            全局快捷键在后台也可唤起。点击「更改」后按下新组合；保存后立即重新注册，无需重启。
           </p>
           {settings ? (
-            <dl className="mt-3 space-y-2 text-[12px]">
-              <div className="flex justify-between gap-4">
-                <dt className="text-muted">快速记录</dt>
-                <dd className="font-mono">{settings.shortcuts.quickCapture}</dd>
-              </div>
-              <div className="flex justify-between gap-4">
-                <dt className="text-muted">统一搜索</dt>
-                <dd className="font-mono">{settings.shortcuts.search}</dd>
-              </div>
-              <div className="flex justify-between gap-4">
-                <dt className="text-muted">剪切板浮层</dt>
-                <dd className="font-mono">{settings.shortcuts.clipboard}</dd>
-              </div>
-              <div className="flex justify-between gap-4">
-                <dt className="text-muted">聚焦主窗口</dt>
-                <dd className="font-mono">{settings.shortcuts.focusMain}</dd>
-              </div>
+            <div className="mt-3 space-y-3 text-[12px]">
+              {(
+                [
+                  "quickCapture",
+                  "search",
+                  "clipboard",
+                  "focusMain",
+                ] as const
+              ).map((key) => (
+                <ShortcutRow
+                  key={key}
+                  id={key}
+                  value={settings.shortcuts[key]}
+                  disabled={saveSettings.isPending || resetShortcuts.isPending}
+                  onChange={(next) => saveShortcut(key, next)}
+                />
+              ))}
               <Button
                 size="sm"
                 variant="secondary"
-                className="mt-2"
+                className="mt-1"
                 onClick={() => resetShortcuts.mutate()}
+                disabled={resetShortcuts.isPending}
               >
                 恢复默认快捷键
               </Button>
-            </dl>
+            </div>
           ) : null}
         </section>
 

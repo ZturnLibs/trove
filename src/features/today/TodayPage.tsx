@@ -4,6 +4,7 @@ import { Clock } from "lucide-react";
 import { TaskDetailPanel } from "@/design-system/patterns/TaskDetailPanel";
 import { TaskRow } from "@/design-system/patterns/TaskRow";
 import { EmptyState } from "@/components/PageScaffold";
+import { NotificationPermissionBanner } from "@/components/NotificationPermissionBanner";
 import { Button } from "@/design-system/primitives/Button";
 import { ipc, type TodayReminderItem } from "@/ipc/client";
 import {
@@ -178,7 +179,9 @@ export function TodayPage() {
     data.remindersToday.length === 0;
 
   return (
-    <SplitTaskLayout
+    <>
+      <NotificationPermissionBanner />
+      <SplitTaskLayout
       title="今日"
       description={data ? data.today : "加载中…"}
       actions={
@@ -199,7 +202,16 @@ export function TodayPage() {
         ) : empty ? (
           <EmptyState
             title="今日还没有事项"
-            body="新建带今日截止日期的任务，或创建今日提醒。"
+            body="给任务加上今天的截止日期，或新建今日提醒。"
+            primaryAction={{
+              label: "新建任务",
+              onClick: () => createMutation.mutate(),
+            }}
+            secondaryAction={{
+              label: "新建提醒",
+              onClick: () => createReminderMutation.mutate(),
+            }}
+            hint="也可用菜单「文件 → 新建任务」或全局快速记录"
           />
         ) : (
           <div>
@@ -344,5 +356,6 @@ export function TodayPage() {
         )
       }
     />
+    </>
   );
 }

@@ -238,8 +238,34 @@ export function TasksPage() {
             <div className="p-4 text-[12px] text-muted">加载中…</div>
           ) : (tasksQuery.data?.length ?? 0) === 0 ? (
             <EmptyState
-              title="没有匹配的任务"
-              body="调整筛选条件，或新建任务。"
+              title={
+                smart !== "none" || status !== "active" || priority !== "all"
+                  ? "没有匹配的任务"
+                  : listId === "all"
+                    ? "还没有任务"
+                    : "这个清单还是空的"
+              }
+              body={
+                smart !== "none" || status !== "active" || priority !== "all"
+                  ? "调整筛选条件，或新建任务。"
+                  : "把收件箱里的任务移过来，或直接新建。"
+              }
+              primaryAction={{
+                label: "新建任务",
+                onClick: () => createMutation.mutate(),
+              }}
+              secondaryAction={
+                smart !== "none" || status !== "active" || priority !== "all"
+                  ? {
+                      label: "清除筛选",
+                      onClick: () => {
+                        setSmart("none");
+                        setStatus("active");
+                        setPriority("all");
+                      },
+                    }
+                  : undefined
+              }
             />
           ) : (
             tasksQuery.data?.map((task) => (

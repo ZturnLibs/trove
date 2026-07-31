@@ -5,6 +5,7 @@ import { TaskRow } from "@/design-system/patterns/TaskRow";
 import { EmptyState } from "@/components/PageScaffold";
 import { Button } from "@/design-system/primitives/Button";
 import { ipc } from "@/ipc/client";
+import { formatShortcutLabel } from "@/lib/shortcuts";
 import {
   NewTaskButton,
   SplitTaskLayout,
@@ -15,6 +16,11 @@ export function InboxPage() {
   useDomainInvalidation();
   const queryClient = useQueryClient();
   const [selectedId, setSelectedId] = useState<string | null>(null);
+
+  const settingsQuery = useQuery({
+    queryKey: ["settings"],
+    queryFn: () => ipc.settingsGet(),
+  });
 
   const inboxQuery = useQuery({
     queryKey: ["tasks", "inbox"],
@@ -94,7 +100,16 @@ export function InboxPage() {
         ) : (inboxQuery.data?.length ?? 0) === 0 ? (
           <EmptyState
             title="收件箱为空"
-            body="新任务默认进入这里。可用全局快捷键快速捕获。"
+            body="新任务会先出现在这里。可用全局快捷键随时捕获。"
+            primaryAction={{
+              label: "新建任务",
+              onClick: () => createMutation.mutate(),
+            }}
+            hint={
+              settingsQuery.data?.shortcuts.quickCapture
+                ? `快速记录：${formatShortcutLabel(settingsQuery.data.shortcuts.quickCapture)}`
+                : undefined
+            }
           />
         ) : (
           <div>

@@ -2,6 +2,11 @@ import { useEffect, useMemo, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Star } from "lucide-react";
 import { EmptyState } from "@/components/PageScaffold";
+import {
+  PermissionBanner,
+  dismissBanner,
+  isBannerDismissed,
+} from "@/components/PermissionBanner";
 import { Button } from "@/design-system/primitives/Button";
 import { Input } from "@/design-system/primitives/Input";
 import { SplitTaskLayout } from "@/features/tasks/TaskLayout";
@@ -229,6 +234,16 @@ export function ClipboardPage() {
   }, [items, selectedId]);
 
   const capturing = settingsQuery.data?.clipboardCaptureEnabled ?? true;
+  const [pasteBanner, setPasteBanner] = useState(
+    () => !isBannerDismissed("accessibility"),
+  );
+
+  const healthQuery = useQuery({
+    queryKey: ["app", "health"],
+    queryFn: () => ipc.appHealth(),
+  });
+  const directPasteAvailable =
+    healthQuery.data?.capabilities.directPaste.available ?? true;
 
   const toggleCapture = useMutation({
     mutationFn: (enabled: boolean) => ipc.clipboardSetCaptureEnabled(enabled),
@@ -246,6 +261,32 @@ export function ClipboardPage() {
   });
 
   return (
+    <>
+      {!capturing ? (
+        <PermissionBanner
+          kind="clipboard_paused"
+          title="剪切板采集已暂停"
+          body="不会记录新的复制内容；历史仍可浏览。"
+          primaryAction={{
+            label: "恢复采集",
+            onClick: () => toggleCapture.mutate(true),
+          }}
+        />
+      ) : null}
+      {pasteBanner && !directPasteAvailable ? (
+        <PermissionBanner
+          kind="accessibility"
+          title="无法直接粘贴"
+          body={
+            healthQuery.data?.capabilities.directPaste.notes ??
+            "请使用「再次复制」后手动粘贴。"
+          }
+          onDismiss={() => {
+            dismissBanner("accessibility");
+            setPasteBanner(false);
+          }}
+        />
+      ) : null}
     <SplitTaskLayout
       title="剪切板"
       description={capturing ? "记录中 · 仅本地保存" : "已暂停采集"}
@@ -296,9 +337,24 @@ export function ClipboardPage() {
           <EmptyState
             title={favoritesOnly ? "暂无收藏" : "暂无剪切板历史"}
             body={
-              capturing
-                ? "复制文本或图片后会出现在这里。密码管理器等应用默认已排除。"
-                : "采集已暂停。恢复后才会记录新的复制内容。"
+              favoritesOnly
+                ? "在历史条目上点亮星标，收藏不会随过期清理删除。"
+                : capturing
+                  ? "复制文本或图片后会出现在这里。密码管理器等应用默认已排除。"
+                  : "采集已暂停，恢复后才会记录新的复制内容。"
+            }
+            primaryAction={
+              favoritesOnly
+                ? {
+                    label: "显示全部历史",
+                    onClick: () => setFavoritesOnly(false),
+                  }
+                : !capturing
+                  ? {
+                      label: "恢复采集",
+                      onClick: () => toggleCapture.mutate(true),
+                    }
+                  : undefined
             }
           />
         ) : (
@@ -349,5 +405,6 @@ export function ClipboardPage() {
         />
       }
     />
+    </>
   );
 }

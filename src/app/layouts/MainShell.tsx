@@ -1,6 +1,6 @@
 import { useEffect, useState } from "react";
-import { NavLink, Outlet } from "react-router-dom";
-import { useQuery } from "@tanstack/react-query";
+import { NavLink, Outlet, useNavigate } from "react-router-dom";
+import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { listen } from "@tauri-apps/api/event";
 import {
   ClipboardList,
@@ -14,6 +14,7 @@ import { cn } from "@/lib/cn";
 import { ipc } from "@/ipc/client";
 import { useDomainInvalidation } from "@/features/tasks/useDomainInvalidation";
 import { OnboardingOverlay } from "@/features/settings/OnboardingOverlay";
+import { PermissionBanner } from "@/components/PermissionBanner";
 
 const navItems = [
   { to: "/today", label: "今日", icon: SunMedium, badge: "overdue" as const },
@@ -25,6 +26,8 @@ const navItems = [
 
 export function MainShell() {
   useDomainInvalidation();
+  const navigate = useNavigate();
+  const queryClient = useQueryClient();
   const [backupError, setBackupError] = useState<string | null>(null);
   const countsQuery = useQuery({
     queryKey: ["task-counts"],
@@ -35,6 +38,15 @@ export function MainShell() {
     queryKey: ["app", "health"],
     queryFn: () => ipc.appHealth(),
     refetchInterval: 60_000,
+  });
+
+  const backupNow = useMutation({
+    mutationFn: () => ipc.backupCreate(),
+    onSuccess: () => {
+      setBackupError(null);
+      void queryClient.invalidateQueries({ queryKey: ["backups"] });
+      void queryClient.invalidateQueries({ queryKey: ["app", "health"] });
+    },
   });
 
   useEffect(() => {
@@ -105,21 +117,19 @@ export function MainShell() {
 
       <main className="flex min-w-0 flex-1 flex-col">
         {backupError ? (
-          <div className="flex items-center justify-between gap-3 border-b border-danger/30 bg-danger/5 px-4 py-2 text-[12px] text-danger">
-            <span>{backupError}</span>
-            <div className="flex items-center gap-2">
-              <NavLink to="/settings" className="underline">
-                去设置
-              </NavLink>
-              <button
-                type="button"
-                className="underline"
-                onClick={() => setBackupError(null)}
-              >
-                关闭
-              </button>
-            </div>
-          </div>
+          <PermissionBanner
+            kind="backup_failed"
+            title="自动备份失败"
+            body={`${backupError}。数据仍在本地，但暂时缺少新的备份保护。`}
+            primaryAction={{
+              label: backupNow.isPending ? "备份中…" : "立即备份",
+              onClick: () => backupNow.mutate(),
+            }}
+            secondaryAction={{
+              label: "去设置",
+              onClick: () => navigate("/settings"),
+            }}
+          />
         ) : null}
         <Outlet />
       </main>

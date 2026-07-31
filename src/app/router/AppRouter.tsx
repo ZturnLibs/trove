@@ -9,6 +9,7 @@ import { TasksPage } from "@/features/tasks/TasksPage";
 import { MemoryPage } from "@/features/memory/MemoryPage";
 import { ClipboardPage } from "@/features/clipboard/ClipboardPage";
 import { SettingsPage } from "@/features/settings/SettingsPage";
+import { useMenuAcceleratorFallback } from "@/features/settings/useMenuAcceleratorFallback";
 import { QuickWindow } from "@/features/search/QuickWindow";
 
 function MainNavigateListener() {
@@ -31,6 +32,7 @@ function MainRoutes() {
   return (
     <BrowserRouter>
       <MainNavigateListener />
+      <MainMenuAcceleratorFallback />
       <Routes>
         <Route element={<MainShell />}>
           <Route index element={<Navigate to="/today" replace />} />
@@ -45,6 +47,11 @@ function MainRoutes() {
       </Routes>
     </BrowserRouter>
   );
+}
+
+function MainMenuAcceleratorFallback() {
+  useMenuAcceleratorFallback();
+  return null;
 }
 
 export function AppRouter() {

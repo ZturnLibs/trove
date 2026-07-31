@@ -1,4 +1,5 @@
 import type { ReactNode } from "react";
+import { Button } from "@/design-system/primitives/Button";
 
 export function PageScaffold({
   title,
@@ -27,18 +28,55 @@ export function PageScaffold({
   );
 }
 
+export type EmptyStateAction = {
+  label: string;
+  onClick: () => void;
+  variant?: "default" | "secondary" | "ghost";
+};
+
 export function EmptyState({
   title,
   body,
+  primaryAction,
+  secondaryAction,
+  hint,
 }: {
   title: string;
   body: string;
+  primaryAction?: EmptyStateAction;
+  secondaryAction?: EmptyStateAction;
+  hint?: string;
 }) {
   return (
     <div className="flex h-full items-center justify-center p-8">
       <div className="max-w-sm text-center">
         <h2 className="text-[14px] font-medium">{title}</h2>
         <p className="mt-1 text-[12px] text-muted">{body}</p>
+        {primaryAction || secondaryAction ? (
+          <div className="mt-4 flex items-center justify-center gap-2">
+            {secondaryAction ? (
+              <Button
+                size="sm"
+                variant={secondaryAction.variant ?? "secondary"}
+                onClick={secondaryAction.onClick}
+              >
+                {secondaryAction.label}
+              </Button>
+            ) : null}
+            {primaryAction ? (
+              <Button
+                size="sm"
+                variant={primaryAction.variant ?? "default"}
+                onClick={primaryAction.onClick}
+              >
+                {primaryAction.label}
+              </Button>
+            ) : null}
+          </div>
+        ) : null}
+        {hint ? (
+          <p className="mt-3 text-[11px] text-muted">{hint}</p>
+        ) : null}
       </div>
     </div>
   );

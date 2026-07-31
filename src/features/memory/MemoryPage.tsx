@@ -266,7 +266,12 @@ export function MemoryPage() {
         ) : (memoriesQuery.data?.length ?? 0) === 0 ? (
           <EmptyState
             title="还没有记忆"
-            body="快速记录窗口可直接创建记忆，也支持转为任务。"
+            body="适合保存短文本、链接和可检索的片段；也可稍后转为任务。"
+            primaryAction={{
+              label: "新建记忆",
+              onClick: () => createMutation.mutate(),
+            }}
+            hint="快速记录里可切换到「记忆」"
           />
         ) : (
           <div>

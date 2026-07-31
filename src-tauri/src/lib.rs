@@ -5,7 +5,9 @@ mod application;
 mod commands;
 mod domain;
 mod infrastructure;
+mod menu_bar;
 mod platform;
+mod shortcuts;
 
 use app_state::AppState;
 use infrastructure::db::Database;
@@ -152,76 +154,6 @@ fn setup_tray(app: &tauri::AppHandle) -> tauri::Result<()> {
     Ok(())
 }
 
-fn register_default_shortcuts(app: &tauri::AppHandle) {
-    use tauri_plugin_global_shortcut::{Code, GlobalShortcutExt, Modifiers, Shortcut, ShortcutState};
-
-    #[cfg(target_os = "macos")]
-    let shortcuts = [
-        (
-            "capture",
-            Shortcut::new(Some(Modifiers::SUPER | Modifiers::SHIFT), Code::Space),
-        ),
-        (
-            "search",
-            Shortcut::new(Some(Modifiers::SUPER | Modifiers::SHIFT), Code::KeyF),
-        ),
-        (
-            "clipboard",
-            Shortcut::new(Some(Modifiers::SUPER | Modifiers::SHIFT), Code::KeyV),
-        ),
-        (
-            "main",
-            Shortcut::new(Some(Modifiers::SUPER | Modifiers::SHIFT), Code::KeyA),
-        ),
-    ];
-
-    #[cfg(not(target_os = "macos"))]
-    let shortcuts = [
-        (
-            "capture",
-            Shortcut::new(Some(Modifiers::CONTROL | Modifiers::SHIFT), Code::Space),
-        ),
-        (
-            "search",
-            Shortcut::new(Some(Modifiers::CONTROL | Modifiers::SHIFT), Code::KeyF),
-        ),
-        (
-            "clipboard",
-            Shortcut::new(Some(Modifiers::CONTROL | Modifiers::SHIFT), Code::KeyV),
-        ),
-        (
-            "main",
-            Shortcut::new(Some(Modifiers::CONTROL | Modifiers::SHIFT), Code::KeyA),
-        ),
-    ];
-
-    for (kind, shortcut) in shortcuts {
-        let kind = kind.to_string();
-        if let Err(err) = app.global_shortcut().on_shortcut(shortcut, move |app, _shortcut, event| {
-            if event.state != ShortcutState::Pressed {
-                return;
-            }
-            match kind.as_str() {
-                "capture" => {
-                    let _ = commands::window_show_quick(app.clone(), Some("capture".into()));
-                }
-                "search" => {
-                    let _ = commands::window_show_quick(app.clone(), Some("search".into()));
-                }
-                "clipboard" => {
-                    let _ = commands::window_show_quick(app.clone(), Some("clip".into()));
-                }
-                "main" => {
-                    let _ = commands::window_show_main(app.clone());
-                }
-                _ => {}
-            }
-        }) {
-            tracing::warn!(error = %err, "failed to register global shortcut; remapping will be available in settings");
-        }
-    }
-}
-
 fn hide_on_close(app: &tauri::AppHandle, label: &str) {
     if let Some(window) = app.get_webview_window(label) {
         let handle = app.clone();
@@ -295,7 +227,11 @@ pub fn run() {
             app.manage(state);
 
             setup_tray(app.handle())?;
-            register_default_shortcuts(app.handle());
+            menu_bar::setup_app_menu(app.handle())?;
+            let shortcut_result = shortcuts::apply_shortcuts(app.handle());
+            if !shortcut_result.ok {
+                tracing::warn!(errors = ?shortcut_result.errors, "some global shortcuts failed to register");
+            }
             hide_on_close(app.handle(), "main");
             hide_on_close(app.handle(), "quick");
             application::scheduler::start(app.handle().clone(), reminders);
@@ -308,6 +244,7 @@ pub fn run() {
             commands::settings_get,
             commands::settings_save,
             commands::settings_reset_shortcuts,
+            commands::shortcuts_apply,
             commands::smoke_note_create,
             commands::smoke_note_list,
             commands::smoke_note_delete,
