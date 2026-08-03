@@ -169,6 +169,54 @@ fn hide_on_close(app: &tauri::AppHandle, label: &str) {
     }
 }
 
+/// Guards against a persisted window state that restores the main window to an
+/// oversized or off-screen frame (e.g. a corrupted .window-state.json).
+fn clamp_main_window(app: &tauri::AppHandle) {
+    use tauri::{LogicalSize, Manager};
+    let Some(window) = app.get_webview_window("main") else {
+        return;
+    };
+    let Ok(Some(monitor)) = window.current_monitor() else {
+        return;
+    };
+    let area = monitor.work_area();
+    let Ok(size) = window.outer_size() else {
+        return;
+    };
+    if size.width > area.size.width.saturating_mul(2)
+        || size.height > area.size.height.saturating_mul(2)
+    {
+        tracing::warn!(size = ?size, area = ?area, "resetting oversized main window");
+        if window.set_size(LogicalSize::new(1080.0, 720.0)).is_err() {
+            return;
+        }
+    }
+    let Ok(pos) = window.outer_position() else {
+        return;
+    };
+    let Ok(size) = window.outer_size() else {
+        return;
+    };
+    let center_x = pos.x + (size.width as i32) / 2;
+    let center_y = pos.y + (size.height as i32) / 2;
+    let on_screen = window
+        .available_monitors()
+        .map(|mons| {
+            mons.iter().any(|m| {
+                let r = m.work_area();
+                center_x >= r.position.x
+                    && center_x <= r.position.x + r.size.width as i32
+                    && center_y >= r.position.y
+                    && center_y <= r.position.y + r.size.height as i32
+            })
+        })
+        .unwrap_or(false);
+    if !on_screen {
+        tracing::warn!(pos = ?pos, "centering off-screen main window");
+        let _ = window.center();
+    }
+}
+
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     logging::init_logging();
@@ -225,6 +273,20 @@ pub fn run() {
             };
 
             app.manage(state);
+
+            clamp_main_window(app.handle());
+            // The window-state plugin applies the restored geometry after setup,
+            // so also re-check once the restore has taken effect.
+            {
+                let handle = app.handle().clone();
+                std::thread::spawn(move || {
+                    std::thread::sleep(std::time::Duration::from_millis(600));
+                    let target = handle.clone();
+                    let _ = handle.run_on_main_thread(move || {
+                        clamp_main_window(&target);
+                    });
+                });
+            }
 
             setup_tray(app.handle())?;
             menu_bar::setup_app_menu(app.handle())?;
