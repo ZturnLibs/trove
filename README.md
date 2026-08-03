@@ -40,8 +40,8 @@ CI（`.github/workflows/release.yml`）在推送 `v*` 标签时构建 macOS（�
 2. 提交后打标签并推送：
 
    ```bash
-   git tag v1.2.0
-   git push origin v1.2.0
+   git tag v0.0.1
+   git push origin v0.0.1
    ```
 
 3. Actions 跑完后到 [Releases](../../releases) 页发布草稿。
