@@ -1001,6 +1001,10 @@ pub fn window_show_main(app: tauri::AppHandle) -> Result<(), AppError> {
 pub fn window_show_quick(app: tauri::AppHandle, mode: Option<String>) -> Result<(), AppError> {
     use tauri::Manager;
 
+    // Anchor the popover to the tray (or a centered fallback) before showing,
+    // so menu / global-shortcut / tray-menu entries all share the same position.
+    crate::show_quick_anchored(&app).map_err(|e| AppError::new("window_error", e.to_string()))?;
+
     if let Some(window) = app.get_webview_window("quick") {
         let mode = mode.unwrap_or_else(|| "capture".into());
         let _ = window.emit("quick://set-mode", mode);

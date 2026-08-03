@@ -26,12 +26,11 @@
         "title": "快速记录",
         "width": 560,
         "height": 420,
-        "resizable": true,
+        "resizable": false,
         "visible": false,
-        "decorations": true,
+        "decorations": false,
         "alwaysOnTop": true,
-        "skipTaskbar": true,
-        "center": true
+        "skipTaskbar": true
       }
     ],
     "security": {

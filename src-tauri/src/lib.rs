@@ -15,8 +15,10 @@ use infrastructure::logging;
 use tauri::{
     menu::{Menu, MenuItem},
     tray::{MouseButton, MouseButtonState, TrayIconBuilder, TrayIconEvent},
-    Emitter, Manager, WindowEvent,
+    PhysicalPosition, PhysicalSize, Rect, Emitter, Manager, WindowEvent,
 };
+use std::sync::atomic::{AtomicI64, AtomicU64, Ordering};
+use std::sync::Mutex;
 use tauri_plugin_autostart::{MacosLauncher, ManagerExt};
 
 fn resolve_db_path(app: &tauri::AppHandle) -> Result<std::path::PathBuf, String> {
@@ -81,10 +83,10 @@ fn setup_tray(app: &tauri::AppHandle) -> tauri::Result<()> {
     )?;
 
     let toggle_item = toggle_clipboard.clone();
-    let _tray = TrayIconBuilder::new()
+    let _tray = TrayIconBuilder::with_id("main")
         .icon(app.default_window_icon().unwrap().clone())
         .menu(&menu)
-        .show_menu_on_left_click(cfg!(target_os = "macos"))
+        .show_menu_on_left_click(false)
         .on_menu_event(move |app, event| match event.id.as_ref() {
             "show_main" => {
                 let _ = commands::window_show_main(app.clone());
@@ -132,21 +134,28 @@ fn setup_tray(app: &tauri::AppHandle) -> tauri::Result<()> {
             _ => {}
         })
         .on_tray_icon_event(|tray, event| {
+            // Cache the tray-icon rect so the global-shortcut path (which has
+            // no click event) can still anchor the popover to the tray.
+            if let Ok(mut guard) = LAST_TRAY_RECT.lock() {
+                let rect = match &event {
+                    TrayIconEvent::Click { rect, .. }
+                    | TrayIconEvent::DoubleClick { rect, .. }
+                    | TrayIconEvent::Enter { rect, .. }
+                    | TrayIconEvent::Move { rect, .. }
+                    | TrayIconEvent::Leave { rect, .. } => Some(*rect),
+                    _ => None,
+                };
+                *guard = rect;
+            }
             if let TrayIconEvent::Click {
                 button: MouseButton::Left,
                 button_state: MouseButtonState::Up,
+                rect,
                 ..
             } = event
             {
-                #[cfg(not(target_os = "macos"))]
-                {
-                    let app = tray.app_handle();
-                    let _ = commands::window_show_main(app.clone());
-                }
-                #[cfg(target_os = "macos")]
-                {
-                    let _ = tray;
-                }
+                let app = tray.app_handle();
+                toggle_quick_from_tray(&app, &rect);
             }
         })
         .build(app)?;
@@ -217,6 +226,150 @@ fn clamp_main_window(app: &tauri::AppHandle) {
     }
 }
 
+// --- 快速记录托盘锚定弹层（quick-capture tray popover） ---
+
+/// Gap between the tray icon and the popover, in physical pixels.
+const QUICK_POPOVER_GAP: f64 = 6.0;
+/// Ignore focus-loss within this many ms after show, so the show→focus
+/// transition doesn't instantly dismiss the popover.
+const QUICK_SHOW_GRACE_MS: i64 = 150;
+/// Blur-hide is deferred this long so a tray click arriving right after the
+/// blur (which it causes) can cancel it — keeping click-to-toggle reliable
+/// regardless of whether the blur or the click event is delivered first.
+const QUICK_BLUR_HIDE_DELAY_MS: u64 = 120;
+
+static QUICK_LAST_SHOWN_MS: AtomicI64 = AtomicI64::new(0);
+/// Monotonic counter for cancelable deferred blur-hides. A tray click bumps it
+/// to invalidate any hide scheduled by the focus-loss the click itself caused.
+static QUICK_BLUR_TOKEN: AtomicU64 = AtomicU64::new(0);
+/// Last seen tray-icon rect (cached from tray events) so the global-shortcut
+/// path — which has no click event — can still anchor to the tray.
+static LAST_TRAY_RECT: Mutex<Option<Rect>> = Mutex::new(None);
+
+fn now_ms() -> i64 {
+    chrono::Local::now().timestamp_millis()
+}
+
+/// Position the quick window anchored to a tray-icon rect (physical coordinates).
+/// macOS: drops below the menu-bar icon; Windows: rises above the system-tray icon.
+fn position_quick_at_tray(app: &tauri::AppHandle, rect: &Rect) -> tauri::Result<()> {
+    let Some(window) = app.get_webview_window("quick") else {
+        return Ok(());
+    };
+    let scale = window.scale_factor().unwrap_or(1.0);
+    let icon_pos = rect.position.to_physical::<f64>(scale);
+    let icon_size = rect.size.to_physical::<f64>(scale);
+    let icon_cx = icon_pos.x + icon_size.width / 2.0;
+    let icon_bottom = icon_pos.y + icon_size.height;
+
+    let panel = window.outer_size()?;
+    let (pw, ph) = (panel.width as f64, panel.height as f64);
+
+    let monitor = window
+        .monitor_from_point(icon_cx, icon_pos.y)?
+        .or_else(|| window.current_monitor().ok().flatten());
+    let (x, y) = match monitor.as_ref().map(|m| m.work_area()) {
+        Some(area) => {
+            let (ax, ay) = (area.position.x as f64, area.position.y as f64);
+            let (aw, ah) = (area.size.width as f64, area.size.height as f64);
+            let x = (icon_cx - pw / 2.0).clamp(ax, (ax + aw - pw).max(ax));
+            // macOS: tray sits in the top menu bar -> popover below the icon.
+            // Windows: tray sits in the bottom-right -> popover above the icon.
+            let mut y = if cfg!(target_os = "macos") {
+                icon_bottom + QUICK_POPOVER_GAP
+            } else {
+                icon_pos.y - ph - QUICK_POPOVER_GAP
+            };
+            // If the "above" placement overflows the work-area top, fall back to below.
+            if y < ay {
+                y = icon_bottom + QUICK_POPOVER_GAP;
+            }
+            let y = y.clamp(ay, (ay + ah - ph).max(ay));
+            (x, y)
+        }
+        None => (icon_cx - pw / 2.0, icon_bottom + QUICK_POPOVER_GAP),
+    };
+    window.set_position(PhysicalPosition::new(x.round() as i32, y.round() as i32))?;
+    Ok(())
+}
+
+/// Fallback rect (upper-third of the current monitor) when no tray rect is known yet.
+fn default_center_rect(app: &tauri::AppHandle) -> Rect {
+    let (w, h) = (560.0_f64, 420.0_f64);
+    if let Some(window) = app.get_webview_window("quick") {
+        if let Ok(Some(monitor)) = window.current_monitor() {
+            let area = monitor.work_area();
+            let cx = area.position.x as f64 + area.size.width as f64 / 2.0;
+            let top = area.position.y as f64 + area.size.height as f64 / 3.0;
+            return Rect {
+                position: PhysicalPosition::new(cx - w / 2.0, top).into(),
+                size: PhysicalSize::new(w, h).into(),
+            };
+        }
+    }
+    Rect::default()
+}
+
+/// Anchor the quick window to the tray (or a centered fallback) and stamp the
+/// show timestamp. Caller is still responsible for emit/show/focus.
+pub fn show_quick_anchored(app: &tauri::AppHandle) -> tauri::Result<()> {
+    let rect = LAST_TRAY_RECT
+        .lock()
+        .ok()
+        .and_then(|guard| *guard)
+        .unwrap_or_else(|| default_center_rect(app));
+    position_quick_at_tray(app, &rect)?;
+    QUICK_LAST_SHOWN_MS.store(now_ms(), Ordering::SeqCst);
+    Ok(())
+}
+
+/// Tray left-click: toggle the popover. Cancels any pending blur-hide first,
+/// so the focus-loss caused by the click itself can't race with this handler.
+fn toggle_quick_from_tray(app: &tauri::AppHandle, rect: &Rect) {
+    QUICK_BLUR_TOKEN.fetch_add(1, Ordering::SeqCst);
+    let Some(window) = app.get_webview_window("quick") else {
+        return;
+    };
+    if window.is_visible().unwrap_or(false) {
+        let _ = window.hide();
+        return;
+    }
+    let _ = position_quick_at_tray(app, rect);
+    let _ = window.emit("quick://set-mode", "capture");
+    let _ = window.show();
+    let _ = window.set_focus();
+    QUICK_LAST_SHOWN_MS.store(now_ms(), Ordering::SeqCst);
+}
+
+/// Auto-dismiss the popover when it loses focus (outside click / app switch),
+/// unless it just opened. The hide is deferred and cancelable so a tray click
+/// that follows the blur isn't fought over.
+fn setup_quick_blur_hide(app: &tauri::AppHandle) {
+    let Some(window) = app.get_webview_window("quick") else {
+        return;
+    };
+    let app = app.clone();
+    window.on_window_event(move |event| {
+        if !matches!(event, WindowEvent::Focused(false)) {
+            return;
+        }
+        if now_ms() - QUICK_LAST_SHOWN_MS.load(Ordering::SeqCst) < QUICK_SHOW_GRACE_MS {
+            return;
+        }
+        let token = QUICK_BLUR_TOKEN.fetch_add(1, Ordering::SeqCst) + 1;
+        let app = app.clone();
+        std::thread::spawn(move || {
+            std::thread::sleep(std::time::Duration::from_millis(QUICK_BLUR_HIDE_DELAY_MS));
+            if QUICK_BLUR_TOKEN.load(Ordering::SeqCst) != token {
+                return; // a tray click (or newer blur) invalidated this hide
+            }
+            if let Some(quick) = app.get_webview_window("quick") {
+                let _ = quick.hide();
+            }
+        });
+    });
+}
+
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     logging::init_logging();
@@ -225,7 +378,14 @@ pub fn run() {
         .plugin(tauri_plugin_opener::init())
         .plugin(tauri_plugin_notification::init())
         .plugin(tauri_plugin_clipboard_manager::init())
-        .plugin(tauri_plugin_window_state::Builder::default().build())
+        .plugin(
+            tauri_plugin_window_state::Builder::default()
+                // The quick popover is transient and positioned on every show;
+                // exclude it so a stale saved geometry (e.g. from when it had a
+                // title bar) doesn't override the configured 560×420.
+                .with_denylist(&["quick"])
+                .build(),
+        )
         .plugin(tauri_plugin_autostart::init(
             MacosLauncher::LaunchAgent,
             None,
@@ -296,6 +456,7 @@ pub fn run() {
             }
             hide_on_close(app.handle(), "main");
             hide_on_close(app.handle(), "quick");
+            setup_quick_blur_hide(app.handle());
             application::scheduler::start(app.handle().clone(), reminders);
             application::clipboard_poller::start(app.handle().clone(), clipboard);
 
