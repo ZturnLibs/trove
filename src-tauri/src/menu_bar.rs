@@ -303,12 +303,12 @@ pub fn setup_app_menu(app: &AppHandle) -> tauri::Result<()> {
 
     #[cfg(target_os = "macos")]
     let menu = {
-        let about = PredefinedMenuItem::about(app, Some("关于工作台"), None)?;
+        let about = PredefinedMenuItem::about(app, Some("关于 Trove"), None)?;
         let settings =
             MenuItem::with_id(app, "menu.app.settings", "设置…", true, Some("CmdOrCtrl+,"))?;
         let app_menu = Submenu::with_items(
             app,
-            "工作台",
+            "Trove",
             true,
             &[
                 &about,
@@ -317,11 +317,11 @@ pub fn setup_app_menu(app: &AppHandle) -> tauri::Result<()> {
                 &PredefinedMenuItem::separator(app)?,
                 &PredefinedMenuItem::services(app, None)?,
                 &PredefinedMenuItem::separator(app)?,
-                &PredefinedMenuItem::hide(app, Some("隐藏工作台"))?,
+                &PredefinedMenuItem::hide(app, Some("隐藏 Trove"))?,
                 &PredefinedMenuItem::hide_others(app, Some("隐藏其他"))?,
                 &PredefinedMenuItem::show_all(app, Some("显示全部"))?,
                 &PredefinedMenuItem::separator(app)?,
-                &PredefinedMenuItem::quit(app, Some("退出工作台"))?,
+                &PredefinedMenuItem::quit(app, Some("退出 Trove"))?,
             ],
         )?;
         Menu::with_items(

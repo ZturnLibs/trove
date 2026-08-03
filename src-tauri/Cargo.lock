@@ -4470,6 +4470,36 @@ dependencies = [
 ]
 
 [[package]]
+name = "trove"
+version = "1.2.0"
+dependencies = [
+ "base64 0.22.1",
+ "chrono",
+ "directories",
+ "hex",
+ "image",
+ "parking_lot",
+ "rusqlite",
+ "serde",
+ "serde_json",
+ "sha2",
+ "tauri",
+ "tauri-build",
+ "tauri-plugin-autostart",
+ "tauri-plugin-clipboard-manager",
+ "tauri-plugin-global-shortcut",
+ "tauri-plugin-notification",
+ "tauri-plugin-opener",
+ "tauri-plugin-single-instance",
+ "tauri-plugin-window-state",
+ "tempfile",
+ "thiserror 2.0.19",
+ "tracing",
+ "tracing-subscriber",
+ "uuid",
+]
+
+[[package]]
 name = "try-lock"
 version = "0.2.5"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -5408,36 +5438,6 @@ dependencies = [
  "wayland-client",
  "wayland-protocols",
  "wayland-protocols-wlr",
-]
-
-[[package]]
-name = "workbench"
-version = "1.2.0"
-dependencies = [
- "base64 0.22.1",
- "chrono",
- "directories",
- "hex",
- "image",
- "parking_lot",
- "rusqlite",
- "serde",
- "serde_json",
- "sha2",
- "tauri",
- "tauri-build",
- "tauri-plugin-autostart",
- "tauri-plugin-clipboard-manager",
- "tauri-plugin-global-shortcut",
- "tauri-plugin-notification",
- "tauri-plugin-opener",
- "tauri-plugin-single-instance",
- "tauri-plugin-window-state",
- "tempfile",
- "thiserror 2.0.19",
- "tracing",
- "tracing-subscriber",
- "uuid",
 ]
 
 [[package]]

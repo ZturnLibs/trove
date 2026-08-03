@@ -1,8 +1,8 @@
 {
   "$schema": "https://schema.tauri.app/config/2",
-  "productName": "工作台",
+  "productName": "Trove",
   "version": "1.2.0",
-  "identifier": "com.workbench.app",
+  "identifier": "com.trove.app",
   "build": {
     "beforeDevCommand": "pnpm dev",
     "devUrl": "http://localhost:4720",
@@ -13,7 +13,7 @@
     "windows": [
       {
         "label": "main",
-        "title": "工作台",
+        "title": "Trove",
         "width": 1080,
         "height": 720,
         "minWidth": 880,

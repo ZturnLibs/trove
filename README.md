@@ -1,4 +1,4 @@
-# 工作台
+# Trove
 
 一站式个人工作台桌面应用（Tauri 2 + React + SQLite）。
 

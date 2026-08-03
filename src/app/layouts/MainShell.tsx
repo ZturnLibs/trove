@@ -75,7 +75,7 @@ export function MainShell() {
     <div className="flex h-full bg-surface text-foreground">
       <aside className="flex w-[200px] shrink-0 flex-col border-r border-border bg-sidebar">
         <div className="flex h-11 items-center px-3 text-[15px] font-semibold tracking-tight">
-          工作台
+          Trove
         </div>
         <nav className="flex flex-1 flex-col gap-0.5 px-2 py-1">
           {navItems.map(({ to, label, icon: Icon, badge }) => (
