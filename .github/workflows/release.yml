@@ -1,0 +1,82 @@
+name: release
+
+# 发布流程：推送 `v*` 标签触发，构建 macOS（通用二进制）与 Windows 安装包，
+# 汇总到一个 GitHub Draft Release，核对后再发布。
+# 平台范围对应文档「首批目标平台 macOS、Windows」；Linux 后续在 matrix 中加一项即可。
+
+on:
+  push:
+    tags:
+      - 'v*'
+
+permissions:
+  contents: write
+
+concurrency:
+  group: release-${{ github.ref }}
+  # 发布过程不可中途取消，避免产出半成品资产。
+  cancel-in-progress: false
+
+jobs:
+  # 标签必须与应用版本一致，否则构建出来的安装包版本号会对不上。
+  check-tag:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: 校验标签与版本一致
+        run: |
+          set -euo pipefail
+          PKG_VERSION=$(node -p "require('./package.json').version")
+          CONF_VERSION=$(node -e "console.log(require('./src-tauri/tauri.conf.json').version)")
+          TAG="${GITHUB_REF_NAME#v}"
+          echo "package.json: ${PKG_VERSION}"
+          echo "tauri.conf : ${CONF_VERSION}"
+          echo "tag        : ${TAG}"
+          if [ "${PKG_VERSION}" != "${TAG}" ] || [ "${CONF_VERSION}" != "${TAG}" ]; then
+            echo "::error::标签 (${TAG}) 与应用版本不一致（package.json=${PKG_VERSION}, tauri.conf=${CONF_VERSION}）"
+            exit 1
+          fi
+
+  publish:
+    needs: check-tag
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          # Apple Silicon 运行器构建 universal 包（同时覆盖 Intel 与 Apple Silicon）。
+          - platform: macos-14
+            args: '--target universal-apple-darwin'
+            rust-targets: 'aarch64-apple-darwin,x86_64-apple-darwin'
+          - platform: windows-latest
+            args: ''
+            rust-targets: ''
+    runs-on: ${{ matrix.platform }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 11
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: ${{ matrix.rust-targets }}
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: src-tauri
+      - run: pnpm install --frozen-lockfile
+      - uses: tauri-apps/tauri-action@v0
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          # 可选：配置以下密钥后会生成带签名的更新包（需同时在 tauri.conf.json 开启 updater 插件）。
+          TAURI_PRIVATE_KEY: ${{ secrets.TAURI_PRIVATE_KEY }}
+          TAURI_KEY_PASSWORD: ${{ secrets.TAURI_KEY_PASSWORD }}
+        with:
+          tagName: ${{ github.ref_name }}
+          releaseName: 'Trove ${{ github.ref_name }}'
+          releaseDraft: true
+          prerelease: false
+          generateReleaseNotes: true
+          args: ${{ matrix.args }}

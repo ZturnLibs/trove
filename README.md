@@ -31,3 +31,19 @@ Rust 数据层测试：
 ```bash
 cd src-tauri && cargo test
 ```
+
+## 发布新版本
+
+CI（`.github/workflows/release.yml`）在推送 `v*` 标签时构建 macOS（通用二进制）与 Windows 安装包，并汇总为一个 GitHub **Draft Release**，核对后再发布。
+
+1. 同步更新 `package.json` 与 `src-tauri/tauri.conf.json` 的 `version`；
+2. 提交后打标签并推送：
+
+   ```bash
+   git tag v1.2.0
+   git push origin v1.2.0
+   ```
+
+3. Actions 跑完后到 [Releases](../../releases) 页发布草稿。
+
+> 标签必须与应用版本一致，否则 CI 在 `check-tag` 阶段失败。当前 macOS / Windows 为未签名构建，首次打开会有系统提示；签名与自动更新可后续接入。
