@@ -54,6 +54,21 @@ export function QuickWindow() {
       if (next === "capture" || next === "search" || next === "clip") {
         setQuickMode(next);
       }
+      // Every show re-emits this event — use it as the "just invoked" hook.
+      if (next === "capture") {
+        // Start each capture fresh: clear any text left from a dismissed-attempt.
+        setTitle("");
+        setBody("");
+        setDueDate("");
+        setFireAt("");
+        setPriority("none");
+        setDaily(false);
+        setAmbiguous([]);
+        setParsedHint(null);
+        setError(null);
+      }
+      // Focus the active mode's input after the (possible) mode switch renders.
+      requestAnimationFrame(() => inputRef.current?.focus());
     }).then((fn) => {
       unlisten = fn;
     });

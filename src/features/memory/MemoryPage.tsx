@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Pin } from "lucide-react";
 import { EmptyState } from "@/components/PageScaffold";
@@ -38,14 +38,18 @@ function linkify(text: string) {
 function MemoryDetail({
   memory,
   onDeleted,
+  focusTitleId,
 }: {
   memory: Memory | null;
   onDeleted?: () => void;
+  /** When set to the memory's id (e.g. right after "新建"), focus + select its title. */
+  focusTitleId?: string | null;
 }) {
   const queryClient = useQueryClient();
   const [draft, setDraft] = useState<UpdateMemoryInput | null>(null);
   const [tagText, setTagText] = useState("");
   const [preview, setPreview] = useState(false);
+  const titleRef = useRef<HTMLInputElement>(null);
 
   useEffect(() => {
     if (!memory) {
@@ -64,6 +68,16 @@ function MemoryDetail({
     });
     setTagText(memory.tagNames.join(", "));
   }, [memory]);
+
+  // Newly created memory: focus + select the title so typing replaces "新记忆".
+  useEffect(() => {
+    if (memory && focusTitleId && memory.id === focusTitleId) {
+      requestAnimationFrame(() => {
+        titleRef.current?.focus();
+        titleRef.current?.select();
+      });
+    }
+  }, [memory, focusTitleId]);
 
   const saveMutation = useMutation({
     mutationFn: (input: UpdateMemoryInput) => ipc.memoryUpdate(input),
@@ -119,6 +133,7 @@ function MemoryDetail({
       </div>
       <div className="min-h-0 flex-1 space-y-3 overflow-auto p-3">
         <Input
+          ref={titleRef}
           value={draft.title}
           onChange={(e) => setDraft({ ...draft, title: e.target.value })}
           onBlur={save}
@@ -239,6 +254,7 @@ export function MemoryPage() {
   const queryClient = useQueryClient();
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [pinnedOnly, setPinnedOnly] = useState(false);
+  const [createdId, setCreatedId] = useState<string | null>(null);
 
   const memoriesQuery = useQuery({
     queryKey: ["memories", { pinnedOnly }],
@@ -250,6 +266,7 @@ export function MemoryPage() {
     onSuccess: (memory) => {
       void queryClient.invalidateQueries({ queryKey: ["memories"] });
       setSelectedId(memory.id);
+      setCreatedId(memory.id);
     },
   });
 
@@ -319,6 +336,7 @@ export function MemoryPage() {
         <MemoryDetail
           memory={selected}
           onDeleted={() => setSelectedId(null)}
+          focusTitleId={createdId}
         />
       }
     />

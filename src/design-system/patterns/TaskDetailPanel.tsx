@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { AttachmentsSection } from "@/design-system/patterns/AttachmentsSection";
 import { Button } from "@/design-system/primitives/Button";
@@ -13,9 +13,12 @@ import {
 export function TaskDetailPanel({
   task,
   onDeleted,
+  focusTitleId,
 }: {
   task: Task | null;
   onDeleted?: () => void;
+  /** When set to the task's id (e.g. right after "新建"), focus + select its title. */
+  focusTitleId?: string | null;
 }) {
   const queryClient = useQueryClient();
   const listsQuery = useQuery({
@@ -26,6 +29,7 @@ export function TaskDetailPanel({
   const [draft, setDraft] = useState<UpdateTaskInput | null>(null);
   const [tagText, setTagText] = useState("");
   const [error, setError] = useState<string | null>(null);
+  const titleRef = useRef<HTMLInputElement>(null);
 
   useEffect(() => {
     if (!task) {
@@ -45,6 +49,16 @@ export function TaskDetailPanel({
     setTagText(task.tagNames.join(", "));
     setError(null);
   }, [task]);
+
+  // Newly created task: focus + select the title so typing replaces "新任务".
+  useEffect(() => {
+    if (task && focusTitleId && task.id === focusTitleId) {
+      requestAnimationFrame(() => {
+        titleRef.current?.focus();
+        titleRef.current?.select();
+      });
+    }
+  }, [task, focusTitleId]);
 
   const saveMutation = useMutation({
     mutationFn: (input: UpdateTaskInput) => ipc.taskUpdate(input),
@@ -113,6 +127,7 @@ export function TaskDetailPanel({
 
       <div className="min-h-0 flex-1 space-y-3 overflow-auto p-3">
         <Input
+          ref={titleRef}
           value={draft.title}
           onChange={(e) => setDraft({ ...draft, title: e.target.value })}
           onBlur={save}

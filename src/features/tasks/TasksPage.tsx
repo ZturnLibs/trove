@@ -36,6 +36,7 @@ export function TasksPage() {
   const [priority, setPriority] = useState<TaskPriority | "all">("all");
   const [smart, setSmart] = useState<SmartListKind | "none">("none");
   const [newListName, setNewListName] = useState("");
+  const [createdId, setCreatedId] = useState<string | null>(null);
 
   const listsQuery = useQuery({
     queryKey: ["task-lists"],
@@ -64,6 +65,7 @@ export function TasksPage() {
     onSuccess: (task) => {
       void queryClient.invalidateQueries({ queryKey: ["tasks"] });
       setSelectedId(task.id);
+      setCreatedId(task.id);
     },
   });
 
@@ -284,6 +286,7 @@ export function TasksPage() {
         <TaskDetailPanel
           task={selected}
           onDeleted={() => setSelectedId(null)}
+          focusTitleId={createdId}
         />
       }
     />

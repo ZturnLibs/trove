@@ -16,6 +16,7 @@ export function InboxPage() {
   useDomainInvalidation();
   const queryClient = useQueryClient();
   const [selectedId, setSelectedId] = useState<string | null>(null);
+  const [createdId, setCreatedId] = useState<string | null>(null);
 
   const settingsQuery = useQuery({
     queryKey: ["settings"],
@@ -33,6 +34,7 @@ export function InboxPage() {
     onSuccess: (task) => {
       void queryClient.invalidateQueries({ queryKey: ["tasks"] });
       setSelectedId(task.id);
+      setCreatedId(task.id);
     },
   });
 
@@ -129,6 +131,7 @@ export function InboxPage() {
         <TaskDetailPanel
           task={selected}
           onDeleted={() => setSelectedId(null)}
+          focusTitleId={createdId}
         />
       }
     />

@@ -84,6 +84,7 @@ export function TodayPage() {
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [selectedReminderId, setSelectedReminderId] = useState<string | null>(null);
   const [completedCollapsed, setCompletedCollapsed] = useState(true);
+  const [createdId, setCreatedId] = useState<string | null>(null);
 
   const todayQuery = useQuery({
     queryKey: ["tasks", "today"],
@@ -99,6 +100,7 @@ export function TodayPage() {
     onSuccess: (task) => {
       void queryClient.invalidateQueries({ queryKey: ["tasks"] });
       setSelectedId(task.id);
+      setCreatedId(task.id);
       setSelectedReminderId(null);
     },
   });
@@ -352,6 +354,7 @@ export function TodayPage() {
           <TaskDetailPanel
             task={selected}
             onDeleted={() => setSelectedId(null)}
+            focusTitleId={createdId}
           />
         )
       }
