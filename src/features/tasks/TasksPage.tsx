@@ -36,6 +36,7 @@ export function TasksPage() {
   const [listId, setListId] = useState<string>("all");
   const [status, setStatus] = useState<TaskStatus | "active">("active");
   const [priority, setPriority] = useState<TaskPriority | "all">("all");
+  const [tagId, setTagId] = useState<string | null>(null);
   const [smart, setSmart] = useState<SmartListKind | "none">("none");
   const [newListName, setNewListName] = useState("");
   const [createdId, setCreatedId] = useState<string | null>(null);
@@ -45,8 +46,13 @@ export function TasksPage() {
     queryFn: () => ipc.taskListLists(),
   });
 
+  const tagsQuery = useQuery({
+    queryKey: ["task-tags"],
+    queryFn: () => ipc.taskListTags(),
+  });
+
   const tasksQuery = useQuery({
-    queryKey: ["tasks", "list", listId, status, priority, smart],
+    queryKey: ["tasks", "list", listId, status, priority, smart, tagId],
     queryFn: () =>
       smart === "none"
         ? ipc.taskQuery({
@@ -54,6 +60,7 @@ export function TasksPage() {
             status: status === "active" ? undefined : status,
             includeArchived: status === "archived",
             priority: priority === "all" ? undefined : priority,
+            tagId: tagId ?? undefined,
           })
         : ipc.taskSmartList(smart),
   });
@@ -180,6 +187,20 @@ export function TasksPage() {
                 <option value="low">低</option>
                 <option value="none">无</option>
               </select>
+              <select
+                className="h-7 rounded-[var(--radius-control)] border border-border bg-surface-raised px-2 text-[12px]"
+                value={tagId ?? "all"}
+                onChange={(e) =>
+                  setTagId(e.target.value === "all" ? null : e.target.value)
+                }
+              >
+                <option value="all">全部标签</option>
+                {(tagsQuery.data ?? []).map((tag) => (
+                  <option key={tag.id} value={tag.id}>
+                    {tag.name}
+                  </option>
+                ))}
+              </select>
             </>
           ) : null}
           {selectedId ? (
@@ -243,14 +264,20 @@ export function TasksPage() {
           ) : (tasksQuery.data?.length ?? 0) === 0 ? (
             <EmptyState
               title={
-                smart !== "none" || status !== "active" || priority !== "all"
+                smart !== "none" ||
+                status !== "active" ||
+                priority !== "all" ||
+                tagId !== null
                   ? "没有匹配的任务"
                   : listId === "all"
                     ? "还没有任务"
                     : "这个清单还是空的"
               }
               body={
-                smart !== "none" || status !== "active" || priority !== "all"
+                smart !== "none" ||
+                status !== "active" ||
+                priority !== "all" ||
+                tagId !== null
                   ? "调整筛选条件，或新建任务。"
                   : "把收件箱里的任务移过来，或直接新建。"
               }
@@ -259,13 +286,17 @@ export function TasksPage() {
                 onClick: () => createMutation.mutate(),
               }}
               secondaryAction={
-                smart !== "none" || status !== "active" || priority !== "all"
+                smart !== "none" ||
+                status !== "active" ||
+                priority !== "all" ||
+                tagId !== null
                   ? {
                       label: "清除筛选",
                       onClick: () => {
                         setSmart("none");
                         setStatus("active");
                         setPriority("all");
+                        setTagId(null);
                       },
                     }
                   : undefined
