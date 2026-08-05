@@ -8,6 +8,12 @@ import { ShortcutRow } from "@/features/settings/ShortcutRow";
 import {
   ipc,
   type AppSettings,
+  type ItemTemplate,
+  type RecurrenceFrequency,
+  type RecurrenceRule,
+  type TaskPriority,
+  type TemplateKind,
+  type TemplatePreview,
   type ThemePreference,
 } from "@/ipc/client";
 
@@ -15,6 +21,31 @@ function formatBytes(n: number) {
   if (n < 1024) return `${n} B`;
   if (n < 1024 * 1024) return `${(n / 1024).toFixed(1)} KB`;
   return `${(n / (1024 * 1024)).toFixed(1)} MB`;
+}
+
+const KIND_LABEL: Record<TemplateKind, string> = {
+  task: "任务",
+  reminder: "提醒",
+  memory: "记忆",
+};
+
+const PRIORITY_LABEL: Record<TaskPriority, string> = {
+  none: "无",
+  low: "低",
+  medium: "中",
+  high: "高",
+};
+
+function recurrenceLabel(rule: RecurrenceRule): string {
+  const freq: Record<RecurrenceFrequency, string> = {
+    daily: "每天",
+    weekdays: "工作日",
+    weekly: "每周",
+    monthly: "每月",
+    everyNDays: `每 ${rule.interval} 天`,
+    everyNWeeks: `每 ${rule.interval} 周`,
+  };
+  return freq[rule.frequency] ?? "周期";
 }
 
 export function SettingsPage() {
@@ -43,6 +74,24 @@ export function SettingsPage() {
   const [backupKeepText, setBackupKeepText] = useState("");
   const [message, setMessage] = useState<string | null>(null);
   const [pendingImportFile, setPendingImportFile] = useState<File | null>(null);
+
+  // 新建模板表单
+  const [showCreateForm, setShowCreateForm] = useState(false);
+  const [templateName, setTemplateName] = useState("");
+  const [templateKind, setTemplateKind] = useState<TemplateKind>("task");
+  const [taskTitle, setTaskTitle] = useState("");
+  const [relativeDueDays, setRelativeDueDays] = useState("0");
+  const [priority, setPriority] = useState<TaskPriority>("none");
+  const [reminderTitle, setReminderTitle] = useState("");
+  const [relativeFireHours, setRelativeFireHours] = useState("0");
+  const [recurring, setRecurring] = useState(false);
+  const [memoryTitle, setMemoryTitle] = useState("");
+  const [memoryBody, setMemoryBody] = useState("");
+
+  // 应用前预览
+  const [previewing, setPreviewing] = useState<ItemTemplate | null>(null);
+  const [previewData, setPreviewData] = useState<TemplatePreview | null>(null);
+  const [previewError, setPreviewError] = useState<string | null>(null);
 
   const settings = settingsQuery.data;
   const health = healthQuery.data;
@@ -180,6 +229,124 @@ export function SettingsPage() {
     autostart: "开机启动",
     tray: "托盘",
   };
+
+  const handleKindChange = (kind: TemplateKind) => {
+    setTemplateKind(kind);
+    setTaskTitle("");
+    setReminderTitle("");
+    setMemoryTitle("");
+    setMemoryBody("");
+    // 清空各类型专属字段，避免切换后残留值串入其他类型
+    setRelativeDueDays("0");
+    setPriority("none");
+    setRelativeFireHours("0");
+    setRecurring(false);
+  };
+
+  const resetCreateForm = () => {
+    setTemplateName("");
+    setTemplateKind("task");
+    setTaskTitle("");
+    setRelativeDueDays("0");
+    setPriority("none");
+    setReminderTitle("");
+    setRelativeFireHours("0");
+    setRecurring(false);
+    setMemoryTitle("");
+    setMemoryBody("");
+  };
+
+  const buildTemplatePayload = (): Record<string, unknown> => {
+    if (templateKind === "task") {
+      return {
+        title: taskTitle.trim(),
+        relativeDueDays: Number(relativeDueDays) || 0,
+        priority,
+      };
+    }
+    if (templateKind === "reminder") {
+      return {
+        title: reminderTitle.trim(),
+        relativeFireHours: Number(relativeFireHours) || 0,
+        ...(recurring
+          ? {
+              recurrence: {
+                version: 1,
+                frequency: "daily" as const,
+                interval: 1,
+                timezone: Intl.DateTimeFormat().resolvedOptions().timeZone,
+              },
+            }
+          : {}),
+      };
+    }
+    return {
+      title: memoryTitle.trim(),
+      body: memoryBody,
+    };
+  };
+
+  const createTemplate = useMutation({
+    mutationFn: (input: {
+      kind: TemplateKind;
+      name: string;
+      payload: Record<string, unknown>;
+    }) => ipc.templateCreate(input),
+    onSuccess: (tpl) => {
+      void queryClient.invalidateQueries({ queryKey: ["templates"] });
+      setMessage(`已创建模板「${tpl.name}」`);
+      setShowCreateForm(false);
+      resetCreateForm();
+    },
+    onError: (err) => {
+      setMessage(err instanceof Error ? err.message : "创建模板失败");
+    },
+  });
+
+  const openPreview = (tpl: ItemTemplate) => {
+    setPreviewing(tpl);
+    setPreviewData(null);
+    setPreviewError(null);
+    void ipc
+      .templatePreview(tpl.id)
+      .then((data) => setPreviewData(data))
+      .catch((err) =>
+        setPreviewError(err instanceof Error ? err.message : "解析模板失败"),
+      );
+  };
+
+  const closePreview = () => {
+    setPreviewing(null);
+    setPreviewData(null);
+    setPreviewError(null);
+  };
+
+  const applyTemplate = useMutation({
+    mutationFn: (id: string) => ipc.templateApply(id),
+    onSuccess: () => {
+      const name = previewing?.name ?? "";
+      void queryClient.invalidateQueries({ queryKey: ["templates"] });
+      void queryClient.invalidateQueries({ queryKey: ["tasks"] });
+      void queryClient.invalidateQueries({ queryKey: ["reminders"] });
+      void queryClient.invalidateQueries({ queryKey: ["memories"] });
+      setMessage(`已应用模板「${name}」`);
+      closePreview();
+    },
+    onError: (err) => {
+      setMessage(err instanceof Error ? err.message : "应用模板失败");
+    },
+  });
+
+  const currentTitle =
+    templateKind === "task"
+      ? taskTitle
+      : templateKind === "reminder"
+        ? reminderTitle
+        : memoryTitle;
+  const canCreate =
+    Boolean(templateName.trim()) &&
+    Boolean(currentTitle.trim()) &&
+    !createTemplate.isPending;
 
   return (
     <PageScaffold title="设置" description="备份、权限、快捷键与隐私说明">
@@ -361,7 +528,147 @@ export function SettingsPage() {
             >
               添加示例：报销
             </Button>
+            <Button
+              size="sm"
+              variant="secondary"
+              onClick={() => setShowCreateForm((v) => !v)}
+            >
+              {showCreateForm ? "收起表单" : "新建模板"}
+            </Button>
           </div>
+          {showCreateForm ? (
+            <div className="mt-3 space-y-2 rounded-[var(--radius-control)] border border-border bg-surface p-3 text-[12px]">
+              <div className="grid grid-cols-2 gap-2">
+                <label className="flex flex-col gap-1">
+                  <span className="text-muted">名称</span>
+                  <Input
+                    value={templateName}
+                    onChange={(e) => setTemplateName(e.target.value)}
+                    placeholder="模板名称"
+                  />
+                </label>
+                <label className="flex flex-col gap-1">
+                  <span className="text-muted">类型</span>
+                  <select
+                    className="h-8 w-full rounded-[var(--radius-control)] border border-border bg-surface-raised px-2 text-[13px] text-foreground outline-none focus:ring-2 focus:ring-accent/35"
+                    value={templateKind}
+                    onChange={(e) =>
+                      handleKindChange(e.target.value as TemplateKind)
+                    }
+                  >
+                    <option value="task">任务</option>
+                    <option value="reminder">提醒</option>
+                    <option value="memory">记忆</option>
+                  </select>
+                </label>
+              </div>
+              {templateKind === "task" ? (
+                <div className="grid grid-cols-2 gap-2">
+                  <label className="flex flex-col gap-1">
+                    <span className="text-muted">标题</span>
+                    <Input
+                      value={taskTitle}
+                      onChange={(e) => setTaskTitle(e.target.value)}
+                      placeholder="任务标题"
+                    />
+                  </label>
+                  <label className="flex flex-col gap-1">
+                    <span className="text-muted">相对截止天数</span>
+                    <Input
+                      type="number"
+                      min={0}
+                      value={relativeDueDays}
+                      onChange={(e) => setRelativeDueDays(e.target.value)}
+                    />
+                  </label>
+                  <label className="flex flex-col gap-1">
+                    <span className="text-muted">优先级</span>
+                    <select
+                      className="h-8 w-full rounded-[var(--radius-control)] border border-border bg-surface-raised px-2 text-[13px] text-foreground outline-none focus:ring-2 focus:ring-accent/35"
+                      value={priority}
+                      onChange={(e) =>
+                        setPriority(e.target.value as TaskPriority)
+                      }
+                    >
+                      <option value="none">无</option>
+                      <option value="low">低</option>
+                      <option value="medium">中</option>
+                      <option value="high">高</option>
+                    </select>
+                  </label>
+                </div>
+              ) : null}
+              {templateKind === "reminder" ? (
+                <div className="grid grid-cols-2 gap-2">
+                  <label className="flex flex-col gap-1">
+                    <span className="text-muted">标题</span>
+                    <Input
+                      value={reminderTitle}
+                      onChange={(e) => setReminderTitle(e.target.value)}
+                      placeholder="提醒标题"
+                    />
+                  </label>
+                  <label className="flex flex-col gap-1">
+                    <span className="text-muted">相对触发小时</span>
+                    <Input
+                      type="number"
+                      min={0}
+                      value={relativeFireHours}
+                      onChange={(e) => setRelativeFireHours(e.target.value)}
+                    />
+                  </label>
+                  <label className="flex items-center gap-2">
+                    <input
+                      type="checkbox"
+                      checked={recurring}
+                      onChange={(e) => setRecurring(e.target.checked)}
+                    />
+                    每天重复
+                  </label>
+                </div>
+              ) : null}
+              {templateKind === "memory" ? (
+                <div className="space-y-2">
+                  <label className="flex flex-col gap-1">
+                    <span className="text-muted">标题</span>
+                    <Input
+                      value={memoryTitle}
+                      onChange={(e) => setMemoryTitle(e.target.value)}
+                      placeholder="记忆标题"
+                    />
+                  </label>
+                  <label className="flex flex-col gap-1">
+                    <span className="text-muted">正文</span>
+                    <textarea
+                      rows={3}
+                      value={memoryBody}
+                      onChange={(e) => setMemoryBody(e.target.value)}
+                      className="w-full resize-none rounded-[var(--radius-control)] border border-border bg-surface-raised p-2 text-[13px] outline-none focus:ring-2 focus:ring-accent/35"
+                      placeholder="记忆正文（可选）"
+                    />
+                  </label>
+                </div>
+              ) : null}
+              <div className="flex items-center justify-between">
+                <span className="text-[11px] text-muted">
+                  相对日期在应用时解析为当天偏移
+                </span>
+                <Button
+                  size="sm"
+                  disabled={!canCreate}
+                  onClick={() =>
+                    createTemplate.mutate({
+                      kind: templateKind,
+                      name: templateName.trim(),
+                      payload: buildTemplatePayload(),
+                    })
+                  }
+                >
+                  创建
+                </Button>
+              </div>
+            </div>
+          ) : null}
           <ul className="mt-3 divide-y divide-border border-t border-border text-[12px]">
             {(templatesQuery.data ?? []).map((tpl) => (
               <li
@@ -376,12 +683,7 @@ export function SettingsPage() {
                   <Button
                     size="sm"
                     variant="ghost"
-                    onClick={() =>
-                      void ipc.templateApply(tpl.id).then(() => {
-                        setMessage(`已应用模板「${tpl.name}」`);
-                        void queryClient.invalidateQueries();
-                      })
-                    }
+                    onClick={() => openPreview(tpl)}
                   >
                     应用
                   </Button>
@@ -407,6 +709,112 @@ export function SettingsPage() {
             ) : null}
           </ul>
         </section>
+
+        {previewing ? (
+          <div className="fixed inset-0 z-50 flex items-center justify-center p-6">
+            <button
+              type="button"
+              aria-label="关闭预览"
+              className="absolute inset-0 cursor-default bg-black/40"
+              onClick={closePreview}
+            />
+            <div
+              className="relative max-h-[70vh] w-full max-w-md overflow-auto rounded-[var(--radius-panel)] border border-border bg-surface p-4 shadow-xl"
+              role="dialog"
+              aria-modal="true"
+              aria-label={`预览模板「${previewing.name}」`}
+            >
+              <div className="mb-3 flex items-center justify-between">
+                <h4 className="text-[13px] font-medium">
+                  {previewing.name}
+                  <span className="ml-2 text-muted">
+                    {KIND_LABEL[previewing.kind]}
+                  </span>
+                </h4>
+                <Button size="sm" variant="ghost" onClick={closePreview}>
+                  关闭
+                </Button>
+              </div>
+              {previewError ? (
+                <p className="text-[12px] text-danger">{previewError}</p>
+              ) : previewData ? (
+                <>
+                  <dl className="space-y-2 text-[12px]">
+                    <div>
+                      <dt className="text-muted">标题</dt>
+                      <dd>{previewData.title}</dd>
+                    </div>
+                    {previewData.body ? (
+                      <div>
+                        <dt className="text-muted">正文</dt>
+                        <dd className="whitespace-pre-wrap">
+                          {previewData.body}
+                        </dd>
+                      </div>
+                    ) : null}
+                    {previewData.dueDate || previewData.dueTime ? (
+                      <div>
+                        <dt className="text-muted">截止时间</dt>
+                        <dd>
+                          {previewData.dueDate}
+                          {previewData.dueDate && previewData.dueTime
+                            ? " "
+                            : ""}
+                          {previewData.dueTime ?? ""}
+                        </dd>
+                      </div>
+                    ) : null}
+                    {previewData.fireAt ? (
+                      <div>
+                        <dt className="text-muted">触发时间</dt>
+                        <dd>{previewData.fireAt.replace("T", " ")}</dd>
+                      </div>
+                    ) : null}
+                    {previewData.priority ? (
+                      <div>
+                        <dt className="text-muted">优先级</dt>
+                        <dd>{PRIORITY_LABEL[previewData.priority]}</dd>
+                      </div>
+                    ) : null}
+                    {previewData.tagNames.length > 0 ? (
+                      <div>
+                        <dt className="text-muted">标签</dt>
+                        <dd>{previewData.tagNames.join("、")}</dd>
+                      </div>
+                    ) : null}
+                    {previewData.recurrence ? (
+                      <div>
+                        <dt className="text-muted">周期</dt>
+                        <dd>{recurrenceLabel(previewData.recurrence)}</dd>
+                      </div>
+                    ) : null}
+                  </dl>
+                  <div className="mt-4 flex justify-end gap-2">
+                    <Button
+                      size="sm"
+                      variant="secondary"
+                      onClick={closePreview}
+                      disabled={applyTemplate.isPending}
+                    >
+                      取消
+                    </Button>
+                    <Button
+                      size="sm"
+                      onClick={() => applyTemplate.mutate(previewing.id)}
+                      disabled={applyTemplate.isPending}
+                    >
+                      确认应用
+                    </Button>
+                  </div>
+                </>
+              ) : (
+                <p className="p-4 text-center text-[12px] text-muted">
+                  解析中…
+                </p>
+              )}
+            </div>
+          </div>
+        ) : null}
 
         <section className="rounded-[var(--radius-panel)] border border-border bg-surface-raised p-4">
           <h2 className="text-[13px] font-semibold">剪切板</h2>

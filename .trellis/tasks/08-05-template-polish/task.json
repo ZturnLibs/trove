@@ -3,7 +3,7 @@
   "name": "template-polish",
   "title": "模板能力补齐",
   "description": "应用前调用 template_preview 展示结果；模板通用创建入口与编辑",
-  "status": "planning",
+  "status": "in_progress",
   "dev_type": null,
   "scope": null,
   "package": null,
