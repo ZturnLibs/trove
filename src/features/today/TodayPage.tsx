@@ -6,6 +6,7 @@ import { TaskRow } from "@/design-system/patterns/TaskRow";
 import { EmptyState } from "@/components/PageScaffold";
 import { NotificationPermissionBanner } from "@/components/NotificationPermissionBanner";
 import { Button } from "@/design-system/primitives/Button";
+import { Input } from "@/design-system/primitives/Input";
 import { ipc, type TodayReminderItem } from "@/ipc/client";
 import {
   NewTaskButton,
@@ -87,6 +88,8 @@ export function TodayPage() {
   const [selectedReminderId, setSelectedReminderId] = useState<string | null>(null);
   const [completedCollapsed, setCompletedCollapsed] = useState(true);
   const [createdId, setCreatedId] = useState<string | null>(null);
+  const [quickTitle, setQuickTitle] = useState("");
+  const [quickError, setQuickError] = useState<string | null>(null);
 
   const todayQuery = useQuery({
     queryKey: ["tasks", "today"],
@@ -123,6 +126,45 @@ export function TodayPage() {
       setSelectedId(null);
     },
   });
+
+  const quickAddMutation = useMutation({
+    mutationFn: async (text: string) => {
+      const parsed = await ipc.nlParseCapture(text);
+      const finalTitle = parsed.title.trim() || text;
+      const finalDue =
+        parsed.dueDate ??
+        todayQuery.data?.today ??
+        new Date().toISOString().slice(0, 10);
+      const finalPriority =
+        parsed.priority !== "none" ? parsed.priority : undefined;
+      const input = {
+        title: finalTitle,
+        dueDate: finalDue,
+        dueTime: parsed.dueTime,
+        priority: finalPriority,
+      };
+      if (parsed.recurrence) {
+        return ipc.taskCreateRecurring(input, parsed.recurrence);
+      }
+      return ipc.taskCreate(input);
+    },
+    onSuccess: (task) => {
+      void queryClient.invalidateQueries({ queryKey: ["tasks"] });
+      setQuickTitle("");
+      setQuickError(null);
+      setSelectedId(task.id);
+      setSelectedReminderId(null);
+    },
+    onError: (err) => {
+      setQuickError(err instanceof Error ? err.message : "创建失败");
+    },
+  });
+
+  const submitQuickAdd = () => {
+    const value = quickTitle.trim();
+    if (!value || quickAddMutation.isPending) return;
+    quickAddMutation.mutate(value);
+  };
 
   const toggleMutation = useMutation({
     mutationFn: async (id: string) => {
@@ -362,6 +404,38 @@ export function TodayPage() {
             focusTitleId={createdId}
           />
         )
+      }
+      footer={
+        <div className="p-2">
+          {quickError ? (
+            <p className="mb-2 text-[12px] text-danger">{quickError}</p>
+          ) : null}
+          <div className="flex items-center gap-2">
+            <Input
+              value={quickTitle}
+              onChange={(e) => {
+                setQuickTitle(e.target.value);
+                setQuickError(null);
+              }}
+              placeholder="快速添加任务，如：明天下午三点回复客户…"
+              onKeyDown={(e) => {
+                if (e.nativeEvent.isComposing) return;
+                if (e.key === "Enter") {
+                  e.preventDefault();
+                  submitQuickAdd();
+                }
+              }}
+            />
+            <Button
+              size="sm"
+              className="shrink-0"
+              disabled={!quickTitle.trim() || quickAddMutation.isPending}
+              onClick={() => submitQuickAdd()}
+            >
+              添加
+            </Button>
+          </div>
+        </div>
       }
     />
     </>

@@ -7,12 +7,14 @@ export function SplitTaskLayout({
   actions,
   list,
   detail,
+  footer,
 }: {
   title: string;
   description?: string;
   actions?: ReactNode;
   list: ReactNode;
   detail: ReactNode;
+  footer?: ReactNode;
 }) {
   return (
     <div className="flex h-full min-h-0 flex-col">
@@ -26,9 +28,12 @@ export function SplitTaskLayout({
         {actions ? <div className="flex items-center gap-2">{actions}</div> : null}
       </header>
       <div className="flex min-h-0 flex-1">
-        <section className="min-w-0 flex-1 overflow-auto border-r border-border bg-surface">
-          {list}
-        </section>
+        <div className="flex min-w-0 flex-1 flex-col border-r border-border bg-surface">
+          <section className="min-h-0 flex-1 overflow-auto">{list}</section>
+          {footer ? (
+            <div className="shrink-0 border-t border-border">{footer}</div>
+          ) : null}
+        </div>
         <aside className="w-[360px] shrink-0 overflow-hidden bg-surface-raised">
           {detail}
         </aside>
