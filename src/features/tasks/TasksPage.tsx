@@ -16,6 +16,7 @@ import {
   SplitTaskLayout,
 } from "@/features/tasks/TaskLayout";
 import { useDomainInvalidation } from "@/features/tasks/useDomainInvalidation";
+import { useTaskRename } from "@/features/tasks/useTaskRename";
 
 const smartLists: { id: SmartListKind | "none"; label: string }[] = [
   { id: "none", label: "清单视图" },
@@ -29,6 +30,7 @@ const smartLists: { id: SmartListKind | "none"; label: string }[] = [
 
 export function TasksPage() {
   useDomainInvalidation();
+  const rename = useTaskRename();
   const queryClient = useQueryClient();
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [listId, setListId] = useState<string>("all");
@@ -277,6 +279,7 @@ export function TasksPage() {
                 selected={selectedId === task.id}
                 onSelect={() => setSelectedId(task.id)}
                 onToggleComplete={() => toggleMutation.mutate(task.id)}
+                onRename={rename}
               />
             ))
           )}

@@ -13,6 +13,7 @@ import {
   TaskGroup,
 } from "@/features/tasks/TaskLayout";
 import { useDomainInvalidation } from "@/features/tasks/useDomainInvalidation";
+import { useTaskRename } from "@/features/tasks/useTaskRename";
 import { cn } from "@/lib/cn";
 
 function ReminderRow({
@@ -80,6 +81,7 @@ function ReminderRow({
 
 export function TodayPage() {
   useDomainInvalidation();
+  const rename = useTaskRename();
   const queryClient = useQueryClient();
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [selectedReminderId, setSelectedReminderId] = useState<string | null>(null);
@@ -229,6 +231,7 @@ export function TodayPage() {
                     setSelectedReminderId(null);
                   }}
                   onToggleComplete={() => toggleMutation.mutate(task.id)}
+                  onRename={rename}
                 />
               ))}
             </TaskGroup>
@@ -263,6 +266,7 @@ export function TodayPage() {
                     setSelectedReminderId(null);
                   }}
                   onToggleComplete={() => toggleMutation.mutate(task.id)}
+                  onRename={rename}
                 />
               ))}
             </TaskGroup>
@@ -282,6 +286,7 @@ export function TodayPage() {
                     setSelectedReminderId(null);
                   }}
                   onToggleComplete={() => toggleMutation.mutate(task.id)}
+                  onRename={rename}
                 />
               ))}
             </TaskGroup>

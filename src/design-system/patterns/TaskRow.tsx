@@ -1,4 +1,6 @@
+import { useEffect, useRef, useState } from "react";
 import { Check } from "lucide-react";
+import { Input } from "@/design-system/primitives/Input";
 import type { Task } from "@/ipc/client";
 import { cn } from "@/lib/cn";
 
@@ -15,14 +17,47 @@ export function TaskRow({
   overdue,
   onSelect,
   onToggleComplete,
+  onRename,
 }: {
   task: Task;
   selected?: boolean;
   overdue?: boolean;
   onSelect: () => void;
   onToggleComplete: () => void;
+  /** If provided, double-clicking the title edits it in place (optimistic). */
+  onRename?: (task: Task, title: string) => void | Promise<void>;
 }) {
   const done = task.status === "completed";
+  const [editing, setEditing] = useState(false);
+  const [draft, setDraft] = useState(task.title);
+  const inputRef = useRef<HTMLInputElement>(null);
+
+  useEffect(() => {
+    if (editing) {
+      requestAnimationFrame(() => {
+        inputRef.current?.focus();
+        inputRef.current?.select();
+      });
+    }
+  }, [editing]);
+
+  const startEdit = () => {
+    setDraft(task.title);
+    setEditing(true);
+  };
+
+  const commit = () => {
+    const trimmed = draft.trim();
+    if (trimmed && trimmed !== task.title) {
+      void onRename?.(task, trimmed);
+    }
+    setEditing(false);
+  };
+
+  const cancel = () => {
+    setDraft(task.title);
+    setEditing(false);
+  };
 
   return (
     <div
@@ -55,15 +90,43 @@ export function TaskRow({
         {done ? <Check className="h-3 w-3" /> : null}
       </button>
       <div className="min-w-0 flex-1">
-        <div
-          className={cn(
-            "truncate",
-            done && "text-muted line-through",
-            overdue && !done && "text-danger",
-          )}
-        >
-          {task.title}
-        </div>
+        {editing ? (
+          <Input
+            ref={inputRef}
+            value={draft}
+            onChange={(event) => setDraft(event.target.value)}
+            onClick={(event) => event.stopPropagation()}
+            onDoubleClick={(event) => event.stopPropagation()}
+            onKeyDown={(event) => {
+              // Keep keystrokes inside the field (the row binds Enter/Space to select).
+              event.stopPropagation();
+              if (event.key === "Enter") {
+                event.preventDefault();
+                commit();
+              } else if (event.key === "Escape") {
+                event.preventDefault();
+                cancel();
+              }
+            }}
+            onBlur={commit}
+            className="h-7 text-[13px]"
+          />
+        ) : (
+          <div
+            onDoubleClick={(event) => {
+              if (!onRename) return;
+              event.stopPropagation();
+              startEdit();
+            }}
+            className={cn(
+              "truncate",
+              done && "text-muted line-through",
+              overdue && !done && "text-danger",
+            )}
+          >
+            {task.title}
+          </div>
+        )}
       </div>
       {task.priority !== "none" ? (
         <span className="shrink-0 text-[11px] text-muted">

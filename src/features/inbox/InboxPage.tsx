@@ -11,9 +11,11 @@ import {
   SplitTaskLayout,
 } from "@/features/tasks/TaskLayout";
 import { useDomainInvalidation } from "@/features/tasks/useDomainInvalidation";
+import { useTaskRename } from "@/features/tasks/useTaskRename";
 
 export function InboxPage() {
   useDomainInvalidation();
+  const rename = useTaskRename();
   const queryClient = useQueryClient();
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [createdId, setCreatedId] = useState<string | null>(null);
@@ -122,6 +124,7 @@ export function InboxPage() {
                 selected={selectedId === task.id}
                 onSelect={() => setSelectedId(task.id)}
                 onToggleComplete={() => toggleMutation.mutate(task.id)}
+                onRename={rename}
               />
             ))}
           </div>
