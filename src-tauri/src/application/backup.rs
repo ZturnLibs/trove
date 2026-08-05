@@ -1,7 +1,7 @@
 use crate::domain::DomainError;
 use crate::infrastructure::db::Database;
 use chrono::Local;
-use rusqlite::{backup::Backup, Connection};
+use rusqlite::{backup::Backup, Connection, OpenFlags};
 use serde::{Deserialize, Serialize};
 use std::path::{Path, PathBuf};
 use std::time::Duration;
@@ -169,6 +169,28 @@ impl BackupService {
 
     pub fn restore(&self, file_name: &str) -> Result<(), DomainError> {
         let path = self.resolve_backup_path(file_name)?;
+        // Validate the backup is a readable, uncorrupted SQLite DB *before*
+        // touching the target database.
+        {
+            let check = Connection::open_with_flags(&path, OpenFlags::SQLITE_OPEN_READ_ONLY)
+                .map_err(|err| {
+                    DomainError::Validation(format!(
+                        "备份文件无法打开或已损坏（{err}），已取消恢复，数据未改动"
+                    ))
+                })?;
+            let quick_check: String = check
+                .query_row("PRAGMA quick_check", [], |row| row.get(0))
+                .map_err(|err| {
+                    DomainError::Validation(format!(
+                        "备份文件校验失败（{err}），已取消恢复，数据未改动"
+                    ))
+                })?;
+            if quick_check != "ok" {
+                return Err(DomainError::Validation(format!(
+                    "备份文件校验失败（{quick_check}），已取消恢复，数据未改动"
+                )));
+            }
+        }
         // Safety snapshot of current DB before overwrite.
         let _ = self.create_inner("pre-restore");
 
@@ -180,6 +202,8 @@ impl BackupService {
                 .run_to_completion(100, Duration::from_millis(25), None)
                 .map_err(internal)?;
         }
+        // Bring the restored DB up to the current schema (idempotent).
+        self.db.migrate(None).map_err(internal)?;
         self.set_error(None);
         Ok(())
     }
@@ -249,5 +273,102 @@ mod tests {
             })
             .unwrap();
         assert_eq!(body, "hello-backup");
+    }
+
+    #[test]
+    fn restore_rejects_corrupt_backup() {
+        let dir = tempdir().unwrap();
+        let db_path = dir.path().join("workbench.db");
+        let backup_dir = dir.path().join("backups");
+        std::fs::create_dir_all(&backup_dir).unwrap();
+        let db = Database::open(&db_path).unwrap();
+        TaskService::new(db.clone()).ensure_seed_data().unwrap();
+        {
+            let conn = db.connect().unwrap();
+            conn.execute(
+                "INSERT INTO smoke_notes (id, body, created_at, updated_at, revision, deleted_at)
+                 VALUES ('keep-me', 'intact', 't', 't', 1, NULL)",
+                [],
+            )
+            .unwrap();
+        }
+
+        let corrupt = backup_dir.join("workbench-corrupt-20260101-000000.db");
+        std::fs::write(&corrupt, [0xDE, 0xAD, 0xBE, 0xEF, 0x00, 0x01, 0x02, 0x03]).unwrap();
+
+        let svc = BackupService::new(db.clone(), backup_dir);
+        let err = svc
+            .restore("workbench-corrupt-20260101-000000.db")
+            .unwrap_err();
+        assert!(
+            matches!(err, DomainError::Validation(_)),
+            "expected Validation error, got {err:?}"
+        );
+
+        // Target DB is untouched by the rejected restore.
+        let count: i64 = db
+            .connect()
+            .unwrap()
+            .query_row("SELECT COUNT(*) FROM smoke_notes", [], |row| row.get(0))
+            .unwrap();
+        assert_eq!(count, 1);
+        let body: String = db
+            .connect()
+            .unwrap()
+            .query_row(
+                "SELECT body FROM smoke_notes WHERE id = 'keep-me'",
+                [],
+                |row| row.get(0),
+            )
+            .unwrap();
+        assert_eq!(body, "intact");
+    }
+
+    #[test]
+    fn restore_old_schema_backup_then_migrates() {
+        let dir = tempdir().unwrap();
+        let db_path = dir.path().join("workbench.db");
+        let backup_dir = dir.path().join("backups");
+        std::fs::create_dir_all(&backup_dir).unwrap();
+
+        // Build a genuine v2-schema backup (migrations 1..=2 only).
+        let old_backup = backup_dir.join("workbench-old-v2-20260101-000000.db");
+        {
+            let conn = Connection::open(&old_backup).unwrap();
+            conn.execute_batch(include_str!("../../migrations/0001_init.sql"))
+                .unwrap();
+            conn.execute_batch(include_str!("../../migrations/0002_tasks.sql"))
+                .unwrap();
+            conn.execute(
+                "INSERT INTO schema_migrations (version, applied_at) VALUES (1, 't'), (2, 't')",
+                [],
+            )
+            .unwrap();
+            conn.execute(
+                "INSERT INTO task_lists (id, name, kind, sort_order, created_at, updated_at, revision)
+                 VALUES ('old-list', '旧清单', 'inbox', 0, 't', 't', 1)",
+                [],
+            )
+            .unwrap();
+        }
+
+        let db = Database::open(&db_path).unwrap();
+        assert_eq!(db.health_check().unwrap().schema_version, 8);
+
+        let svc = BackupService::new(db.clone(), backup_dir);
+        svc.restore("workbench-old-v2-20260101-000000.db").unwrap();
+
+        // Restored DB is migrated up to the current schema.
+        assert_eq!(db.health_check().unwrap().schema_version, 8);
+        let name: String = db
+            .connect()
+            .unwrap()
+            .query_row(
+                "SELECT name FROM task_lists WHERE id = 'old-list'",
+                [],
+                |row| row.get(0),
+            )
+            .unwrap();
+        assert_eq!(name, "旧清单");
     }
 }
