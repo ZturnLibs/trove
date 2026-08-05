@@ -3,7 +3,7 @@
   "name": "memory-search-tags-archive",
   "title": "记忆搜索/标签/归档",
   "description": "MemoryPage 增加搜索框、标签筛选（memory_query tagId）、归档视图（includeArchived）",
-  "status": "planning",
+  "status": "in_progress",
   "dev_type": null,
   "scope": null,
   "package": null,

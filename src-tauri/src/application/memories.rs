@@ -160,6 +160,14 @@ impl MemoryService {
             );
             values.push(Box::new(tag_id.to_string()));
         }
+        if let Some(text) = query.search.as_ref().map(|s| s.trim().to_string()) {
+            if !text.is_empty() {
+                sql.push_str(" AND (title LIKE ? ESCAPE '\\' OR body LIKE ? ESCAPE '\\')");
+                let pattern = format!("%{}%", escape_like(&text));
+                values.push(Box::new(pattern.clone()));
+                values.push(Box::new(pattern));
+            }
+        }
         sql.push_str(" ORDER BY pinned DESC, updated_at DESC");
         let params_ref: Vec<&dyn rusqlite::types::ToSql> =
             values.iter().map(|v| v.as_ref()).collect();
@@ -293,6 +301,13 @@ fn internal<E: std::fmt::Display>(err: E) -> DomainError {
     DomainError::Internal(err.to_string())
 }
 
+fn escape_like(value: &str) -> String {
+    value
+        .replace('\\', "\\\\")
+        .replace('%', "\\%")
+        .replace('_', "\\_")
+}
+
 fn map_memory_row(row: &rusqlite::Row<'_>) -> Result<Memory, rusqlite::Error> {
     Ok(Memory {
         id: row.get::<_, String>(0)?.parse().map_err(|e| {
@@ -359,5 +374,147 @@ mod tests {
         assert_eq!(links[0].link_kind, "converted_to");
         assert_eq!(links[0].target_type, "task");
         assert_eq!(links[0].target_id, converted.task_id);
+    }
+
+    #[test]
+    fn query_search_matches_title_and_body() {
+        let dir = tempdir().unwrap();
+        let db = Database::open(dir.path().join("m.db")).unwrap();
+        let svc = MemoryService::new(db);
+        let alpha = svc
+            .create(CreateMemoryInput {
+                title: "Alpha 备忘".into(),
+                body: Some("https://example.com/docs".into()),
+                pinned: None,
+                quick_insert: None,
+                trigger_word: None,
+                tag_names: None,
+            })
+            .unwrap();
+        let beta = svc
+            .create(CreateMemoryInput {
+                title: "Beta 备忘".into(),
+                body: Some("包含 keyword 的正文".into()),
+                pinned: None,
+                quick_insert: None,
+                trigger_word: None,
+                tag_names: None,
+            })
+            .unwrap();
+        let _gamma = svc
+            .create(CreateMemoryInput {
+                title: "Gamma".into(),
+                body: Some("无关内容".into()),
+                pinned: None,
+                quick_insert: None,
+                trigger_word: None,
+                tag_names: None,
+            })
+            .unwrap();
+
+        // 标题命中
+        let by_title = svc
+            .query(MemoryQuery {
+                pinned_only: None,
+                include_archived: None,
+                tag_id: None,
+                quick_insert_only: None,
+                search: Some("Alpha".into()),
+            })
+            .unwrap();
+        assert_eq!(
+            by_title.iter().map(|m| m.id).collect::<Vec<_>>(),
+            vec![alpha.id]
+        );
+
+        // 正文命中
+        let by_body = svc
+            .query(MemoryQuery {
+                pinned_only: None,
+                include_archived: None,
+                tag_id: None,
+                quick_insert_only: None,
+                search: Some("keyword".into()),
+            })
+            .unwrap();
+        assert_eq!(
+            by_body.iter().map(|m| m.id).collect::<Vec<_>>(),
+            vec![beta.id]
+        );
+
+        // 空白搜索退化为全量
+        let blank = svc
+            .query(MemoryQuery {
+                pinned_only: None,
+                include_archived: None,
+                tag_id: None,
+                quick_insert_only: None,
+                search: Some("   ".into()),
+            })
+            .unwrap();
+        assert_eq!(blank.len(), 3);
+
+        // 未命中
+        let none = svc
+            .query(MemoryQuery {
+                pinned_only: None,
+                include_archived: None,
+                tag_id: None,
+                quick_insert_only: None,
+                search: Some("不存在".into()),
+            })
+            .unwrap();
+        assert!(none.is_empty());
+    }
+
+    #[test]
+    fn query_search_escapes_wildcards() {
+        let dir = tempdir().unwrap();
+        let db = Database::open(dir.path().join("m.db")).unwrap();
+        let svc = MemoryService::new(db);
+        svc.create(CreateMemoryInput {
+            title: "折扣 50% off".into(),
+            body: Some("下划线 100_200".into()),
+            pinned: None,
+            quick_insert: None,
+            trigger_word: None,
+            tag_names: None,
+        })
+        .unwrap();
+        svc.create(CreateMemoryInput {
+            title: "普通标题".into(),
+            body: Some("不相关内容".into()),
+            pinned: None,
+            quick_insert: None,
+            trigger_word: None,
+            tag_names: None,
+        })
+        .unwrap();
+
+        // `%` 作为字面量：不应命中所有记忆
+        let percent = svc
+            .query(MemoryQuery {
+                pinned_only: None,
+                include_archived: None,
+                tag_id: None,
+                quick_insert_only: None,
+                search: Some("50%".into()),
+            })
+            .unwrap();
+        assert_eq!(percent.len(), 1);
+        assert_eq!(percent[0].title, "折扣 50% off");
+
+        // `_` 作为字面量：不应把 100200 当通配符命中
+        let underscore = svc
+            .query(MemoryQuery {
+                pinned_only: None,
+                include_archived: None,
+                tag_id: None,
+                quick_insert_only: None,
+                search: Some("100_200".into()),
+            })
+            .unwrap();
+        assert_eq!(underscore.len(), 1);
+        assert_eq!(underscore[0].body, "下划线 100_200");
     }
 }

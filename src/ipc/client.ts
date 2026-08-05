@@ -299,6 +299,7 @@ export type MemoryQuery = {
   includeArchived?: boolean;
   tagId?: string;
   quickInsertOnly?: boolean;
+  search?: string;
 };
 
 export type SmartListKind =

@@ -50,6 +50,7 @@ pub struct MemoryQuery {
     pub include_archived: Option<bool>,
     pub tag_id: Option<EntityId>,
     pub quick_insert_only: Option<bool>,
+    pub search: Option<String>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]

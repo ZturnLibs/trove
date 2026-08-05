@@ -39,10 +39,13 @@ function linkify(text: string) {
 function MemoryDetail({
   memory,
   onDeleted,
+  onArchived,
   focusTitleId,
 }: {
   memory: Memory | null;
   onDeleted?: () => void;
+  /** 归档/恢复成功后回调（默认视图归档后该项从列表消失，需清空选中避免幽灵项）。 */
+  onArchived?: () => void;
   /** When set to the memory's id (e.g. right after "新建"), focus + select its title. */
   focusTitleId?: string | null;
 }) {
@@ -90,6 +93,15 @@ function MemoryDetail({
     onSuccess: () => {
       void queryClient.invalidateQueries({ queryKey: ["memories"] });
       onDeleted?.();
+    },
+  });
+
+  const archiveMutation = useMutation({
+    mutationFn: () =>
+      ipc.memoryUpdate({ ...draft!, archived: !draft!.archived }),
+    onSuccess: () => {
+      void queryClient.invalidateQueries({ queryKey: ["memories"] });
+      onArchived?.();
     },
   });
 
@@ -225,6 +237,16 @@ function MemoryDetail({
           </Button>
           <ConfirmButton
             size="sm"
+            confirmLabel={draft.archived ? "确认恢复？" : "确认归档？"}
+            confirmVariant="secondary"
+            onConfirm={() => archiveMutation.mutate()}
+            resetKey={memory.id}
+            disabled={archiveMutation.isPending}
+          >
+            {draft.archived ? "恢复" : "归档"}
+          </ConfirmButton>
+          <ConfirmButton
+            size="sm"
             confirmLabel={
               (linksQuery.data?.length ?? 0) > 0
                 ? `确认删除？(${(linksQuery.data ?? []).length} 关联)`
@@ -253,12 +275,51 @@ export function MemoryPage() {
   const queryClient = useQueryClient();
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [pinnedOnly, setPinnedOnly] = useState(false);
+  const [showArchived, setShowArchived] = useState(false);
+  const [tagId, setTagId] = useState<string>("all");
+  const [searchText, setSearchText] = useState("");
+  const [search, setSearch] = useState("");
   const [createdId, setCreatedId] = useState<string | null>(null);
 
-  const memoriesQuery = useQuery({
-    queryKey: ["memories", { pinnedOnly }],
-    queryFn: () => ipc.memoryQuery({ pinnedOnly }),
+  // 防抖：停止输入 250ms 后触发查询。
+  useEffect(() => {
+    const timer = window.setTimeout(() => setSearch(searchText), 250);
+    return () => window.clearTimeout(timer);
+  }, [searchText]);
+
+  const tagsQuery = useQuery({
+    queryKey: ["task-tags"],
+    queryFn: () => ipc.taskListTags(),
   });
+
+  const memoriesQuery = useQuery({
+    queryKey: ["memories", { pinnedOnly, tagId, showArchived, search }],
+    queryFn: () =>
+      ipc.memoryQuery({
+        pinnedOnly: !showArchived && pinnedOnly ? true : undefined,
+        tagId: tagId === "all" ? undefined : tagId,
+        includeArchived: showArchived ? true : undefined,
+        search: search.trim() || undefined,
+      }),
+  });
+
+  // 新建的记忆出现在列表后解除 createdId 锁定，使后续筛选变化可正常清空选中。
+  useEffect(() => {
+    if (!createdId) return;
+    if (memoriesQuery.data?.some((m) => m.id === createdId)) {
+      setCreatedId(null);
+    }
+  }, [createdId, memoriesQuery.data]);
+
+  // 选中项因搜索/标签/归档视图变化而不可见时，清空选中，避免详情显示幽灵项。
+  useEffect(() => {
+    const data = memoriesQuery.data;
+    if (!data || !selectedId) return;
+    if (createdId === selectedId) return;
+    if (!data.some((m) => m.id === selectedId)) {
+      setSelectedId(null);
+    }
+  }, [selectedId, memoriesQuery.data, createdId]);
 
   const createMutation = useMutation({
     mutationFn: () => ipc.memoryCreate({ title: "新记忆", body: "" }),
@@ -274,19 +335,59 @@ export function MemoryPage() {
     [memoriesQuery.data, selectedId],
   );
 
+  const hasFilters = search.trim() !== "" || tagId !== "all";
+
+  const clearFilters = () => {
+    setSearchText("");
+    setSearch("");
+    setTagId("all");
+  };
+
   return (
     <SplitTaskLayout
       title="记忆"
       description="短小、可检索的信息片段"
       actions={
         <>
+          <Input
+            type="search"
+            className="h-7 w-40"
+            value={searchText}
+            onChange={(e) => setSearchText(e.target.value)}
+            placeholder="搜索标题/正文…"
+          />
+          <select
+            className="h-7 max-w-28 rounded-[var(--radius-control)] border border-border bg-surface-raised px-2 text-[12px]"
+            value={tagId}
+            onChange={(e) => setTagId(e.target.value)}
+            title="按标签筛选"
+          >
+            <option value="all">全部标签</option>
+            {(tagsQuery.data ?? []).map((tag) => (
+              <option key={tag.id} value={tag.id}>
+                {tag.name}
+              </option>
+            ))}
+          </select>
           <Button
             size="sm"
-            variant={pinnedOnly ? "default" : "secondary"}
-            onClick={() => setPinnedOnly((v) => !v)}
+            variant={showArchived ? "default" : "secondary"}
+            onClick={() => {
+              setShowArchived((v) => !v);
+              setPinnedOnly(false);
+            }}
           >
-            仅置顶
+            归档视图
           </Button>
+          {!showArchived ? (
+            <Button
+              size="sm"
+              variant={pinnedOnly ? "default" : "secondary"}
+              onClick={() => setPinnedOnly((v) => !v)}
+            >
+              仅置顶
+            </Button>
+          ) : null}
           <NewTaskButton onClick={() => createMutation.mutate()} />
         </>
       }
@@ -294,15 +395,31 @@ export function MemoryPage() {
         memoriesQuery.isLoading ? (
           <div className="p-4 text-[12px] text-muted">加载中…</div>
         ) : (memoriesQuery.data?.length ?? 0) === 0 ? (
-          <EmptyState
-            title="还没有记忆"
-            body="适合保存短文本、链接和可检索的片段；也可稍后转为任务。"
-            primaryAction={{
-              label: "新建记忆",
-              onClick: () => createMutation.mutate(),
-            }}
-            hint="快速记录里可切换到「记忆」"
-          />
+          hasFilters ? (
+            <EmptyState
+              title="没有匹配的记忆"
+              body="换个关键词或标签试试。"
+              secondaryAction={{
+                label: "清除筛选",
+                onClick: clearFilters,
+              }}
+            />
+          ) : showArchived ? (
+            <EmptyState
+              title="没有已归档的记忆"
+              body="在默认视图里对记忆点「归档」，可稍后在这里恢复。"
+            />
+          ) : (
+            <EmptyState
+              title="还没有记忆"
+              body="适合保存短文本、链接和可检索的片段；也可稍后转为任务。"
+              primaryAction={{
+                label: "新建记忆",
+                onClick: () => createMutation.mutate(),
+              }}
+              hint="快速记录里可切换到「记忆」"
+            />
+          )
         ) : (
           <div>
             {memoriesQuery.data?.map((memory) => (
@@ -321,7 +438,16 @@ export function MemoryPage() {
                   <span className="mt-0.5 h-3.5 w-3.5 shrink-0" />
                 )}
                 <div className="min-w-0 flex-1">
-                  <div className="truncate text-[13px] font-medium">{memory.title}</div>
+                  <div className="flex items-center gap-1.5">
+                    <span className="truncate text-[13px] font-medium">
+                      {memory.title}
+                    </span>
+                    {showArchived && memory.archived ? (
+                      <span className="shrink-0 rounded border border-border bg-surface-raised px-1 py-px text-[10px] text-muted">
+                        归档
+                      </span>
+                    ) : null}
+                  </div>
                   <div className="truncate text-[11px] text-muted">
                     {memory.body || "（无正文）"}
                   </div>
@@ -335,6 +461,7 @@ export function MemoryPage() {
         <MemoryDetail
           memory={selected}
           onDeleted={() => setSelectedId(null)}
+          onArchived={() => setSelectedId(null)}
           focusTitleId={createdId}
         />
       }
