@@ -2,6 +2,7 @@ import { useEffect, useRef, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { AttachmentsSection } from "@/design-system/patterns/AttachmentsSection";
 import { Button } from "@/design-system/primitives/Button";
+import { ConfirmButton } from "@/design-system/patterns/ConfirmButton";
 import { Input } from "@/design-system/primitives/Input";
 import {
   ipc,
@@ -244,41 +245,35 @@ export function TaskDetailPanel({
       <div className="flex items-center justify-between gap-2 border-t border-border p-3">
         <div className="flex gap-1">
           {task.seriesId ? (
-            <Button
+            <ConfirmButton
               size="sm"
-              variant="ghost"
-              onClick={() => {
-                if (confirm("跳过当前周期实例并生成下一实例？")) {
-                  skipMutation.mutate();
-                }
-              }}
+              confirmLabel="确认跳过？"
+              onConfirm={() => skipMutation.mutate()}
+              resetKey={task.id}
             >
               跳过本次
-            </Button>
+            </ConfirmButton>
           ) : null}
-          <Button
+          <ConfirmButton
             size="sm"
-            variant="ghost"
-            onClick={() => {
-              if (confirm("确认归档此任务？")) archiveMutation.mutate();
-            }}
+            confirmLabel="确认归档？"
+            onConfirm={() => archiveMutation.mutate()}
+            resetKey={task.id}
           >
             归档
-          </Button>
-          <Button
+          </ConfirmButton>
+          <ConfirmButton
             size="sm"
-            variant="ghost"
-            onClick={() => {
-              const count = (linksQuery.data ?? []).length;
-              const message =
-                count > 0
-                  ? `确认删除此任务？\n将移除 ${count} 个关联资源；资源文件按保留规则保留。`
-                  : "确认删除此任务？";
-              if (confirm(message)) deleteMutation.mutate();
-            }}
+            confirmLabel={
+              (linksQuery.data?.length ?? 0) > 0
+                ? `确认删除？(${(linksQuery.data ?? []).length} 关联)`
+                : "确认删除？"
+            }
+            onConfirm={() => deleteMutation.mutate()}
+            resetKey={task.id}
           >
             删除
-          </Button>
+          </ConfirmButton>
         </div>
         <Button
           size="sm"

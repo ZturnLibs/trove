@@ -8,6 +8,7 @@ import {
   isBannerDismissed,
 } from "@/components/PermissionBanner";
 import { Button } from "@/design-system/primitives/Button";
+import { ConfirmButton } from "@/design-system/patterns/ConfirmButton";
 import { Input } from "@/design-system/primitives/Input";
 import { SplitTaskLayout } from "@/features/tasks/TaskLayout";
 import { useDomainInvalidation } from "@/features/tasks/useDomainInvalidation";
@@ -40,6 +41,7 @@ function ClipboardDetail({
   onDeleted?: () => void;
 }) {
   const queryClient = useQueryClient();
+  const [notice, setNotice] = useState<string | null>(null);
 
   const favoriteMutation = useMutation({
     mutationFn: (favorite: boolean) => ipc.clipboardSetFavorite(item!.id, favorite),
@@ -63,7 +65,7 @@ function ClipboardDetail({
     mutationFn: () => ipc.clipboardConvertToTask(item!.id),
     onSuccess: () => {
       void queryClient.invalidateQueries({ queryKey: ["tasks"] });
-      alert("已转为任务（收件箱）");
+      setNotice("已转为任务（收件箱）");
     },
   });
 
@@ -71,7 +73,7 @@ function ClipboardDetail({
     mutationFn: () => ipc.clipboardConvertToMemory(item!.id),
     onSuccess: () => {
       void queryClient.invalidateQueries({ queryKey: ["memories"] });
-      alert("已保存为记忆");
+      setNotice("已保存为记忆");
     },
   });
 
@@ -89,6 +91,11 @@ function ClipboardDetail({
 
   return (
     <div className="flex h-full flex-col gap-3 p-4">
+      {notice ? (
+        <p className="rounded-[var(--radius-control)] border border-border bg-surface-raised px-2 py-1.5 text-[12px] text-foreground">
+          {notice}
+        </p>
+      ) : null}
       <div className="flex flex-wrap items-center gap-2">
         <Button
           size="sm"
@@ -120,15 +127,14 @@ function ClipboardDetail({
         >
           保存为记忆
         </Button>
-        <Button
+        <ConfirmButton
           size="sm"
-          variant="ghost"
-          onClick={() => {
-            if (confirm("删除此条剪切板记录？")) deleteMutation.mutate();
-          }}
+          confirmLabel="确认删除？"
+          onConfirm={() => deleteMutation.mutate()}
+          resetKey={item.id}
         >
           删除
-        </Button>
+        </ConfirmButton>
       </div>
       <dl className="grid grid-cols-2 gap-2 text-[11px] text-muted">
         <div>
@@ -313,21 +319,14 @@ export function ClipboardPage() {
           >
             {capturing ? "暂停" : "恢复"}
           </Button>
-          <Button
+          <ConfirmButton
             size="sm"
-            variant="ghost"
-            onClick={() => {
-              if (
-                confirm(
-                  "清空所有非收藏剪切板记录？\n收藏条目将保留。此操作不可撤销。",
-                )
-              ) {
-                clearMutation.mutate();
-              }
-            }}
+            confirmLabel="确认清空？"
+            confirmTitle="清空所有非收藏剪切板记录？收藏条目将保留。"
+            onConfirm={() => clearMutation.mutate()}
           >
             清空…
-          </Button>
+          </ConfirmButton>
         </>
       }
       list={

@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useRef, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { ImagePlus, Paperclip, X } from "lucide-react";
 import { Button } from "@/design-system/primitives/Button";
@@ -26,6 +26,21 @@ export function AttachmentsSection({
 }) {
   const queryClient = useQueryClient();
   const [pickerOpen, setPickerOpen] = useState(false);
+  const [removeArmedId, setRemoveArmedId] = useState<string | null>(null);
+  const removeTimer = useRef<number | null>(null);
+
+  const onRemoveClick = (linkId: string) => {
+    if (removeArmedId === linkId) {
+      if (removeTimer.current) window.clearTimeout(removeTimer.current);
+      removeTimer.current = null;
+      setRemoveArmedId(null);
+      removeMutation.mutate(linkId);
+    } else {
+      setRemoveArmedId(linkId);
+      if (removeTimer.current) window.clearTimeout(removeTimer.current);
+      removeTimer.current = window.setTimeout(() => setRemoveArmedId(null), 3000);
+    }
+  };
 
   const linksQuery = useQuery({
     queryKey: ["links", entityType, entityId],
@@ -105,18 +120,25 @@ export function AttachmentsSection({
                   </span>
                   <button
                     type="button"
-                    title="移除附件"
+                    title={
+                      removeArmedId === asset.linkId
+                        ? "再次点击确认移除附件"
+                        : "移除附件"
+                    }
                     className={cn(
-                      "rounded p-0.5 text-muted hover:bg-row-hover hover:text-danger",
+                      "rounded p-0.5 text-muted hover:bg-row-hover",
+                      removeArmedId === asset.linkId
+                        ? "bg-danger/10 text-danger"
+                        : "hover:text-danger",
                       "opacity-0 transition-opacity group-hover:opacity-100",
                     )}
-                    onClick={() => {
-                      if (confirm("从当前条目移除该附件？")) {
-                        removeMutation.mutate(asset.linkId);
-                      }
-                    }}
+                    onClick={() => onRemoveClick(asset.linkId)}
                   >
-                    <X className="size-3.5" />
+                    {removeArmedId === asset.linkId ? (
+                      <span className="px-0.5 text-[10px]">确认移除</span>
+                    ) : (
+                      <X className="size-3.5" />
+                    )}
                   </button>
                 </div>
               </li>

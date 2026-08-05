@@ -2,6 +2,7 @@ import { useEffect, useRef, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { PageScaffold } from "@/components/PageScaffold";
 import { Button } from "@/design-system/primitives/Button";
+import { ConfirmButton } from "@/design-system/patterns/ConfirmButton";
 import { Input } from "@/design-system/primitives/Input";
 import { ShortcutRow } from "@/features/settings/ShortcutRow";
 import {
@@ -41,6 +42,7 @@ export function SettingsPage() {
   const [maxItemsText, setMaxItemsText] = useState("");
   const [backupKeepText, setBackupKeepText] = useState("");
   const [message, setMessage] = useState<string | null>(null);
+  const [pendingImportFile, setPendingImportFile] = useState<File | null>(null);
 
   const settings = settingsQuery.data;
   const health = healthQuery.data;
@@ -383,21 +385,20 @@ export function SettingsPage() {
                   >
                     应用
                   </Button>
-                  <Button
+                  <ConfirmButton
                     size="sm"
-                    variant="ghost"
-                    onClick={() => {
-                      if (confirm(`删除模板「${tpl.name}」？`)) {
-                        void ipc.templateDelete(tpl.id).then(() => {
-                          void queryClient.invalidateQueries({
-                            queryKey: ["templates"],
-                          });
+                    confirmLabel={`删除模板「${tpl.name}」？`}
+                    onConfirm={() => {
+                      void ipc.templateDelete(tpl.id).then(() => {
+                        void queryClient.invalidateQueries({
+                          queryKey: ["templates"],
                         });
-                      }
+                      });
                     }}
+                    resetKey={tpl.id}
                   >
                     删除
-                  </Button>
+                  </ConfirmButton>
                 </div>
               </li>
             ))}
@@ -524,19 +525,40 @@ export function SettingsPage() {
                   className="hidden"
                   onChange={(e) => {
                     const file = e.target.files?.[0];
-                    if (!file) return;
-                    if (
-                      !confirm(
-                        "导入将覆盖当前任务、提醒、记忆与剪切板等业务数据。确定继续？",
-                      )
-                    ) {
-                      e.target.value = "";
-                      return;
-                    }
-                    void file.text().then((text) => importData.mutate(text));
                     e.target.value = "";
+                    if (!file) return;
+                    setPendingImportFile(file);
                   }}
                 />
+                {pendingImportFile ? (
+                  <div className="flex flex-wrap items-center gap-2 rounded-[var(--radius-control)] border border-danger/40 bg-danger/5 p-2">
+                    <span className="text-[12px]">
+                      导入将覆盖当前任务、提醒、记忆与剪切板等业务数据。确认导入{" "}
+                      {pendingImportFile.name}？
+                    </span>
+                    <Button
+                      size="sm"
+                      variant="danger"
+                      disabled={importData.isPending}
+                      onClick={() => {
+                        void pendingImportFile
+                          .text()
+                          .then((text) => importData.mutate(text));
+                        setPendingImportFile(null);
+                      }}
+                    >
+                      确认导入
+                    </Button>
+                    <Button
+                      size="sm"
+                      variant="ghost"
+                      disabled={importData.isPending}
+                      onClick={() => setPendingImportFile(null)}
+                    >
+                      取消
+                    </Button>
+                  </div>
+                ) : null}
               </div>
               <ul className="divide-y divide-border border-t border-border">
                 {(backupsQuery.data ?? []).slice(0, 8).map((item) => (
@@ -553,21 +575,15 @@ export function SettingsPage() {
                         {item.reason}
                       </p>
                     </div>
-                    <Button
+                    <ConfirmButton
                       size="sm"
-                      variant="ghost"
-                      onClick={() => {
-                        if (
-                          confirm(
-                            `恢复备份 ${item.fileName}？当前数据会先自动备份。`,
-                          )
-                        ) {
-                          restoreBackup.mutate(item.fileName);
-                        }
-                      }}
+                      confirmLabel={`恢复 ${item.fileName}？`}
+                      confirmTitle={`恢复备份 ${item.fileName}？当前数据会先自动备份。`}
+                      onConfirm={() => restoreBackup.mutate(item.fileName)}
+                      resetKey={item.fileName}
                     >
                       恢复
-                    </Button>
+                    </ConfirmButton>
                   </li>
                 ))}
                 {(backupsQuery.data ?? []).length === 0 ? (

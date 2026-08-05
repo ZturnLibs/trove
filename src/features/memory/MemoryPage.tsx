@@ -4,6 +4,7 @@ import { Pin } from "lucide-react";
 import { EmptyState } from "@/components/PageScaffold";
 import { AttachmentsSection } from "@/design-system/patterns/AttachmentsSection";
 import { Button } from "@/design-system/primitives/Button";
+import { ConfirmButton } from "@/design-system/patterns/ConfirmButton";
 import { Input } from "@/design-system/primitives/Input";
 import {
   NewTaskButton,
@@ -222,20 +223,18 @@ function MemoryDetail({
           >
             复制
           </Button>
-          <Button
+          <ConfirmButton
             size="sm"
-            variant="ghost"
-            onClick={() => {
-              const count = (linksQuery.data ?? []).length;
-              const message =
-                count > 0
-                  ? `确认删除此记忆？\n将移除 ${count} 个关联资源；资源文件按保留规则保留。`
-                  : "确认删除此记忆？";
-              if (confirm(message)) deleteMutation.mutate();
-            }}
+            confirmLabel={
+              (linksQuery.data?.length ?? 0) > 0
+                ? `确认删除？(${(linksQuery.data ?? []).length} 关联)`
+                : "确认删除？"
+            }
+            onConfirm={() => deleteMutation.mutate()}
+            resetKey={memory.id}
           >
             删除
-          </Button>
+          </ConfirmButton>
         </div>
         <Button
           size="sm"
