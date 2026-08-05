@@ -58,6 +58,32 @@ Questions to answer:
 
 ---
 
+## Branding / App Icons
+
+**品牌标识**：Trove 用宝藏箱 + 字母 T 标记，品牌蓝单色。
+- 应用内 Logo 一律使用 `src/components/BrandLogo.tsx`（内联 SVG，`fill="currentColor"`），
+  通过 `text-accent` 继承主题色（亮 `#2563eb` / 暗 `#5b8def`），明暗主题自动适配。
+- 例：侧边栏 `<BrandLogo className="h-5 w-5 text-accent" />`，Onboarding
+  `<BrandLogo className="h-12 w-12 text-accent" />`。
+
+**再生成应用图标**（改 Logo 后必须执行）：
+
+```bash
+# 源图为 1024×1024 方形透明 SVG，位于 design/logo.svg
+pnpm tauri icon design/logo.svg
+rm -rf src-tauri/icons/android src-tauri/icons/ios   # 项目无移动端，删除 CLI 顺带产物
+```
+
+- `tauri icon` 会覆盖 `src-tauri/icons/`（icns/ico/各尺寸 PNG），
+  `tauri.conf.json` `bundle.icon` 引用的文件名不变；托盘与窗口图标经
+  `app.default_window_icon()` 自动生效。
+- favicon：`public/logo.svg`，`index.html` 引用 `/logo.svg`。
+- **Forbidden**：不要直接改 `src-tauri/icons/` 里的 PNG 产物，一律改 `design/logo.svg` 源图再生成。
+
+**Related**: `design/logo.svg`、`src/components/BrandLogo.tsx`、`src-tauri/icons/`。
+
+---
+
 ## Destructive/Confirm Actions
 
 **Gotcha**: Tauri 的 webview（macOS WKWebView / Windows WebView2）不实现

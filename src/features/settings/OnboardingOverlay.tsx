@@ -1,5 +1,6 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Button } from "@/design-system/primitives/Button";
+import { BrandLogo } from "@/components/BrandLogo";
 import { ipc } from "@/ipc/client";
 
 export function OnboardingOverlay() {
@@ -26,7 +27,8 @@ export function OnboardingOverlay() {
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-6">
       <div className="max-w-lg rounded-[var(--radius-panel)] border border-border bg-surface p-5 shadow-lg">
-        <h2 className="text-[16px] font-semibold">欢迎使用 Trove</h2>
+        <BrandLogo className="h-12 w-12 text-accent" />
+        <h2 className="mt-3 text-[16px] font-semibold">欢迎使用 Trove</h2>
         <p className="mt-2 text-[13px] text-muted">
           这是一个本地优先的个人工作台。任务、提醒、记忆和剪切板都保存在本机，可完全离线使用。
         </p>

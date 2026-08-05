@@ -15,6 +15,7 @@ import { ipc } from "@/ipc/client";
 import { useDomainInvalidation } from "@/features/tasks/useDomainInvalidation";
 import { OnboardingOverlay } from "@/features/settings/OnboardingOverlay";
 import { PermissionBanner } from "@/components/PermissionBanner";
+import { BrandLogo } from "@/components/BrandLogo";
 
 const navItems = [
   { to: "/today", label: "今日", icon: SunMedium, badge: "overdue" as const },
@@ -74,8 +75,9 @@ export function MainShell() {
   return (
     <div className="flex h-full bg-surface text-foreground">
       <aside className="flex w-[200px] shrink-0 flex-col border-r border-border bg-sidebar">
-        <div className="flex h-11 items-center px-3 text-[15px] font-semibold tracking-tight">
-          Trove
+        <div className="flex h-11 items-center gap-2 px-3 text-[15px] font-semibold tracking-tight">
+          <BrandLogo className="h-5 w-5 text-accent" />
+          <span className="truncate">Trove</span>
         </div>
         <nav className="flex flex-1 flex-col gap-0.5 px-2 py-1">
           {navItems.map(({ to, label, icon: Icon, badge }) => (

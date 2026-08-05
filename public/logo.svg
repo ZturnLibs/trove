@@ -1,0 +1,15 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1024" height="1024" viewBox="0 0 1024 1024">
+  <!-- Trove 品牌标：宝藏箱 + 字母 T（宽箱盖 = T 横杠，窄箱体 = T 竖笔），品牌蓝单色 -->
+  <defs>
+    <mask id="keyhole">
+      <rect width="1024" height="1024" fill="#ffffff"/>
+      <circle cx="512" cy="682" r="70" fill="#000000"/>
+    </mask>
+  </defs>
+  <g fill="#2563eb" mask="url(#keyhole)">
+    <!-- 箱盖（T 横杠）：顶部圆角宽条 -->
+    <path d="M144 320 a96 96 0 0 1 96 -96 h544 a96 96 0 0 1 96 96 v192 H144 z"/>
+    <!-- 箱体（T 竖笔）：底部圆角窄条，与箱盖之间留开口缝 -->
+    <path d="M320 576 h384 v224 a64 64 0 0 1 -64 64 h-256 a64 64 0 0 1 -64 -64 z"/>
+  </g>
+</svg>

@@ -303,7 +303,15 @@ pub fn setup_app_menu(app: &AppHandle) -> tauri::Result<()> {
 
     #[cfg(target_os = "macos")]
     let menu = {
-        let about = PredefinedMenuItem::about(app, Some("关于 Trove"), None)?;
+        use tauri::menu::AboutMetadata;
+        let about_meta = AboutMetadata {
+            version: Some(env!("CARGO_PKG_VERSION").to_string()),
+            short_version: Some(env!("CARGO_PKG_VERSION").to_string()),
+            comments: Some("本地优先的个人工作台：任务、提醒、记忆与剪切板".to_string()),
+            copyright: Some("© 2026 Trove".to_string()),
+            ..Default::default()
+        };
+        let about = PredefinedMenuItem::about(app, Some("关于 Trove"), Some(about_meta))?;
         let settings =
             MenuItem::with_id(app, "menu.app.settings", "设置…", true, Some("CmdOrCtrl+,"))?;
         let app_menu = Submenu::with_items(
