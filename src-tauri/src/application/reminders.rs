@@ -155,6 +155,21 @@ impl ReminderService {
         collect(rows)
     }
 
+    pub fn list_all(&self) -> Result<Vec<Reminder>, DomainError> {
+        let conn = self.connect()?;
+        let mut stmt = conn
+            .prepare(
+                "SELECT id, title, notes, task_id, recurrence_json, timezone, next_fire_at, end_at,
+                        enabled, created_at, updated_at, revision
+                 FROM reminders
+                 WHERE deleted_at IS NULL
+                 ORDER BY next_fire_at ASC",
+            )
+            .map_err(internal)?;
+        let rows = stmt.query_map([], map_reminder_row).map_err(internal)?;
+        collect(rows)
+    }
+
     pub fn delete(&self, id: EntityId) -> Result<(), DomainError> {
         let _ = self.get(id)?;
         let now = stamp(&self.clock);
@@ -648,5 +663,53 @@ mod tests {
         svc.complete_occurrence(occ.id).unwrap();
         let updated = svc.get(reminder.id).unwrap();
         assert_eq!(&updated.next_fire_at[..10], "2026-07-30");
+    }
+
+    #[test]
+    fn list_all_returns_every_reminder_sorted_including_disabled() {
+        let svc = service();
+        let fire_later = format_local_datetime(local_now_naive() + Duration::days(2));
+        let fire_sooner = format_local_datetime(local_now_naive() + Duration::days(1));
+        let later = svc
+            .create(CreateReminderInput {
+                title: "later".into(),
+                notes: None,
+                task_id: None,
+                fire_at: fire_later,
+                recurrence: None,
+                timezone: Some("Asia/Shanghai".into()),
+                end_at: None,
+            })
+            .unwrap();
+        let sooner = svc
+            .create(CreateReminderInput {
+                title: "sooner".into(),
+                notes: None,
+                task_id: None,
+                fire_at: fire_sooner.clone(),
+                recurrence: None,
+                timezone: Some("Asia/Shanghai".into()),
+                end_at: None,
+            })
+            .unwrap();
+        // Disable the sooner reminder — it must still be listed.
+        svc.update(UpdateReminderInput {
+            id: sooner.id,
+            title: sooner.title.clone(),
+            notes: sooner.notes.clone(),
+            fire_at: fire_sooner,
+            recurrence: sooner.recurrence.clone(),
+            enabled: false,
+            end_at: sooner.end_at.clone(),
+        })
+        .unwrap();
+
+        let all = svc.list_all().unwrap();
+        assert_eq!(all.len(), 2);
+        // Ordered by next_fire_at ascending.
+        assert_eq!(all[0].id, sooner.id);
+        assert_eq!(all[1].id, later.id);
+        assert!(!all[0].enabled);
+        assert!(all[1].enabled);
     }
 }

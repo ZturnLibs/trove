@@ -526,6 +526,7 @@ pub fn run() {
             commands::reminder_update,
             commands::reminder_delete,
             commands::reminder_list_for_task,
+            commands::reminder_list_all,
             commands::reminder_complete,
             commands::reminder_snooze,
             commands::window_show_main,

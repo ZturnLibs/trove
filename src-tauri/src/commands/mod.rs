@@ -314,6 +314,11 @@ pub fn reminder_list_for_task(
 }
 
 #[tauri::command]
+pub fn reminder_list_all(state: State<'_, AppState>) -> Result<Vec<Reminder>, AppError> {
+    state.reminders.list_all().map_err(Into::into)
+}
+
+#[tauri::command]
 pub fn reminder_complete(
     app: AppHandle,
     state: State<'_, AppState>,

@@ -242,6 +242,16 @@ export type CreateReminderInput = {
   endAt?: string | null;
 };
 
+export type UpdateReminderInput = {
+  id: string;
+  title: string;
+  notes: string;
+  fireAt: string;
+  recurrence?: RecurrenceRule | null;
+  enabled: boolean;
+  endAt?: string | null;
+};
+
 export type SnoozePreset = "minutes10" | "hour1" | "tomorrow";
 
 export type TaskCounts = {
@@ -469,6 +479,9 @@ export const ipc = {
     invoke<{ kind: string; id: string }>("template_apply", { id }),
   reminderCreate: (input: CreateReminderInput) =>
     invoke<Reminder>("reminder_create", { input }),
+  reminderUpdate: (input: UpdateReminderInput) =>
+    invoke<Reminder>("reminder_update", { input }),
+  reminderListAll: () => invoke<Reminder[]>("reminder_list_all"),
   reminderDelete: (id: string) => invoke<void>("reminder_delete", { id }),
   reminderListForTask: (taskId: string) =>
     invoke<Reminder[]>("reminder_list_for_task", { taskId }),
