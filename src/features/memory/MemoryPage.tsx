@@ -263,6 +263,8 @@ export function MemoryPage() {
   const [searchText, setSearchText] = useState("");
   const [search, setSearch] = useState("");
   const [createdId, setCreatedId] = useState<string | null>(null);
+  const [view, setView] = useState<"memory" | "notes">("memory");
+  const [noteDraft, setNoteDraft] = useState("");
 
   // 防抖：停止输入 250ms 后触发查询。
   useEffect(() => {
@@ -284,6 +286,27 @@ export function MemoryPage() {
         includeArchived: showArchived ? true : undefined,
         search: search.trim() || undefined,
       }),
+  });
+
+  const smokeNotesQuery = useQuery({
+    queryKey: ["smoke-notes"],
+    queryFn: () => ipc.smokeNoteList(),
+    enabled: view === "notes",
+  });
+
+  const createNoteMutation = useMutation({
+    mutationFn: () => ipc.smokeNoteCreate(noteDraft),
+    onSuccess: () => {
+      void queryClient.invalidateQueries({ queryKey: ["smoke-notes"] });
+      setNoteDraft("");
+    },
+  });
+
+  const deleteNoteMutation = useMutation({
+    mutationFn: (id: string) => ipc.smokeNoteDelete(id),
+    onSuccess: () => {
+      void queryClient.invalidateQueries({ queryKey: ["smoke-notes"] });
+    },
   });
 
   // 新建的记忆出现在列表后解除 createdId 锁定，使后续筛选变化可正常清空选中。
@@ -332,50 +355,123 @@ export function MemoryPage() {
       description="短小、可检索的信息片段"
       actions={
         <>
-          <Input
-            type="search"
-            className="h-7 w-40"
-            value={searchText}
-            onChange={(e) => setSearchText(e.target.value)}
-            placeholder="搜索标题/正文…"
-          />
-          <select
-            className="h-7 max-w-28 rounded-[var(--radius-control)] border border-border bg-surface-raised px-2 text-[12px]"
-            value={tagId}
-            onChange={(e) => setTagId(e.target.value)}
-            title="按标签筛选"
-          >
-            <option value="all">全部标签</option>
-            {(tagsQuery.data ?? []).map((tag) => (
-              <option key={tag.id} value={tag.id}>
-                {tag.name}
-              </option>
-            ))}
-          </select>
           <Button
             size="sm"
-            variant={showArchived ? "default" : "secondary"}
-            onClick={() => {
-              setShowArchived((v) => !v);
-              setPinnedOnly(false);
-            }}
+            variant={view === "memory" ? "default" : "secondary"}
+            onClick={() => setView("memory")}
           >
-            归档视图
+            记忆
           </Button>
-          {!showArchived ? (
-            <Button
-              size="sm"
-              variant={pinnedOnly ? "default" : "secondary"}
-              onClick={() => setPinnedOnly((v) => !v)}
-            >
-              仅置顶
-            </Button>
+          <Button
+            size="sm"
+            variant={view === "notes" ? "default" : "secondary"}
+            onClick={() => setView("notes")}
+          >
+            随手记
+          </Button>
+          {view === "memory" ? (
+            <>
+              <Input
+                type="search"
+                className="h-7 w-40"
+                value={searchText}
+                onChange={(e) => setSearchText(e.target.value)}
+                placeholder="搜索标题/正文…"
+              />
+              <select
+                className="h-7 max-w-28 rounded-[var(--radius-control)] border border-border bg-surface-raised px-2 text-[12px]"
+                value={tagId}
+                onChange={(e) => setTagId(e.target.value)}
+                title="按标签筛选"
+              >
+                <option value="all">全部标签</option>
+                {(tagsQuery.data ?? []).map((tag) => (
+                  <option key={tag.id} value={tag.id}>
+                    {tag.name}
+                  </option>
+                ))}
+              </select>
+              <Button
+                size="sm"
+                variant={showArchived ? "default" : "secondary"}
+                onClick={() => {
+                  setShowArchived((v) => !v);
+                  setPinnedOnly(false);
+                }}
+              >
+                归档视图
+              </Button>
+              {!showArchived ? (
+                <Button
+                  size="sm"
+                  variant={pinnedOnly ? "default" : "secondary"}
+                  onClick={() => setPinnedOnly((v) => !v)}
+                >
+                  仅置顶
+                </Button>
+              ) : null}
+              <NewTaskButton onClick={() => createMutation.mutate()} />
+            </>
           ) : null}
-          <NewTaskButton onClick={() => createMutation.mutate()} />
         </>
       }
       list={
-        memoriesQuery.isLoading ? (
+        view === "notes" ? (
+          <div className="flex h-full flex-col">
+            <div className="border-b border-border p-2">
+              <Input
+                value={noteDraft}
+                onChange={(e) => setNoteDraft(e.target.value)}
+                placeholder="随手记…"
+                onKeyDown={(e) => {
+                  if (e.key === "Enter") {
+                    e.preventDefault();
+                    if (noteDraft.trim() && !createNoteMutation.isPending) {
+                      createNoteMutation.mutate();
+                    }
+                  }
+                }}
+              />
+            </div>
+            <div className="min-h-0 flex-1 overflow-auto">
+              {smokeNotesQuery.isLoading ? (
+                <div className="p-4 text-[12px] text-muted">加载中…</div>
+              ) : (smokeNotesQuery.data?.length ?? 0) === 0 ? (
+                <EmptyState
+                  title="还没有随手记"
+                  body="在上方输入后按回车，快速记录一条。"
+                />
+              ) : (
+                <ul>
+                  {smokeNotesQuery.data?.map((note) => (
+                    <li
+                      key={note.id}
+                      className="flex items-start gap-2 border-b border-border px-3 py-2"
+                    >
+                      <div className="min-w-0 flex-1">
+                        <div className="whitespace-pre-wrap break-words text-[13px]">
+                          {note.body}
+                        </div>
+                        <div className="text-[11px] text-muted">
+                          {note.updatedAt.slice(0, 16).replace("T", " ")}
+                        </div>
+                      </div>
+                      <ConfirmButton
+                        size="sm"
+                        confirmLabel="确认删除？"
+                        onConfirm={() => deleteNoteMutation.mutate(note.id)}
+                        resetKey={note.id}
+                        disabled={deleteNoteMutation.isPending}
+                      >
+                        删除
+                      </ConfirmButton>
+                    </li>
+                  ))}
+                </ul>
+              )}
+            </div>
+          </div>
+        ) : memoriesQuery.isLoading ? (
           <div className="p-4 text-[12px] text-muted">加载中…</div>
         ) : (memoriesQuery.data?.length ?? 0) === 0 ? (
           hasFilters ? (
@@ -441,12 +537,18 @@ export function MemoryPage() {
         )
       }
       detail={
-        <MemoryDetail
-          memory={selected}
-          onDeleted={() => setSelectedId(null)}
-          onArchived={() => setSelectedId(null)}
-          focusTitleId={createdId}
-        />
+        view === "notes" ? (
+          <div className="flex h-full items-center justify-center p-6 text-center text-[12px] text-muted">
+            随手记在左侧快速记录与删除
+          </div>
+        ) : (
+          <MemoryDetail
+            memory={selected}
+            onDeleted={() => setSelectedId(null)}
+            onArchived={() => setSelectedId(null)}
+            focusTitleId={createdId}
+          />
+        )
       }
     />
   );

@@ -18,7 +18,7 @@ const modes: { id: QuickMode; label: string }[] = [
   { id: "clip", label: "剪切板" },
 ];
 
-type CaptureType = "task" | "reminder" | "memory";
+type CaptureType = "task" | "reminder" | "memory" | "note";
 
 const typeLabel: Record<SearchEntityType, string> = {
   task: "任务",
@@ -168,7 +168,8 @@ export function QuickWindow() {
 
   // 快速记录模式下：输入恰好等于某 quickInsert 记忆的触发词时，提供「展开」入口。
   const snippetHit = useMemo(() => {
-    if (mode !== "capture") return null;
+    // 随手记单次回车即提交，不提供片段展开入口。
+    if (mode !== "capture" || captureType === "note") return null;
     const q = title.trim().toLowerCase();
     if (!q) return null;
     return (
@@ -176,7 +177,7 @@ export function QuickWindow() {
         (m) => m.triggerWord && m.triggerWord.trim().toLowerCase() === q,
       ) ?? null
     );
-  }, [mode, title, snippetsQuery.data]);
+  }, [mode, title, captureType, snippetsQuery.data]);
 
   const expandSnippet = () => {
     if (!snippetHit) return;
@@ -379,11 +380,13 @@ export function QuickWindow() {
               }
             : null,
         });
-      } else {
+      } else if (captureType === "memory") {
         await ipc.memoryCreate({
           title: value,
           body: body || undefined,
         });
+      } else {
+        await ipc.smokeNoteCreate(value);
       }
       setTitle("");
       setBody("");
@@ -428,7 +431,7 @@ export function QuickWindow() {
         {mode === "capture" ? (
           <>
             <div className="flex gap-1 text-[12px]">
-              {(["task", "reminder", "memory"] as const).map((type) => (
+              {(["task", "reminder", "memory", "note"] as const).map((type) => (
                 <button
                   key={type}
                   type="button"
@@ -440,7 +443,13 @@ export function QuickWindow() {
                   )}
                   onClick={() => setCaptureType(type)}
                 >
-                  {type === "task" ? "任务" : type === "reminder" ? "提醒" : "记忆"}
+                  {type === "task"
+                    ? "任务"
+                    : type === "reminder"
+                      ? "提醒"
+                      : type === "memory"
+                        ? "记忆"
+                        : "随手记"}
                 </button>
               ))}
             </div>
@@ -453,7 +462,9 @@ export function QuickWindow() {
                   ? "如：明天下午三点回复客户…"
                   : captureType === "reminder"
                     ? "快速记录提醒…"
-                    : "快速记录记忆标题…"
+                    : captureType === "memory"
+                      ? "快速记录记忆标题…"
+                      : "随手记…"
               }
               onKeyDown={(event) => {
                 if (event.key === "Escape") {
@@ -462,7 +473,16 @@ export function QuickWindow() {
                     setBody("");
                   } else void ipc.windowHideQuick();
                 }
-                if ((event.metaKey || event.ctrlKey) && event.key === "Enter") {
+                if (
+                  (event.metaKey || event.ctrlKey) &&
+                  event.key === "Enter" &&
+                  captureType !== "note"
+                ) {
+                  event.preventDefault();
+                  void submit();
+                }
+                if (event.key === "Enter" && captureType === "note") {
+                  // 随手记：单次回车即提交（⌘/Ctrl+Enter 也走这里，避免重复提交）。
                   event.preventDefault();
                   void submit();
                 }
@@ -576,7 +596,9 @@ export function QuickWindow() {
                   ? "创建任务"
                   : captureType === "reminder"
                     ? "创建提醒"
-                    : "创建记忆"}
+                    : captureType === "memory"
+                      ? "创建记忆"
+                      : "创建随手记"}
               </Button>
             </div>
           </>
