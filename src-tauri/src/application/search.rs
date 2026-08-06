@@ -236,7 +236,7 @@ impl SearchService {
         {
             let mut stmt = conn
                 .prepare(
-                    "SELECT id, title, body FROM memories WHERE deleted_at IS NULL AND archived = 0",
+                    "SELECT id, title, body, trigger_word FROM memories WHERE deleted_at IS NULL AND archived = 0",
                 )
                 .map_err(internal)?;
             let rows = stmt
@@ -245,15 +245,28 @@ impl SearchService {
                         row.get::<_, String>(0)?,
                         row.get::<_, String>(1)?,
                         row.get::<_, String>(2)?,
+                        row.get::<_, Option<String>>(3)?,
                     ))
                 })
                 .map_err(internal)?;
             for row in rows {
-                let (id, title, body) = row.map_err(internal)?;
+                let (id, title, body, trigger_word) = row.map_err(internal)?;
+                let searchable = match trigger_word.as_deref() {
+                    Some(word) if !word.trim().is_empty() => {
+                        format!("{}\n{}", body, word.trim())
+                    }
+                    _ => body,
+                };
                 let entity_id: EntityId = id
                     .parse()
                     .map_err(|e| DomainError::Internal(format!("{e}")))?;
-                self.upsert_conn(&conn, SearchEntityType::Memory, entity_id, &title, &body)?;
+                self.upsert_conn(
+                    &conn,
+                    SearchEntityType::Memory,
+                    entity_id,
+                    &title,
+                    &searchable,
+                )?;
                 count += 1;
             }
         }

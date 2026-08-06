@@ -3,7 +3,7 @@
   "name": "snippet-trigger",
   "title": "触发词展开/插入",
   "description": "实现触发词自动展开/插入通道，triggerWord 参与搜索索引",
-  "status": "planning",
+  "status": "in_progress",
   "dev_type": null,
   "scope": null,
   "package": null,

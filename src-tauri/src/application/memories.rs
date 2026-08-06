@@ -67,8 +67,12 @@ impl MemoryService {
         if let Some(tag_names) = input.tag_names {
             self.replace_tags(&tx, id, &tag_names)?;
         }
+        let searchable = match &trigger_word {
+            Some(word) => format!("{}\n{}", body, word),
+            None => body.clone(),
+        };
         self.search
-            .upsert_conn(&tx, SearchEntityType::Memory, id, &title, &body)?;
+            .upsert_conn(&tx, SearchEntityType::Memory, id, &title, &searchable)?;
         tx.commit().map_err(internal)?;
         self.get(id)
     }
@@ -105,12 +109,18 @@ impl MemoryService {
         .map_err(internal)?;
         self.replace_tags(&tx, input.id, &input.tag_names)?;
         if !input.archived {
+            let searchable = match input.trigger_word.as_deref() {
+                Some(word) if !word.trim().is_empty() => {
+                    format!("{}\n{}", input.body, word.trim())
+                }
+                _ => input.body.clone(),
+            };
             self.search.upsert_conn(
                 &tx,
                 SearchEntityType::Memory,
                 input.id,
                 &title,
-                &input.body,
+                &searchable,
             )?;
         }
         tx.commit().map_err(internal)?;
@@ -342,6 +352,7 @@ where
 mod tests {
     use super::*;
     use crate::application::tasks::TaskService;
+    use crate::domain::SearchQuery;
     use tempfile::tempdir;
 
     #[test]
@@ -465,6 +476,50 @@ mod tests {
             })
             .unwrap();
         assert!(none.is_empty());
+    }
+
+    #[test]
+    fn search_index_includes_trigger_word() {
+        let dir = tempdir().unwrap();
+        let db = Database::open(dir.path().join("m.db")).unwrap();
+        let svc = MemoryService::new(db);
+        svc.create(CreateMemoryInput {
+            title: "会议模板".into(),
+            body: Some("会议纪要模板正文".into()),
+            pinned: None,
+            quick_insert: Some(true),
+            trigger_word: Some("meeting".into()),
+            tag_names: None,
+        })
+        .unwrap();
+
+        // 触发词参与搜索索引：按 trigger_word 检索可命中该记忆
+        let results = svc
+            .search
+            .query(SearchQuery {
+                query: "meeting".into(),
+                types: Some(vec![SearchEntityType::Memory]),
+                limit: Some(10),
+            })
+            .unwrap();
+        assert!(
+            results.memories.iter().any(|h| h.title == "会议模板"),
+            "trigger_word 应参与搜索索引，按触发词可命中"
+        );
+
+        // 直接断言 upsert 写入的搜索文档包含 trigger_word
+        let conn = svc.connect().unwrap();
+        let stored: String = conn
+            .query_row(
+                "SELECT body FROM search_documents WHERE entity_type = 'memory'",
+                [],
+                |row| row.get(0),
+            )
+            .unwrap();
+        assert!(
+            stored.contains("meeting"),
+            "search_documents.body 应包含 trigger_word，实际: {stored}"
+        );
     }
 
     #[test]

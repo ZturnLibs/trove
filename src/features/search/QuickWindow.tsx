@@ -147,6 +147,12 @@ export function QuickWindow() {
     enabled: mode === "clip",
   });
 
+  const snippetsQuery = useQuery({
+    queryKey: ["memories", { quickInsertOnly: true }],
+    queryFn: () => ipc.memoryQuery({ quickInsertOnly: true }),
+    enabled: mode === "capture",
+  });
+
   const flatResults = useMemo(() => {
     const data = searchQuery.data;
     if (!data) return [] as SearchHit[];
@@ -159,6 +165,24 @@ export function QuickWindow() {
   }, [searchQuery.data]);
 
   const clipItems = clipQuery.data ?? [];
+
+  // 快速记录模式下：输入恰好等于某 quickInsert 记忆的触发词时，提供「展开」入口。
+  const snippetHit = useMemo(() => {
+    if (mode !== "capture") return null;
+    const q = title.trim().toLowerCase();
+    if (!q) return null;
+    return (
+      (snippetsQuery.data ?? []).find(
+        (m) => m.triggerWord && m.triggerWord.trim().toLowerCase() === q,
+      ) ?? null
+    );
+  }, [mode, title, snippetsQuery.data]);
+
+  const expandSnippet = () => {
+    if (!snippetHit) return;
+    // 仅替换标题输入，不改 captureType/dueDate/priority/daily 等既有表单状态。
+    setTitle(snippetHit.body || snippetHit.title);
+  };
 
   type PaletteItem =
     | { kind: "hit"; hit: SearchHit }
@@ -442,8 +466,28 @@ export function QuickWindow() {
                   event.preventDefault();
                   void submit();
                 }
+                if (event.key === "Enter" && snippetHit) {
+                  event.preventDefault();
+                  expandSnippet();
+                }
               }}
             />
+            {snippetHit ? (
+              <div className="overflow-hidden rounded-[var(--radius-panel)] border border-border">
+                <button
+                  type="button"
+                  className="flex w-full items-center gap-2 border-b border-border px-3 py-2 text-left hover:bg-row-hover"
+                  onClick={expandSnippet}
+                >
+                  <span className="rounded bg-row-hover px-1.5 text-[10px] text-muted">
+                    片段
+                  </span>
+                  <span className="truncate text-[13px] font-medium">
+                    ↩ 展开「{snippetHit.title}」
+                  </span>
+                </button>
+              </div>
+            ) : null}
             {captureType === "task" ? (
               <div className="grid grid-cols-2 gap-2">
                 <label className="space-y-1 text-[11px] text-muted">
