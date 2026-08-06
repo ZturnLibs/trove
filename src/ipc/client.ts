@@ -344,6 +344,15 @@ export type TemplatePreview = {
   tagNames: string[];
 };
 
+export type SavedView = {
+  id: string;
+  name: string;
+  filter: Record<string, unknown>;
+  createdAt: string;
+  updatedAt: string;
+  revision: number;
+};
+
 export type SearchEntityType = "task" | "reminder" | "memory" | "clipboard";
 
 export type SearchHit = {
@@ -479,6 +488,12 @@ export const ipc = {
     invoke<TemplatePreview>("template_preview", { id }),
   templateApply: (id: string) =>
     invoke<{ kind: string; id: string }>("template_apply", { id }),
+  savedViewCreate: (input: {
+    name: string;
+    filter: Record<string, unknown>;
+  }) => invoke<SavedView>("saved_view_create", { input }),
+  savedViewList: () => invoke<SavedView[]>("saved_view_list"),
+  savedViewDelete: (id: string) => invoke<void>("saved_view_delete", { id }),
   reminderCreate: (input: CreateReminderInput) =>
     invoke<Reminder>("reminder_create", { input }),
   reminderUpdate: (input: UpdateReminderInput) =>

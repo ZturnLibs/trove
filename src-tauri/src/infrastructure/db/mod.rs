@@ -18,6 +18,7 @@ const MIGRATIONS: &[(i64, &str)] = &[
     ),
     (7, include_str!("../../../migrations/0007_assets_ocr.sql")),
     (8, include_str!("../../../migrations/0008_entity_links.sql")),
+    (9, include_str!("../../../migrations/0009_saved_views.sql")),
 ];
 
 #[derive(Debug, Error)]
@@ -188,7 +189,7 @@ mod tests {
         let db_path = dir.path().join("workbench.db");
         let db = Database::open(&db_path).unwrap();
         let health = db.health_check().unwrap();
-        assert_eq!(health.schema_version, 8);
+        assert_eq!(health.schema_version, 9);
         assert_eq!(health.journal_mode.to_lowercase(), "wal");
         assert!(health.fts5_available);
     }
@@ -200,6 +201,6 @@ mod tests {
         let db = Database::open(&db_path).unwrap();
         db.migrate(None).unwrap();
         db.migrate(None).unwrap();
-        assert_eq!(db.health_check().unwrap().schema_version, 8);
+        assert_eq!(db.health_check().unwrap().schema_version, 9);
     }
 }

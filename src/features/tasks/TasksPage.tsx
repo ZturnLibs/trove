@@ -5,8 +5,10 @@ import { TaskRow } from "@/design-system/patterns/TaskRow";
 import { EmptyState } from "@/components/PageScaffold";
 import { Button } from "@/design-system/primitives/Button";
 import { Input } from "@/design-system/primitives/Input";
+import { ConfirmButton } from "@/design-system/patterns/ConfirmButton";
 import {
   ipc,
+  type SavedView,
   type SmartListKind,
   type Task,
   type TaskPriority,
@@ -42,6 +44,9 @@ export function TasksPage() {
   const [smart, setSmart] = useState<SmartListKind | "none">("none");
   const [newListName, setNewListName] = useState("");
   const [createdId, setCreatedId] = useState<string | null>(null);
+  const [showViewInput, setShowViewInput] = useState(false);
+  const [viewName, setViewName] = useState("");
+  const [selectedViewId, setSelectedViewId] = useState<string>("");
 
   const listsQuery = useQuery({
     queryKey: ["task-lists"],
@@ -52,6 +57,61 @@ export function TasksPage() {
     queryKey: ["task-tags"],
     queryFn: () => ipc.taskListTags(),
   });
+
+  const savedViewsQuery = useQuery({
+    queryKey: ["saved-views"],
+    queryFn: () => ipc.savedViewList(),
+  });
+
+  const saveViewMutation = useMutation({
+    mutationFn: () =>
+      ipc.savedViewCreate({
+        name: viewName.trim(),
+        filter: { listId, status, priority, tagId, smart },
+      }),
+    onSuccess: () => {
+      void queryClient.invalidateQueries({ queryKey: ["saved-views"] });
+      setViewName("");
+      setShowViewInput(false);
+    },
+  });
+
+  const deleteViewMutation = useMutation({
+    mutationFn: (id: string) => ipc.savedViewDelete(id),
+    onSuccess: () => {
+      void queryClient.invalidateQueries({ queryKey: ["saved-views"] });
+      setSelectedViewId("");
+    },
+  });
+
+  const applySavedView = (view: SavedView) => {
+    const f = view.filter;
+    setListId(typeof f.listId === "string" ? f.listId : "all");
+    const nextStatus = f.status;
+    setStatus(
+      nextStatus === "todo" ||
+        nextStatus === "completed" ||
+        nextStatus === "archived"
+        ? (nextStatus as TaskStatus)
+        : "active",
+    );
+    const nextPriority = f.priority;
+    setPriority(
+      nextPriority === "high" ||
+        nextPriority === "medium" ||
+        nextPriority === "low" ||
+        nextPriority === "none"
+        ? (nextPriority as TaskPriority)
+        : "all",
+    );
+    setTagId(typeof f.tagId === "string" ? f.tagId : null);
+    const nextSmart = f.smart;
+    setSmart(
+      smartLists.some((s) => s.id === nextSmart)
+        ? (nextSmart as SmartListKind | "none")
+        : "none",
+    );
+  };
 
   const tasksQuery = useQuery({
     queryKey: ["tasks", "list", listId, status, priority, smart, tagId],
@@ -213,6 +273,72 @@ export function TasksPage() {
               </select>
             </>
           ) : null}
+          {(savedViewsQuery.data ?? []).length > 0 ? (
+            <>
+              <select
+                className="h-7 rounded-[var(--radius-control)] border border-border bg-surface-raised px-2 text-[12px]"
+                value={selectedViewId}
+                onChange={(e) => {
+                  const id = e.target.value;
+                  setSelectedViewId(id);
+                  const view = savedViewsQuery.data?.find((v) => v.id === id);
+                  if (view) applySavedView(view);
+                }}
+              >
+                <option value="">无</option>
+                {(savedViewsQuery.data ?? []).map((view) => (
+                  <option key={view.id} value={view.id}>
+                    {view.name}
+                  </option>
+                ))}
+              </select>
+              {selectedViewId ? (
+                <ConfirmButton
+                  size="sm"
+                  variant="secondary"
+                  confirmLabel="确认删除"
+                  confirmVariant="danger"
+                  onConfirm={() => deleteViewMutation.mutate(selectedViewId)}
+                  resetKey={selectedViewId}
+                >
+                  删除视图
+                </ConfirmButton>
+              ) : null}
+            </>
+          ) : null}
+          {showViewInput ? (
+            <>
+              <Input
+                value={viewName}
+                onChange={(e) => setViewName(e.target.value)}
+                placeholder="视图名称…"
+                className="h-7 w-32"
+                onKeyDown={(e) => {
+                  if (e.key === "Enter" && viewName.trim()) {
+                    saveViewMutation.mutate();
+                  } else if (e.key === "Escape") {
+                    setShowViewInput(false);
+                  }
+                }}
+              />
+              <Button
+                size="sm"
+                variant="secondary"
+                disabled={!viewName.trim() || saveViewMutation.isPending}
+                onClick={() => saveViewMutation.mutate()}
+              >
+                保存
+              </Button>
+            </>
+          ) : (
+            <Button
+              size="sm"
+              variant="secondary"
+              onClick={() => setShowViewInput(true)}
+            >
+              保存视图
+            </Button>
+          )}
           {selectedId ? (
             <>
               <Button

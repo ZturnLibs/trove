@@ -6,6 +6,7 @@ pub mod data_port;
 pub mod links;
 pub mod memories;
 pub mod reminders;
+pub mod saved_views;
 pub mod scheduler;
 pub mod search;
 pub mod smoke_notes;

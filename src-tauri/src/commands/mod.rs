@@ -1,6 +1,7 @@
 use crate::app_state::AppState;
 use crate::application::backup::{BackupInfo, BackupStatus};
 use crate::application::data_port::ImportResult;
+use crate::application::saved_views::{CreateSavedViewInput, SavedView};
 use crate::application::smoke_notes::SmokeNote;
 use crate::application::tasks::TaskCounts;
 use crate::application::templates::{
@@ -507,6 +508,24 @@ pub fn template_preview(
     id: EntityId,
 ) -> Result<TemplatePreview, AppError> {
     state.templates.preview(id).map_err(Into::into)
+}
+
+#[tauri::command]
+pub fn saved_view_create(
+    state: State<'_, AppState>,
+    input: CreateSavedViewInput,
+) -> Result<SavedView, AppError> {
+    state.saved_views.create(input).map_err(Into::into)
+}
+
+#[tauri::command]
+pub fn saved_view_list(state: State<'_, AppState>) -> Result<Vec<SavedView>, AppError> {
+    state.saved_views.list().map_err(Into::into)
+}
+
+#[tauri::command]
+pub fn saved_view_delete(state: State<'_, AppState>, id: EntityId) -> Result<(), AppError> {
+    state.saved_views.delete(id).map_err(Into::into)
 }
 
 #[tauri::command]
