@@ -183,7 +183,9 @@ impl TemplateService {
             notes: Some(preview.body).filter(|s| !s.is_empty()),
             task_id: None,
             fire_at,
-            timezone: Some("Asia/Shanghai".into()),
+            timezone: Some(
+                iana_time_zone::get_timezone().unwrap_or_else(|_| "Asia/Shanghai".to_string()),
+            ),
             recurrence: preview.recurrence,
             end_at: None,
         })

@@ -3,7 +3,7 @@
   "name": "timezone-fix",
   "title": "时区正确性",
   "description": "去掉 Asia/Shanghai 硬编码，NL 解析与菜单提醒用系统时区",
-  "status": "planning",
+  "status": "in_progress",
   "dev_type": null,
   "scope": null,
   "package": null,

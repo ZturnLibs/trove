@@ -33,6 +33,7 @@ parking_lot = "0.12"
 directories = "6"
 sha2 = "0.10"
 hex = "0.4"
+iana-time-zone = "0.1"
 image = { version = "0.25", default-features = false, features = ["png"] }
 base64 = "0.22"
 

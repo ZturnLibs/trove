@@ -468,7 +468,8 @@ pub fn task_postpone(
 
 #[tauri::command]
 pub fn nl_parse_capture(text: String) -> ParsedCapture {
-    parse_capture(&text)
+    let timezone = iana_time_zone::get_timezone().unwrap_or_else(|_| "Asia/Shanghai".to_string());
+    parse_capture(&text, &timezone)
 }
 
 #[tauri::command]

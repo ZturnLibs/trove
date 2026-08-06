@@ -17,7 +17,7 @@ pub struct ParsedCapture {
 }
 
 /// Deterministic quick-capture parser. Does not silently invent ambiguous dates/times.
-pub fn parse_capture(input: &str) -> ParsedCapture {
+pub fn parse_capture(input: &str, timezone: &str) -> ParsedCapture {
     let raw = input.trim().to_string();
     let mut remaining = raw.clone();
     let mut due_date: Option<String> = None;
@@ -25,7 +25,6 @@ pub fn parse_capture(input: &str) -> ParsedCapture {
     let mut priority = TaskPriority::None;
     let mut recurrence: Option<RecurrenceRule> = None;
     let mut ambiguous_fields = Vec::new();
-    let timezone = "Asia/Shanghai".to_string();
 
     for (pat, pri) in [
         ("优先级高", TaskPriority::High),
@@ -56,7 +55,7 @@ pub fn parse_capture(input: &str) -> ParsedCapture {
             interval: 1,
             weekdays: None,
             monthday: None,
-            timezone: timezone.clone(),
+            timezone: timezone.into(),
             end_at: None,
         });
     } else if let Some((next, weekday)) = take_weekly(&remaining) {
@@ -67,7 +66,7 @@ pub fn parse_capture(input: &str) -> ParsedCapture {
             interval: 1,
             weekdays: Some(vec![weekday]),
             monthday: None,
-            timezone: timezone.clone(),
+            timezone: timezone.into(),
             end_at: None,
         });
     } else if let Some((next, day)) = take_monthly(&remaining) {
@@ -78,7 +77,7 @@ pub fn parse_capture(input: &str) -> ParsedCapture {
             interval: 1,
             weekdays: None,
             monthday: Some(day),
-            timezone: timezone.clone(),
+            timezone: timezone.into(),
             end_at: None,
         });
     }
@@ -390,9 +389,11 @@ fn take_monthly(input: &str) -> Option<(String, u8)> {
 mod tests {
     use super::*;
 
+    const FIXED_TZ: &str = "Asia/Shanghai";
+
     #[test]
     fn parses_tomorrow_afternoon() {
-        let p = parse_capture("明天下午三点回复客户");
+        let p = parse_capture("明天下午三点回复客户", FIXED_TZ);
         assert!(p.title.contains("回复客户"));
         assert!(p.due_date.is_some());
         assert_eq!(p.due_time.as_deref(), Some("15:00"));
@@ -401,7 +402,7 @@ mod tests {
 
     #[test]
     fn bare_weekday_is_ambiguous() {
-        let p = parse_capture("周五交周报");
+        let p = parse_capture("周五交周报", FIXED_TZ);
         assert!(p.due_date.is_some());
         assert!(p.ambiguous_fields.iter().any(|f| f == "dueDate"));
         assert!(p.title.contains("交周报"));
@@ -409,25 +410,34 @@ mod tests {
 
     #[test]
     fn daily_recurrence() {
-        let p = parse_capture("每天吃药");
+        let p = parse_capture("每天吃药", FIXED_TZ);
         assert!(p.recurrence.is_some());
         assert_eq!(
             p.recurrence.as_ref().unwrap().frequency,
             RecurrenceFrequency::Daily
         );
+        assert_eq!(p.recurrence.as_ref().unwrap().timezone, FIXED_TZ);
         assert!(p.title.contains("吃药"));
     }
 
     #[test]
+    fn recurrence_uses_injected_timezone() {
+        // AC2: when the caller injects a non-Shanghai timezone, the parsed
+        // recurrence rule must carry that timezone instead of a hardcoded one.
+        let p = parse_capture("每天吃药", "UTC");
+        assert_eq!(p.recurrence.as_ref().unwrap().timezone, "UTC");
+    }
+
+    #[test]
     fn priority_marker() {
-        let p = parse_capture("明天 !高 提交方案");
+        let p = parse_capture("明天 !高 提交方案", FIXED_TZ);
         assert_eq!(p.priority, TaskPriority::High);
         assert!(p.title.contains("提交方案"));
     }
 
     #[test]
     fn hhmm_time() {
-        let p = parse_capture("明天 15:30 开会");
+        let p = parse_capture("明天 15:30 开会", FIXED_TZ);
         assert_eq!(p.due_time.as_deref(), Some("15:30"));
         assert!(p.title.contains("开会"));
     }

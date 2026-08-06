@@ -4477,6 +4477,7 @@ dependencies = [
  "chrono",
  "directories",
  "hex",
+ "iana-time-zone",
  "image",
  "parking_lot",
  "rusqlite",

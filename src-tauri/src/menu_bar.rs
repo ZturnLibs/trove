@@ -68,13 +68,14 @@ fn menu_new_reminder(app: &AppHandle) {
     };
     let today = Local::now().date_naive();
     let fire_at = format!("{today}T09:00:00");
+    let timezone = iana_time_zone::get_timezone().unwrap_or_else(|_| "Asia/Shanghai".to_string());
     match state.reminders.create(CreateReminderInput {
         title: "新提醒".into(),
         notes: None,
         task_id: None,
         fire_at,
         recurrence: None,
-        timezone: Some("Asia/Shanghai".into()),
+        timezone: Some(timezone),
         end_at: None,
     }) {
         Ok(reminder) => {
