@@ -3,7 +3,7 @@
   "name": "direct-paste",
   "title": "直接粘贴落地或撤回声明",
   "description": "实现 directPaste 或撤回能力声明，避免宣称与实现不符",
-  "status": "planning",
+  "status": "in_progress",
   "dev_type": null,
   "scope": null,
   "package": null,

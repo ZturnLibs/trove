@@ -37,15 +37,8 @@ pub fn detect_capabilities() -> PlatformCapabilities {
             notes: "采集文本与图片。可随时暂停；密码管理器等应用默认排除。正文不会写入日志。图片 OCR 仅本地执行。".into(),
         },
         direct_paste: CapabilityStatus {
-            available: cfg!(any(target_os = "macos", target_os = "windows")),
-            notes: if cfg!(target_os = "macos") {
-                "需要辅助功能权限。未授权时「再次复制」仍可用，可手动粘贴。"
-            } else if cfg!(target_os = "windows") {
-                "依赖系统输入能力；失败时降级为再次复制到剪切板。"
-            } else {
-                "Linux 适配延后；请使用再次复制。"
-            }
-            .into(),
+            available: false,
+            notes: "直接粘贴暂未提供，请使用「再次复制」后手动粘贴。".into(),
         },
         autostart: CapabilityStatus {
             available: true,

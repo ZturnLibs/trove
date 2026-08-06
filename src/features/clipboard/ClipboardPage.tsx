@@ -2,11 +2,7 @@ import { useEffect, useMemo, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Star } from "lucide-react";
 import { EmptyState } from "@/components/PageScaffold";
-import {
-  PermissionBanner,
-  dismissBanner,
-  isBannerDismissed,
-} from "@/components/PermissionBanner";
+import { PermissionBanner } from "@/components/PermissionBanner";
 import { Button } from "@/design-system/primitives/Button";
 import { ConfirmButton } from "@/design-system/patterns/ConfirmButton";
 import { Input } from "@/design-system/primitives/Input";
@@ -240,16 +236,6 @@ export function ClipboardPage() {
   }, [items, selectedId]);
 
   const capturing = settingsQuery.data?.clipboardCaptureEnabled ?? true;
-  const [pasteBanner, setPasteBanner] = useState(
-    () => !isBannerDismissed("accessibility"),
-  );
-
-  const healthQuery = useQuery({
-    queryKey: ["app", "health"],
-    queryFn: () => ipc.appHealth(),
-  });
-  const directPasteAvailable =
-    healthQuery.data?.capabilities.directPaste.available ?? true;
 
   const toggleCapture = useMutation({
     mutationFn: (enabled: boolean) => ipc.clipboardSetCaptureEnabled(enabled),
@@ -276,20 +262,6 @@ export function ClipboardPage() {
           primaryAction={{
             label: "恢复采集",
             onClick: () => toggleCapture.mutate(true),
-          }}
-        />
-      ) : null}
-      {pasteBanner && !directPasteAvailable ? (
-        <PermissionBanner
-          kind="accessibility"
-          title="无法直接粘贴"
-          body={
-            healthQuery.data?.capabilities.directPaste.notes ??
-            "请使用「再次复制」后手动粘贴。"
-          }
-          onDismiss={() => {
-            dismissBanner("accessibility");
-            setPasteBanner(false);
           }}
         />
       ) : null}
