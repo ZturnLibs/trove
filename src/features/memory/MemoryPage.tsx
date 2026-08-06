@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Pin } from "lucide-react";
+import { MarkdownView } from "@/components/MarkdownView";
 import { EmptyState } from "@/components/PageScaffold";
 import { AttachmentsSection } from "@/design-system/patterns/AttachmentsSection";
 import { Button } from "@/design-system/primitives/Button";
@@ -13,28 +14,6 @@ import {
 import { useDomainInvalidation } from "@/features/tasks/useDomainInvalidation";
 import { ipc, type Memory, type UpdateMemoryInput } from "@/ipc/client";
 import { cn } from "@/lib/cn";
-
-function linkify(text: string) {
-  const parts = text.split(/(https?:\/\/[^\s]+)/g);
-  return parts.map((part, index) =>
-    /^https?:\/\//.test(part) ? (
-      <a
-        key={`${part}-${index}`}
-        href={part}
-        className="text-accent underline"
-        onClick={(e) => {
-          e.preventDefault();
-          void navigator.clipboard.writeText(part);
-        }}
-        title="点击复制链接"
-      >
-        {part}
-      </a>
-    ) : (
-      <span key={`${index}`}>{part}</span>
-    ),
-  );
-}
 
 function MemoryDetail({
   memory,
@@ -193,8 +172,12 @@ function MemoryDetail({
           </label>
         ) : null}
         {preview ? (
-          <div className="whitespace-pre-wrap rounded-[var(--radius-control)] border border-border bg-surface p-3 text-[13px] leading-relaxed">
-            {linkify(draft.body || "（空）")}
+          <div className="rounded-[var(--radius-control)] border border-border bg-surface p-3">
+            {draft.body ? (
+              <MarkdownView markdown={draft.body} />
+            ) : (
+              <div className="text-[13px] text-muted">（空）</div>
+            )}
           </div>
         ) : (
           <textarea

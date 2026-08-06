@@ -3,7 +3,7 @@
   "name": "memory-markdown",
   "title": "记忆 Markdown 渲染",
   "description": "引入 Markdown 解析渲染预览，与「支持基础 Markdown」文案一致",
-  "status": "planning",
+  "status": "in_progress",
   "dev_type": null,
   "scope": null,
   "package": null,
