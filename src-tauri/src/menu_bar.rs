@@ -300,7 +300,13 @@ pub fn setup_app_menu(app: &AppHandle) -> tauri::Result<()> {
         true,
         None::<&str>,
     )?;
-    let help_menu = Submenu::with_items(app, "帮助", true, &[&help_shortcuts, &help_privacy])?;
+    let help_about = MenuItem::with_id(app, "menu.help.about", "关于 Trove", true, None::<&str>)?;
+    let help_menu = Submenu::with_items(
+        app,
+        "帮助",
+        true,
+        &[&help_shortcuts, &help_privacy, &help_about],
+    )?;
 
     #[cfg(target_os = "macos")]
     let menu = {
@@ -397,6 +403,11 @@ fn handle_menu_event(app: &AppHandle, id: &str) {
         }
         "menu.go.shortcuts" | "menu.help.shortcuts" | "menu.help.privacy" => {
             show_and_navigate(app, "/settings");
+        }
+        "menu.help.about" => {
+            if let Some(window) = app.get_webview_window("main") {
+                let _ = window.emit("menu://about", ());
+            }
         }
         _ => {}
     }

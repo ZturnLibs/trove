@@ -3,7 +3,7 @@
   "name": "about-multi-platform",
   "title": "About 跨平台",
   "description": "Windows/Linux 增加关于入口/对话框（当前仅 macOS）",
-  "status": "planning",
+  "status": "in_progress",
   "dev_type": null,
   "scope": null,
   "package": null,

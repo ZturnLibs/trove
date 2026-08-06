@@ -16,6 +16,7 @@ import { useDomainInvalidation } from "@/features/tasks/useDomainInvalidation";
 import { OnboardingOverlay } from "@/features/settings/OnboardingOverlay";
 import { PermissionBanner } from "@/components/PermissionBanner";
 import { BrandLogo } from "@/components/BrandLogo";
+import { AboutDialog } from "@/components/AboutDialog";
 
 const navItems = [
   { to: "/today", label: "今日", icon: SunMedium, badge: "overdue" as const },
@@ -30,6 +31,7 @@ export function MainShell() {
   const navigate = useNavigate();
   const queryClient = useQueryClient();
   const [backupError, setBackupError] = useState<string | null>(null);
+  const [aboutOpen, setAboutOpen] = useState(false);
   const countsQuery = useQuery({
     queryKey: ["task-counts"],
     queryFn: () => ipc.taskCounts(),
@@ -54,6 +56,16 @@ export function MainShell() {
     let unlisten: (() => void) | undefined;
     void listen<{ message?: string }>("backup://failed", (event) => {
       setBackupError(event.payload.message ?? "自动备份失败");
+    }).then((fn) => {
+      unlisten = fn;
+    });
+    return () => unlisten?.();
+  }, []);
+
+  useEffect(() => {
+    let unlisten: (() => void) | undefined;
+    void listen("menu://about", () => {
+      setAboutOpen(true);
     }).then((fn) => {
       unlisten = fn;
     });
@@ -136,6 +148,7 @@ export function MainShell() {
         <Outlet />
       </main>
       <OnboardingOverlay />
+      <AboutDialog open={aboutOpen} onClose={() => setAboutOpen(false)} />
     </div>
   );
 }
