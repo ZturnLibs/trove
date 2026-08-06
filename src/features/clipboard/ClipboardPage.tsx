@@ -211,6 +211,11 @@ export function ClipboardPage() {
     queryFn: () => ipc.settingsGet(),
   });
 
+  const healthQuery = useQuery({
+    queryKey: ["app", "health"],
+    queryFn: () => ipc.appHealth(),
+  });
+
   const listQuery = useQuery({
     queryKey: ["clipboard", favoritesOnly, search],
     queryFn: () =>
@@ -265,6 +270,11 @@ export function ClipboardPage() {
           }}
         />
       ) : null}
+    {healthQuery.data?.capabilities.ocr.available === false ? (
+      <p className="border-b border-border px-4 py-1.5 text-[11px] text-muted">
+        当前平台不支持图片文字识别（OCR），图片无法按文字搜索。
+      </p>
+    ) : null}
     <SplitTaskLayout
       title="剪切板"
       description={capturing ? "记录中 · 仅本地保存" : "已暂停采集"}

@@ -49,6 +49,7 @@ export type PlatformCapabilities = {
   directPaste: CapabilityStatus;
   autostart: CapabilityStatus;
   tray: CapabilityStatus;
+  ocr: CapabilityStatus;
 };
 
 export type AppHealth = {

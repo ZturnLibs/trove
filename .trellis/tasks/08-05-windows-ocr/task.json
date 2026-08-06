@@ -3,7 +3,7 @@
   "name": "windows-ocr",
   "title": "Windows OCR",
   "description": "为 Windows/Linux 提供图片 OCR（需平台能力研究），或明确降级策略",
-  "status": "planning",
+  "status": "in_progress",
   "dev_type": null,
   "scope": null,
   "package": null,

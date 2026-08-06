@@ -13,6 +13,7 @@ pub struct PlatformCapabilities {
     pub direct_paste: CapabilityStatus,
     pub autostart: CapabilityStatus,
     pub tray: CapabilityStatus,
+    pub ocr: CapabilityStatus,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -47,6 +48,10 @@ pub fn detect_capabilities() -> PlatformCapabilities {
         tray: CapabilityStatus {
             available: true,
             notes: "关闭主窗口会隐藏到托盘；只有「退出」才会结束进程。".into(),
+        },
+        ocr: CapabilityStatus {
+            available: cfg!(target_os = "macos"),
+            notes: "macOS 使用本机 Vision 识别图片文字；其他平台暂不支持，图片无法按文字搜索。".into(),
         },
     }
 }

@@ -228,6 +228,7 @@ export function SettingsPage() {
     directPaste: "直接粘贴",
     autostart: "开机启动",
     tray: "托盘",
+    ocr: "图片识别（OCR）",
   };
 
   const handleKindChange = (kind: TemplateKind) => {
