@@ -394,6 +394,17 @@ pub fn task_archive(
 }
 
 #[tauri::command]
+pub fn task_unarchive(
+    app: AppHandle,
+    state: State<'_, AppState>,
+    id: EntityId,
+) -> Result<Task, AppError> {
+    let task = state.tasks.unarchive_task(id)?;
+    emit_task_change(&app, &task, "updated");
+    Ok(task)
+}
+
+#[tauri::command]
 pub fn task_delete(
     app: AppHandle,
     state: State<'_, AppState>,

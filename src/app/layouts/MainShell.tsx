@@ -17,6 +17,7 @@ import { OnboardingOverlay } from "@/features/settings/OnboardingOverlay";
 import { PermissionBanner } from "@/components/PermissionBanner";
 import { BrandLogo } from "@/components/BrandLogo";
 import { AboutDialog } from "@/components/AboutDialog";
+import { RecentActionToast } from "@/components/RecentActionToast";
 
 const navItems = [
   { to: "/today", label: "今日", icon: SunMedium, badge: "overdue" as const },
@@ -149,6 +150,7 @@ export function MainShell() {
       </main>
       <OnboardingOverlay />
       <AboutDialog open={aboutOpen} onClose={() => setAboutOpen(false)} />
+      <RecentActionToast />
     </div>
   );
 }

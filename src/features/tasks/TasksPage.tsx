@@ -8,6 +8,7 @@ import { Input } from "@/design-system/primitives/Input";
 import {
   ipc,
   type SmartListKind,
+  type Task,
   type TaskPriority,
   type TaskStatus,
 } from "@/ipc/client";
@@ -17,6 +18,7 @@ import {
 } from "@/features/tasks/TaskLayout";
 import { useDomainInvalidation } from "@/features/tasks/useDomainInvalidation";
 import { useTaskRename } from "@/features/tasks/useTaskRename";
+import { useRecentActions } from "@/stores/recent-actions";
 
 const smartLists: { id: SmartListKind | "none"; label: string }[] = [
   { id: "none", label: "清单视图" },
@@ -88,13 +90,21 @@ export function TasksPage() {
   });
 
   const toggleMutation = useMutation({
-    mutationFn: async (id: string) => {
-      const task = tasksQuery.data?.find((t) => t.id === id);
-      if (!task) return;
-      if (task.status === "completed") await ipc.taskUncomplete(id);
-      else await ipc.taskComplete(id);
+    mutationFn: async (task: Task) => {
+      if (task.status === "completed") await ipc.taskUncomplete(task.id);
+      else await ipc.taskComplete(task.id);
     },
-    onSuccess: () => void queryClient.invalidateQueries({ queryKey: ["tasks"] }),
+    onSuccess: (_data, task) => {
+      void queryClient.invalidateQueries({ queryKey: ["tasks"] });
+      const wasCompleted = task.status === "completed";
+      useRecentActions.getState().push({
+        label: wasCompleted ? "取消完成" : "完成",
+        undo: async () => {
+          if (wasCompleted) await ipc.taskComplete(task.id);
+          else await ipc.taskUncomplete(task.id);
+        },
+      });
+    },
   });
 
   const postponeMutation = useMutation({
@@ -309,7 +319,7 @@ export function TasksPage() {
                 task={task}
                 selected={selectedId === task.id}
                 onSelect={() => setSelectedId(task.id)}
-                onToggleComplete={() => toggleMutation.mutate(task.id)}
+                onToggleComplete={() => toggleMutation.mutate(task)}
                 onRename={rename}
               />
             ))

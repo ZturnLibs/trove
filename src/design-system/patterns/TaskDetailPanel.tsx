@@ -12,6 +12,7 @@ import {
   type UpdateReminderInput,
   type UpdateTaskInput,
 } from "@/ipc/client";
+import { useRecentActions } from "@/stores/recent-actions";
 
 export function TaskDetailPanel({
   task,
@@ -78,12 +79,34 @@ export function TaskDetailPanel({
       if (task.status === "completed") await ipc.taskUncomplete(task.id);
       else await ipc.taskComplete(task.id);
     },
-    onSuccess: () => void queryClient.invalidateQueries({ queryKey: ["tasks"] }),
+    onSuccess: () => {
+      void queryClient.invalidateQueries({ queryKey: ["tasks"] });
+      if (!task) return;
+      const wasCompleted = task.status === "completed";
+      const taskId = task.id;
+      useRecentActions.getState().push({
+        label: wasCompleted ? "取消完成" : "完成",
+        undo: async () => {
+          if (wasCompleted) await ipc.taskComplete(taskId);
+          else await ipc.taskUncomplete(taskId);
+        },
+      });
+    },
   });
 
   const archiveMutation = useMutation({
     mutationFn: () => ipc.taskArchive(task!.id),
-    onSuccess: () => void queryClient.invalidateQueries({ queryKey: ["tasks"] }),
+    onSuccess: () => {
+      void queryClient.invalidateQueries({ queryKey: ["tasks"] });
+      if (!task) return;
+      const taskId = task.id;
+      useRecentActions.getState().push({
+        label: "归档",
+        undo: async () => {
+          await ipc.taskUnarchive(taskId);
+        },
+      });
+    },
   });
 
   const skipMutation = useMutation({
@@ -96,6 +119,23 @@ export function TaskDetailPanel({
     onSuccess: () => {
       void queryClient.invalidateQueries({ queryKey: ["tasks"] });
       onDeleted?.();
+      if (!task) return;
+      // 删除撤销为重建（新 id）：快照当前任务字段，撤销时用 taskCreate 重建。
+      const snapshot = {
+        title: task.title,
+        notes: task.notes,
+        priority: task.priority,
+        listId: task.listId,
+        dueDate: task.dueDate,
+        dueTime: task.dueTime,
+        tagNames: [...task.tagNames],
+      };
+      useRecentActions.getState().push({
+        label: "删除任务（重建）",
+        undo: async () => {
+          await ipc.taskCreate(snapshot);
+        },
+      });
     },
   });
 

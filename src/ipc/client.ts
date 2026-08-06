@@ -455,6 +455,7 @@ export const ipc = {
   taskComplete: (id: string) => invoke<Task>("task_complete", { id }),
   taskUncomplete: (id: string) => invoke<Task>("task_uncomplete", { id }),
   taskArchive: (id: string) => invoke<Task>("task_archive", { id }),
+  taskUnarchive: (id: string) => invoke<Task>("task_unarchive", { id }),
   taskDelete: (id: string) => invoke<void>("task_delete", { id }),
   taskSkip: (id: string) => invoke<Task>("task_skip", { id }),
   taskReorder: (orderedIds: string[]) =>

@@ -459,6 +459,22 @@ impl TaskService {
         self.get_task(id)
     }
 
+    pub fn unarchive_task(&self, id: EntityId) -> Result<Task, DomainError> {
+        let task = self.get_task(id)?;
+        if task.status != TaskStatus::Archived {
+            return Ok(task);
+        }
+        let conn = self.connect()?;
+        let now = stamp(&self.clock);
+        conn.execute(
+            "UPDATE tasks SET status = 'todo', updated_at = ?1, revision = revision + 1
+             WHERE id = ?2 AND deleted_at IS NULL",
+            params![now, id.to_string()],
+        )
+        .map_err(internal)?;
+        self.get_task(id)
+    }
+
     pub fn archive_task(&self, id: EntityId) -> Result<Task, DomainError> {
         let _ = self.get_task(id)?;
         let conn = self.connect()?;
@@ -1017,5 +1033,32 @@ mod tests {
         let today_view = svc.today_tasks().unwrap();
         assert!(today_view.completed_today.iter().any(|t| t.id == due.id));
         assert!(!today_view.due_today.iter().any(|t| t.id == due.id));
+    }
+
+    #[test]
+    fn archive_and_unarchive_roundtrip() {
+        let svc = open_service();
+        let task = svc
+            .create_task(CreateTaskInput {
+                title: "roundtrip".into(),
+                notes: None,
+                priority: None,
+                list_id: None,
+                due_date: None,
+                due_time: None,
+                tag_names: None,
+            })
+            .unwrap();
+        assert_eq!(task.status, TaskStatus::Todo);
+
+        let archived = svc.archive_task(task.id).unwrap();
+        assert_eq!(archived.status, TaskStatus::Archived);
+
+        let restored = svc.unarchive_task(task.id).unwrap();
+        assert_eq!(restored.status, TaskStatus::Todo);
+
+        // Unarchiving a non-archived task is a no-op.
+        let again = svc.unarchive_task(task.id).unwrap();
+        assert_eq!(again.status, TaskStatus::Todo);
     }
 }

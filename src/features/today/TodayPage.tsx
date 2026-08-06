@@ -11,6 +11,7 @@ import { Input } from "@/design-system/primitives/Input";
 import {
   ipc,
   type Reminder,
+  type Task,
   type TodayReminderItem,
   type UpdateReminderInput,
 } from "@/ipc/client";
@@ -21,6 +22,7 @@ import {
 } from "@/features/tasks/TaskLayout";
 import { useDomainInvalidation } from "@/features/tasks/useDomainInvalidation";
 import { useTaskRename } from "@/features/tasks/useTaskRename";
+import { useRecentActions } from "@/stores/recent-actions";
 import { cn } from "@/lib/cn";
 
 function ReminderRow({
@@ -376,18 +378,21 @@ export function TodayPage() {
   };
 
   const toggleMutation = useMutation({
-    mutationFn: async (id: string) => {
-      const all = [
-        ...(todayQuery.data?.overdue ?? []),
-        ...(todayQuery.data?.dueToday ?? []),
-        ...(todayQuery.data?.completedToday ?? []),
-      ];
-      const task = all.find((t) => t.id === id);
-      if (!task) return;
-      if (task.status === "completed") await ipc.taskUncomplete(id);
-      else await ipc.taskComplete(id);
+    mutationFn: async (task: Task) => {
+      if (task.status === "completed") await ipc.taskUncomplete(task.id);
+      else await ipc.taskComplete(task.id);
     },
-    onSuccess: () => void queryClient.invalidateQueries({ queryKey: ["tasks"] }),
+    onSuccess: (_data, task) => {
+      void queryClient.invalidateQueries({ queryKey: ["tasks"] });
+      const wasCompleted = task.status === "completed";
+      useRecentActions.getState().push({
+        label: wasCompleted ? "取消完成" : "完成",
+        undo: async () => {
+          if (wasCompleted) await ipc.taskComplete(task.id);
+          else await ipc.taskUncomplete(task.id);
+        },
+      });
+    },
   });
 
   const reminderComplete = useMutation({
@@ -580,7 +585,7 @@ export function TodayPage() {
                     setSelectedId(task.id);
                     setSelectedReminderId(null);
                   }}
-                  onToggleComplete={() => toggleMutation.mutate(task.id)}
+                  onToggleComplete={() => toggleMutation.mutate(task)}
                   onRename={rename}
                 />
               ))}
@@ -615,7 +620,7 @@ export function TodayPage() {
                     setSelectedId(task.id);
                     setSelectedReminderId(null);
                   }}
-                  onToggleComplete={() => toggleMutation.mutate(task.id)}
+                  onToggleComplete={() => toggleMutation.mutate(task)}
                   onRename={rename}
                 />
               ))}
@@ -635,7 +640,7 @@ export function TodayPage() {
                     setSelectedId(task.id);
                     setSelectedReminderId(null);
                   }}
-                  onToggleComplete={() => toggleMutation.mutate(task.id)}
+                  onToggleComplete={() => toggleMutation.mutate(task)}
                   onRename={rename}
                 />
               ))}

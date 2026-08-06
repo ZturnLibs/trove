@@ -12,13 +12,13 @@ mod shortcuts;
 use app_state::AppState;
 use infrastructure::db::Database;
 use infrastructure::logging;
+use std::sync::atomic::{AtomicI64, AtomicU64, Ordering};
+use std::sync::Mutex;
 use tauri::{
     menu::{Menu, MenuItem},
     tray::{MouseButton, MouseButtonState, TrayIconBuilder, TrayIconEvent},
-    PhysicalPosition, PhysicalSize, Rect, Emitter, Manager, WindowEvent,
+    Emitter, Manager, PhysicalPosition, PhysicalSize, Rect, WindowEvent,
 };
-use std::sync::atomic::{AtomicI64, AtomicU64, Ordering};
-use std::sync::Mutex;
 use tauri_plugin_autostart::{MacosLauncher, ManagerExt};
 
 fn resolve_db_path(app: &tauri::AppHandle) -> Result<std::path::PathBuf, String> {
@@ -482,6 +482,7 @@ pub fn run() {
             commands::task_complete,
             commands::task_uncomplete,
             commands::task_archive,
+            commands::task_unarchive,
             commands::task_delete,
             commands::task_skip,
             commands::task_reorder,
