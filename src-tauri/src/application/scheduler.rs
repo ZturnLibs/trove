@@ -25,11 +25,14 @@ fn tick(app: &AppHandle, reminders: &ReminderService) -> Result<(), String> {
     let due = reminders.due_occurrences(now).map_err(|e| e.to_string())?;
 
     for occ in due {
-        let body = if occ.task_id.is_some() {
-            "任务提醒到期"
-        } else {
-            "提醒到期"
-        };
+        // Format the planned time as `YYYY-MM-DD HH:MM` (drop seconds if present).
+        let scheduled_at = occ
+            .scheduled_at
+            .replace('T', " ")
+            .chars()
+            .take(16)
+            .collect::<String>();
+        let body = format!("计划时间 {scheduled_at}");
 
         let shown = app
             .notification()

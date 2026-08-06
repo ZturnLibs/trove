@@ -1,7 +1,7 @@
 import { useEffect, useState } from "react";
 import { NavLink, Outlet, useNavigate } from "react-router-dom";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { listen } from "@tauri-apps/api/event";
+import { emit, listen } from "@tauri-apps/api/event";
 import {
   ClipboardList,
   Inbox,
@@ -67,6 +67,22 @@ export function MainShell() {
     let unlisten: (() => void) | undefined;
     void listen("menu://about", () => {
       setAboutOpen(true);
+    }).then((fn) => {
+      unlisten = fn;
+    });
+    return () => unlisten?.();
+  }, []);
+
+  useEffect(() => {
+    let unlisten: (() => void) | undefined;
+    void listen<{
+      occurrenceId: string;
+      reminderId: string;
+      taskId?: string | null;
+      title: string;
+    }>("reminder://fired", async () => {
+      await ipc.windowShowMain();
+      await emit("main://navigate", "/today");
     }).then((fn) => {
       unlisten = fn;
     });

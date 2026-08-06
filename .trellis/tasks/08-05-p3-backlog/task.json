@@ -3,7 +3,7 @@
   "name": "p3-backlog",
   "title": "P3 技术债与体验增强 backlog",
   "description": "汇总审计中 P3 项：子任务/检查项、周期任务编辑、清单删除改名、查询分页、页内搜索、通知点击落地、通知文案、周期提醒 UI、搜索筛选维度、截图收藏、存储管理、菜单栏今日面板、命令面板分区、帮助内容",
-  "status": "planning",
+  "status": "in_progress",
   "dev_type": null,
   "scope": null,
   "package": null,
