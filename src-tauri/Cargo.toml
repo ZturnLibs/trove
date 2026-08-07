@@ -1,6 +1,6 @@
 [package]
 name = "trove"
-version = "1.2.2"
+version = "1.2.3"
 description = "Trove — 一站式个人工作台"
 authors = ["you"]
 edition = "2021"
