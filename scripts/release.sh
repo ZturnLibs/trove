@@ -96,10 +96,14 @@ fi
 
 echo "发布版本: ${CURRENT} -> ${NEW} (${TAG})"
 
-node - "$NEW" <<'NODE'
+RELEASE_VERSION="$NEW" node <<'NODE'
 const fs = require("fs");
 
-const version = process.argv[1];
+const version = process.env.RELEASE_VERSION;
+if (!version || !/^\d+\.\d+\.\d+$/.test(version)) {
+  console.error("invalid RELEASE_VERSION:", version);
+  process.exit(1);
+}
 const root = process.cwd();
 
 const pkgPath = `${root}/package.json`;
