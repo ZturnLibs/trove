@@ -15,6 +15,7 @@ use infrastructure::logging;
 use std::sync::atomic::{AtomicI64, AtomicU64, Ordering};
 use std::sync::Mutex;
 use tauri::{
+    image::Image,
     menu::{Menu, MenuItem},
     tray::{MouseButton, MouseButtonState, TrayIconBuilder, TrayIconEvent},
     Emitter, Manager, PhysicalPosition, PhysicalSize, Rect, WindowEvent,
@@ -50,6 +51,36 @@ fn resolve_assets_dir(app: &tauri::AppHandle) -> Result<std::path::PathBuf, Stri
     Ok(dir)
 }
 
+fn load_tray_icon_png(path: &std::path::Path) -> tauri::Result<Image<'static>> {
+    let bytes = std::fs::read(path)
+        .map_err(|e| tauri::Error::AssetNotFound(format!("read {}: {e}", path.display())))?;
+    let img = ::image::load_from_memory(&bytes)
+        .map_err(|e| tauri::Error::AssetNotFound(format!("decode {}: {e}", path.display())))?;
+    let rgba = img.to_rgba8();
+    let (width, height) = rgba.dimensions();
+    Ok(Image::new_owned(rgba.into_raw(), width, height))
+}
+
+fn resolve_tray_icon(app: &tauri::AppHandle) -> tauri::Result<Image<'static>> {
+    #[cfg(target_os = "macos")]
+    {
+        let base = std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("icons");
+        let hi = base.join("tray-icon@2x.png");
+        let path = if hi.exists() {
+            hi
+        } else {
+            base.join("tray-icon.png")
+        };
+        if path.exists() {
+            return load_tray_icon_png(&path);
+        }
+    }
+    app.default_window_icon()
+        .cloned()
+        .map(|icon| icon.to_owned())
+        .ok_or_else(|| tauri::Error::AssetNotFound("tray icon".into()))
+}
+
 fn setup_tray(app: &tauri::AppHandle) -> tauri::Result<()> {
     let capture_enabled = app
         .try_state::<AppState>()
@@ -83,8 +114,13 @@ fn setup_tray(app: &tauri::AppHandle) -> tauri::Result<()> {
     )?;
 
     let toggle_item = toggle_clipboard.clone();
-    let _tray = TrayIconBuilder::with_id("main")
-        .icon(app.default_window_icon().unwrap().clone())
+    let tray_icon = resolve_tray_icon(app)?;
+    let mut tray_builder = TrayIconBuilder::with_id("main").icon(tray_icon);
+    #[cfg(target_os = "macos")]
+    {
+        tray_builder = tray_builder.icon_as_template(true);
+    }
+    let _tray = tray_builder
         .menu(&menu)
         .show_menu_on_left_click(false)
         .on_menu_event(move |app, event| match event.id.as_ref() {

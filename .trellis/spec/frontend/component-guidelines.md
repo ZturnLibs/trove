@@ -72,9 +72,15 @@ Questions to answer:
 # 源图为 1024×1024 方形透明 SVG，位于 design/logo.svg
 pnpm tauri icon design/logo.svg
 rm -rf src-tauri/icons/android src-tauri/icons/ios   # 项目无移动端，删除 CLI 顺带产物
+
+# macOS 菜单栏托盘模板图标（纯黑剪影，系统渲染为白色）
+npx @resvg/resvg-js-cli design/logo-tray.svg src-tauri/icons/tray-icon.png
+cp src-tauri/icons/tray-icon.png src-tauri/icons/tray-icon@2x.png
+sips -z 64 64 src-tauri/icons/tray-icon@2x.png
 ```
 
-- 托盘与窗口图标经 `app.default_window_icon()` 自动生效。
+- **macOS 托盘**：`design/logo-tray.svg` → `tray-icon.png`；`setup_tray` 加载该图并设 `icon_as_template(true)`，菜单栏显示白色模板图标。
+- **Windows 托盘**：仍用彩色 `default_window_icon()`。
 - **macOS 原生 About 面板**（应用菜单 → 关于 Trove）：须在 `menu_bar.rs` 的 `AboutMetadata.icon` 显式传入
   `app.default_window_icon().cloned()`；系统不会自动用 bundle 图标更新该对话框。
 - favicon：`public/logo.svg`，`index.html` 引用 `/logo.svg`。
