@@ -76,9 +76,9 @@ jobs:
       - uses: tauri-apps/tauri-action@v0
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          # 可选：配置以下密钥后会生成带签名的更新包（需同时在 tauri.conf.json 开启 updater 插件）。
-          TAURI_PRIVATE_KEY: ${{ secrets.TAURI_PRIVATE_KEY }}
-          TAURI_KEY_PASSWORD: ${{ secrets.TAURI_KEY_PASSWORD }}
+          # 签名私钥：在 GitHub Secrets 配置 TAURI_SIGNING_PRIVATE_KEY（及可选 TAURI_SIGNING_PRIVATE_KEY_PASSWORD）。
+          TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
+          TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
         with:
           tagName: ${{ github.ref_name }}
           releaseName: 'Trove ${{ github.ref_name }}'

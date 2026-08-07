@@ -18,6 +18,8 @@ import { PermissionBanner } from "@/components/PermissionBanner";
 import { BrandLogo } from "@/components/BrandLogo";
 import { AboutDialog } from "@/components/AboutDialog";
 import { RecentActionToast } from "@/components/RecentActionToast";
+import { UpdateProgressBanner, UpdateToast } from "@/components/UpdateToast";
+import { useAppUpdater } from "@/stores/app-updater";
 
 const navItems = [
   { to: "/today", label: "今日", icon: SunMedium, badge: "overdue" as const },
@@ -43,6 +45,11 @@ export function MainShell() {
     queryFn: () => ipc.appHealth(),
     refetchInterval: 60_000,
   });
+  const settingsQuery = useQuery({
+    queryKey: ["settings"],
+    queryFn: () => ipc.settingsGet(),
+  });
+  const checkForUpdates = useAppUpdater((s) => s.checkForUpdates);
 
   const backupNow = useMutation({
     mutationFn: () => ipc.backupCreate(),
@@ -94,6 +101,14 @@ export function MainShell() {
       setBackupError(healthQuery.data.backup.lastError);
     }
   }, [healthQuery.data?.backup.lastError]);
+
+  useEffect(() => {
+    if (!settingsQuery.data?.autoCheckUpdates) return;
+    const timer = window.setTimeout(() => {
+      void checkForUpdates();
+    }, 30_000);
+    return () => window.clearTimeout(timer);
+  }, [settingsQuery.data?.autoCheckUpdates, checkForUpdates]);
 
   const badgeFor = (kind: "overdue" | "inbox" | null) => {
     if (!kind || !countsQuery.data) return null;
@@ -147,6 +162,7 @@ export function MainShell() {
       </aside>
 
       <main className="flex min-w-0 flex-1 flex-col">
+        <UpdateProgressBanner />
         {backupError ? (
           <PermissionBanner
             kind="backup_failed"
@@ -166,6 +182,7 @@ export function MainShell() {
       </main>
       <OnboardingOverlay />
       <AboutDialog open={aboutOpen} onClose={() => setAboutOpen(false)} />
+      <UpdateToast />
       <RecentActionToast />
     </div>
   );

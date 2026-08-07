@@ -8,6 +8,7 @@
 - [快捷键一览](./keyboard-shortcuts.md)：全局 / 应用内 / 快捷窗口键位定稿、设置页交互与实现对照。
 - [空状态与权限文案](./empty-states-and-permissions.md)：空状态、权限横幅、确认框、引导与错误提示文案。
 - [隐私与数据说明](./privacy-and-data.md)：数据存放位置、权限用途、剪切板隐私与备份恢复说明。
+- [自动更新](./auto-update.md)：签名密钥、GitHub Secret、发版验证与客户端更新行为。
 - [下一阶段路线图](./next-iteration-roadmap.md)：`v1.2.1` 收尾、`v1.3` 个人聚焦与复盘及创新功能的带 todo 执行规划。
 
 ## 实现进度

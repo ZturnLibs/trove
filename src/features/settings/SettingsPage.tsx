@@ -16,6 +16,10 @@ import {
   type TemplatePreview,
   type ThemePreference,
 } from "@/ipc/client";
+import {
+  isAppUpdaterSupported,
+  useAppUpdater,
+} from "@/stores/app-updater";
 
 function formatBytes(n: number) {
   if (n < 1024) return `${n} B`;
@@ -67,6 +71,13 @@ export function SettingsPage() {
     queryKey: ["templates"],
     queryFn: () => ipc.templateList(),
   });
+  const updaterPhase = useAppUpdater((s) => s.phase);
+  const updaterVersion = useAppUpdater((s) => s.availableVersion);
+  const updaterError = useAppUpdater((s) => s.error);
+  const updaterProgress = useAppUpdater((s) => s.progress);
+  const updaterLastCheckedAt = useAppUpdater((s) => s.lastCheckedAt);
+  const checkForUpdates = useAppUpdater((s) => s.checkForUpdates);
+  const installUpdate = useAppUpdater((s) => s.installUpdate);
 
   const [excludedText, setExcludedText] = useState("");
   const [retentionText, setRetentionText] = useState("");
@@ -442,6 +453,83 @@ export function SettingsPage() {
             ) : null}
           </div>
         </section>
+
+        {isAppUpdaterSupported() ? (
+          <section className="rounded-[var(--radius-panel)] border border-border bg-surface-raised p-4">
+            <h2 className="text-[13px] font-semibold">软件更新</h2>
+            <p className="mt-1 text-[12px] text-muted">
+              从 GitHub Release 检查签名更新包。更新仅替换应用本身，不会修改本地数据库。
+            </p>
+            <div className="mt-3 space-y-3 text-[12px]">
+              {settings ? (
+                <label className="flex items-start gap-2">
+                  <input
+                    type="checkbox"
+                    className="mt-0.5"
+                    checked={settings.autoCheckUpdates}
+                    onChange={(e) =>
+                      saveSettings.mutate({
+                        ...settings,
+                        autoCheckUpdates: e.target.checked,
+                      })
+                    }
+                  />
+                  <span>
+                    <span className="block font-medium">自动检查更新</span>
+                    <span className="text-muted">
+                      启动约 30 秒后后台检查，且每 24 小时最多检查一次。
+                    </span>
+                  </span>
+                </label>
+              ) : null}
+              <div className="flex flex-wrap items-center gap-2">
+                <Button
+                  size="sm"
+                  variant="secondary"
+                  disabled={
+                    updaterPhase === "checking" ||
+                    updaterPhase === "downloading" ||
+                    updaterPhase === "installing"
+                  }
+                  onClick={() => void checkForUpdates({ force: true })}
+                >
+                  {updaterPhase === "checking" ? "检查中…" : "检查更新"}
+                </Button>
+                {updaterPhase === "available" && updaterVersion ? (
+                  <Button size="sm" onClick={() => void installUpdate()}>
+                    安装 {updaterVersion}
+                  </Button>
+                ) : null}
+              </div>
+              <p className="text-muted">
+                {updaterPhase === "upToDate"
+                  ? "当前已是最新版本。"
+                  : updaterPhase === "available" && updaterVersion
+                    ? `发现新版本 ${updaterVersion}。`
+                    : updaterPhase === "downloading" || updaterPhase === "installing"
+                      ? "正在下载或安装更新…"
+                      : updaterLastCheckedAt
+                        ? `上次检查：${updaterLastCheckedAt}`
+                        : "尚未检查更新。"}
+              </p>
+              {updaterProgress !== null &&
+              (updaterPhase === "downloading" || updaterPhase === "installing") ? (
+                <div>
+                  <div className="mb-1 text-muted">进度 {updaterProgress}%</div>
+                  <div className="h-1 overflow-hidden rounded-full bg-border">
+                    <div
+                      className="h-full bg-accent transition-[width]"
+                      style={{ width: `${updaterProgress}%` }}
+                    />
+                  </div>
+                </div>
+              ) : null}
+              {updaterError ? (
+                <p className="text-danger">{updaterError}</p>
+              ) : null}
+            </div>
+          </section>
+        ) : null}
 
         <section className="rounded-[var(--radius-panel)] border border-border bg-surface-raised p-4">
           <h2 className="text-[13px] font-semibold">快捷键</h2>
