@@ -34,16 +34,31 @@ cd src-tauri && cargo test
 
 ## 发布新版本
 
-CI（`.github/workflows/release.yml`）在推送 `v*` 标签时构建 macOS（通用二进制）与 Windows 安装包，并汇总为一个 GitHub **Draft Release**，核对后再发布。
+CI（`.github/workflows/release.yml`）在推送 `v*` 标签时构建 macOS（通用二进制）与 Windows 安装包，并**自动发布** GitHub Release。
 
-1. 同步更新 `package.json` 与 `src-tauri/tauri.conf.json` 的 `version`；
+### 一键发布（推荐）
+
+在 **main** 分支、工作区干净且与 `origin/main` 同步时：
+
+```bash
+pnpm release patch    # 1.2.0 -> 1.2.1
+pnpm release minor    # 1.2.0 -> 1.3.0
+pnpm release major    # 1.2.0 -> 2.0.0
+pnpm release 1.2.1    # 指定版本
+```
+
+脚本 `scripts/release.sh` 会同步更新 `package.json`、`src-tauri/tauri.conf.json`、`src-tauri/Cargo.toml`，提交、打 `v*` 标签并推送，从而触发 release 工作流。
+
+### 手动发布
+
+1. 同步更新上述三处 `version`；
 2. 提交后打标签并推送：
 
    ```bash
-   git tag v0.0.1
-   git push origin v0.0.1
+   git tag v1.2.0
+   git push origin main v1.2.0
    ```
 
-3. Actions 跑完后到 [Releases](../../releases) 页发布草稿。
+3. Actions 跑完后到 [Releases](../../releases) 页查看已发布的版本与安装包。
 
 > 标签必须与应用版本一致，否则 CI 在 `check-tag` 阶段失败。当前 macOS / Windows 为未签名构建，首次打开会有系统提示；签名与自动更新可后续接入。

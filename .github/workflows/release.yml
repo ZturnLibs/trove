@@ -1,7 +1,7 @@
 name: release
 
 # 发布流程：推送 `v*` 标签触发，构建 macOS（通用二进制）与 Windows 安装包，
-# 汇总到一个 GitHub Draft Release，核对后再发布。
+# 汇总并自动发布 GitHub Release（含安装包与 Release Notes）。
 # 平台范围对应文档「首批目标平台 macOS、Windows」；Linux 后续在 matrix 中加一项即可。
 
 on:
@@ -34,6 +34,18 @@ jobs:
           echo "tag        : ${TAG}"
           if [ "${PKG_VERSION}" != "${TAG}" ] || [ "${CONF_VERSION}" != "${TAG}" ]; then
             echo "::error::标签 (${TAG}) 与应用版本不一致（package.json=${PKG_VERSION}, tauri.conf=${CONF_VERSION}）"
+            exit 1
+          fi
+          CARGO_VERSION=$(python3 - <<'PY'
+import re, pathlib
+text = pathlib.Path("src-tauri/Cargo.toml").read_text()
+m = re.search(r'^version = "([^"]+)"', text, re.M)
+print(m.group(1) if m else "")
+PY
+)
+          echo "Cargo.toml : ${CARGO_VERSION}"
+          if [ "${CARGO_VERSION}" != "${TAG}" ]; then
+            echo "::error::Cargo.toml 版本 (${CARGO_VERSION}) 与标签 (${TAG}) 不一致"
             exit 1
           fi
 
@@ -76,7 +88,7 @@ jobs:
         with:
           tagName: ${{ github.ref_name }}
           releaseName: 'Trove ${{ github.ref_name }}'
-          releaseDraft: true
+          releaseDraft: false
           prerelease: false
           generateReleaseNotes: true
           args: ${{ matrix.args }}
