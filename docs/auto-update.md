@@ -78,27 +78,19 @@ gh secret set TAURI_SIGNING_PRIVATE_KEY --repo ZturnLibs/trove < .tauri/trove.ke
 
 macOS universal 构建时，`latest.json` 中平台键为 `darwin-aarch64` / `darwin-x86_64`（均指向同一 universal 包）。客户端使用默认 arch 检测即可，**不要**传 `macos-universal` target。
 
-## 私有仓库
+## 仓库可见性
 
-当前仓库 `ZturnLibs/trove` 为 **Private**。GitHub Releases 资产与 `latest.json` 对未登录请求返回 404，Tauri updater **无法**直接拉取更新。
+仓库 `ZturnLibs/trove` 已设为 **Public**。匿名客户端可访问 `latest.json` 与 Release 安装包。
 
-可选方案：
-
-1. **将仓库改为 Public**（最简单，适合开源分发）
-2. **单独公开分发**：把 `latest.json` 与安装包放到公开 CDN / 对象存储，并修改 `tauri.conf.json` 的 `endpoints`
-3. **公开 mirror 仓库**：仅用于 Release 资产的 public repo
-
-验证 endpoint 是否对终端用户可达（应返回 JSON，而非 404）：
+验证 endpoint：
 
 ```bash
+./scripts/verify-updater-endpoint.sh
+# 或
 curl -fsSL https://github.com/ZturnLibs/trove/releases/latest/download/latest.json | jq .version
 ```
 
-若仓库仍为 Private，上述命令会失败；用 `gh release download` 仅表示 CI/维护者侧资产正确，不代表用户可自动更新。
-
-```bash
-curl -fsSL https://github.com/ZturnLibs/trove/releases/latest/download/latest.json | jq .
-```
+若将来改回 Private，匿名 updater 将不可用，需改用公开 CDN 或 mirror 仓库（见 git 历史中的私有仓库方案说明）。
 
 ## 客户端行为
 
