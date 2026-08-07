@@ -586,6 +586,10 @@ mod tests {
     use tempfile::tempdir;
 
     fn service() -> ReminderService {
+        service_with_db().0
+    }
+
+    fn service_with_db() -> (ReminderService, Database) {
         let dir = tempdir().unwrap();
         let db = Database::open(dir.path().join("r.db")).unwrap();
         // seed inbox via tasks migration tables only — create list manually
@@ -599,7 +603,7 @@ mod tests {
         .unwrap();
         drop(conn);
         std::mem::forget(dir);
-        ReminderService::new(db)
+        (ReminderService::new(db.clone()), db)
     }
 
     #[test]
@@ -711,5 +715,150 @@ mod tests {
         assert_eq!(all[1].id, later.id);
         assert!(!all[0].enabled);
         assert!(all[1].enabled);
+    }
+
+    #[test]
+    fn reconcile_counts_oneshot_overdue_and_dedupes_recurring() {
+        let (svc, db) = service_with_db();
+        let now = local_now_naive();
+        let stamp_now = stamp(&SystemClock);
+
+        // One-shot overdue — stays pending for catch-up.
+        let oneshot = svc
+            .create(CreateReminderInput {
+                title: "past".into(),
+                notes: None,
+                task_id: None,
+                fire_at: format_local_datetime(now - Duration::hours(2)),
+                recurrence: None,
+                timezone: Some("Asia/Shanghai".into()),
+                end_at: None,
+            })
+            .unwrap();
+
+        // Recurring with two overdue occurrences; only latest should count.
+        let recurring = svc
+            .create(CreateReminderInput {
+                title: "daily".into(),
+                notes: None,
+                task_id: None,
+                fire_at: format_local_datetime(
+                    NaiveDateTime::parse_from_str("2026-07-28T09:00:00", "%Y-%m-%dT%H:%M:%S")
+                        .unwrap(),
+                ),
+                recurrence: Some(RecurrenceRule {
+                    version: 1,
+                    frequency: RecurrenceFrequency::Daily,
+                    interval: 1,
+                    weekdays: None,
+                    monthday: None,
+                    timezone: "Asia/Shanghai".into(),
+                    end_at: None,
+                }),
+                timezone: Some("Asia/Shanghai".into()),
+                end_at: None,
+            })
+            .unwrap();
+        let conn = db.connect().unwrap();
+        conn.execute(
+            "INSERT INTO reminder_occurrences (
+                id, reminder_id, scheduled_at, status, needs_schedule,
+                system_notification_id, actioned_at, snooze_until,
+                created_at, updated_at, revision
+             ) VALUES (?1, ?2, ?3, 'pending', 1, NULL, NULL, NULL, ?4, ?4, 1)",
+            params![
+                new_id().to_string(),
+                recurring.id.to_string(),
+                "2026-07-29T09:00:00",
+                stamp_now,
+            ],
+        )
+        .unwrap();
+        drop(conn);
+
+        let catch_up = svc.reconcile_on_startup().unwrap();
+        assert_eq!(catch_up, 2);
+
+        let oneshot_occ = svc
+            .today_items()
+            .unwrap()
+            .into_iter()
+            .find(|i| i.reminder.id == oneshot.id)
+            .map(|i| i.occurrence)
+            .or_else(|| {
+                svc.due_occurrences(now)
+                    .unwrap()
+                    .into_iter()
+                    .find(|o| o.reminder_id == oneshot.id)
+            })
+            .expect("oneshot occurrence");
+        assert_eq!(oneshot_occ.status, OccurrenceStatus::Pending);
+
+        let recurring_occs: Vec<_> = svc
+            .due_occurrences(
+                NaiveDateTime::parse_from_str("2026-07-29T09:00:00", "%Y-%m-%dT%H:%M:%S")
+                    .unwrap(),
+            )
+            .unwrap()
+            .into_iter()
+            .filter(|o| o.reminder_id == recurring.id)
+            .collect();
+        assert_eq!(recurring_occs.len(), 1);
+        assert_eq!(recurring_occs[0].scheduled_at, "2026-07-29T09:00:00");
+
+        let missed: i64 = db
+            .connect()
+            .unwrap()
+            .query_row(
+                "SELECT COUNT(*) FROM reminder_occurrences
+                 WHERE reminder_id = ?1 AND status = 'inferred_missed'",
+                [recurring.id.to_string()],
+                |row| row.get(0),
+            )
+            .unwrap();
+        assert_eq!(missed, 1);
+    }
+
+    #[test]
+    fn snoozed_occurrence_not_due_until_snooze_until() {
+        let svc = service();
+        let fire = format_local_datetime(local_now_naive() - Duration::minutes(5));
+        let reminder = svc
+            .create(CreateReminderInput {
+                title: "snooze me".into(),
+                notes: None,
+                task_id: None,
+                fire_at: fire,
+                recurrence: None,
+                timezone: Some("Asia/Shanghai".into()),
+                end_at: None,
+            })
+            .unwrap();
+        let occ_id = svc
+            .due_occurrences(local_now_naive())
+            .unwrap()
+            .into_iter()
+            .find(|o| o.reminder_id == reminder.id)
+            .unwrap()
+            .id;
+
+        let snoozed = svc
+            .snooze_occurrence(occ_id, SnoozePreset::Minutes10)
+            .unwrap();
+        assert_eq!(snoozed.status, OccurrenceStatus::Snoozed);
+        let until = parse_local_datetime(snoozed.snooze_until.as_ref().unwrap()).unwrap();
+
+        assert!(
+            svc.due_occurrences(until - Duration::minutes(1))
+                .unwrap()
+                .iter()
+                .all(|o| o.id != occ_id)
+        );
+        assert!(
+            svc.due_occurrences(until + Duration::seconds(1))
+                .unwrap()
+                .iter()
+                .any(|o| o.id == occ_id)
+        );
     }
 }
