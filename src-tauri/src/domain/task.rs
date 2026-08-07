@@ -175,6 +175,8 @@ pub struct TaskQuery {
     pub due_null: Option<bool>,
     /// completed_at date >= YYYY-MM-DD (local)
     pub completed_since: Option<String>,
+    pub limit: Option<i64>,
+    pub offset: Option<i64>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]

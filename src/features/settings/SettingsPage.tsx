@@ -2,6 +2,7 @@ import { useEffect, useRef, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { PageScaffold } from "@/components/PageScaffold";
 import { Button } from "@/design-system/primitives/Button";
+import { RecurrencePicker } from "@/design-system/patterns/RecurrencePicker";
 import { ConfirmButton } from "@/design-system/patterns/ConfirmButton";
 import { Input } from "@/design-system/primitives/Input";
 import { ShortcutRow } from "@/features/settings/ShortcutRow";
@@ -9,13 +10,13 @@ import {
   ipc,
   type AppSettings,
   type ItemTemplate,
-  type RecurrenceFrequency,
   type RecurrenceRule,
   type TaskPriority,
   type TemplateKind,
   type TemplatePreview,
   type ThemePreference,
 } from "@/ipc/client";
+import { recurrenceLabel } from "@/lib/recurrence";
 
 function formatBytes(n: number) {
   if (n < 1024) return `${n} B`;
@@ -35,18 +36,6 @@ const PRIORITY_LABEL: Record<TaskPriority, string> = {
   medium: "中",
   high: "高",
 };
-
-function recurrenceLabel(rule: RecurrenceRule): string {
-  const freq: Record<RecurrenceFrequency, string> = {
-    daily: "每天",
-    weekdays: "工作日",
-    weekly: "每周",
-    monthly: "每月",
-    everyNDays: `每 ${rule.interval} 天`,
-    everyNWeeks: `每 ${rule.interval} 周`,
-  };
-  return freq[rule.frequency] ?? "周期";
-}
 
 export function SettingsPage() {
   const queryClient = useQueryClient();
@@ -84,7 +73,8 @@ export function SettingsPage() {
   const [priority, setPriority] = useState<TaskPriority>("none");
   const [reminderTitle, setReminderTitle] = useState("");
   const [relativeFireHours, setRelativeFireHours] = useState("0");
-  const [recurring, setRecurring] = useState(false);
+  const [reminderRecurrence, setReminderRecurrence] =
+    useState<RecurrenceRule | null>(null);
   const [memoryTitle, setMemoryTitle] = useState("");
   const [memoryBody, setMemoryBody] = useState("");
 
@@ -241,7 +231,7 @@ export function SettingsPage() {
     setRelativeDueDays("0");
     setPriority("none");
     setRelativeFireHours("0");
-    setRecurring(false);
+    setReminderRecurrence(null);
   };
 
   const resetCreateForm = () => {
@@ -252,7 +242,7 @@ export function SettingsPage() {
     setPriority("none");
     setReminderTitle("");
     setRelativeFireHours("0");
-    setRecurring(false);
+    setReminderRecurrence(null);
     setMemoryTitle("");
     setMemoryBody("");
   };
@@ -269,16 +259,7 @@ export function SettingsPage() {
       return {
         title: reminderTitle.trim(),
         relativeFireHours: Number(relativeFireHours) || 0,
-        ...(recurring
-          ? {
-              recurrence: {
-                version: 1,
-                frequency: "daily" as const,
-                interval: 1,
-                timezone: Intl.DateTimeFormat().resolvedOptions().timeZone,
-              },
-            }
-          : {}),
+        ...(reminderRecurrence ? { recurrence: reminderRecurrence } : {}),
       };
     }
     return {
@@ -618,14 +599,13 @@ export function SettingsPage() {
                       onChange={(e) => setRelativeFireHours(e.target.value)}
                     />
                   </label>
-                  <label className="flex items-center gap-2">
-                    <input
-                      type="checkbox"
-                      checked={recurring}
-                      onChange={(e) => setRecurring(e.target.checked)}
+                  <div className="col-span-2">
+                    <RecurrencePicker
+                      value={reminderRecurrence}
+                      onChange={setReminderRecurrence}
+                      compact
                     />
-                    每天重复
-                  </label>
+                  </div>
                 </div>
               ) : null}
               {templateKind === "memory" ? (

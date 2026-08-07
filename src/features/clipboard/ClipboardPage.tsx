@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useState, useCallback } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Star } from "lucide-react";
 import { EmptyState } from "@/components/PageScaffold";
@@ -10,6 +10,10 @@ import { SplitTaskLayout } from "@/features/tasks/TaskLayout";
 import { useDomainInvalidation } from "@/features/tasks/useDomainInvalidation";
 import { ipc, type ClipboardItem } from "@/ipc/client";
 import { cn } from "@/lib/cn";
+import {
+  PagedListFooter,
+  usePagedQuery,
+} from "@/features/shared/usePagedQuery";
 
 function previewLine(item: ClipboardItem) {
   if (item.kind === "image") {
@@ -216,17 +220,25 @@ export function ClipboardPage() {
     queryFn: () => ipc.appHealth(),
   });
 
-  const listQuery = useQuery({
-    queryKey: ["clipboard", favoritesOnly, search],
-    queryFn: () =>
+  const fetchClipboard = useCallback(
+    (offset: number, limit: number) =>
       ipc.clipboardQuery({
         favoritesOnly: favoritesOnly || undefined,
         search: search.trim() || undefined,
-        limit: 300,
+        limit,
+        offset,
       }),
-  });
+    [favoritesOnly, search],
+  );
 
-  const items = listQuery.data ?? [];
+  const {
+    items,
+    total: clipTotal,
+    hasMore: clipHasMore,
+    loading: clipLoading,
+    loadingMore: clipLoadingMore,
+    loadMore: loadMoreClipboard,
+  } = usePagedQuery(["clipboard", favoritesOnly, search], fetchClipboard, 300);
   const selected = useMemo(
     () => items.find((item) => item.id === selectedId) ?? null,
     [items, selectedId],
@@ -312,7 +324,7 @@ export function ClipboardPage() {
         </>
       }
       list={
-        listQuery.isLoading ? (
+        clipLoading ? (
           <div className="p-4 text-[12px] text-muted">加载中…</div>
         ) : items.length === 0 ? (
           <EmptyState
@@ -376,6 +388,13 @@ export function ClipboardPage() {
                 </li>
               );
             })}
+            <PagedListFooter
+              shown={items.length}
+              total={clipTotal}
+              hasMore={clipHasMore}
+              loadingMore={clipLoadingMore}
+              onLoadMore={loadMoreClipboard}
+            />
           </ul>
         )
       }

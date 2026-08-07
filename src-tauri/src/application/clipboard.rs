@@ -5,8 +5,9 @@ use crate::application::search::SearchService;
 use crate::application::tasks::TaskService;
 use crate::domain::{
     new_id, stamp, ClipboardItem, ClipboardKind, ClipboardQuery, CreateMemoryInput,
-    CreateTaskInput, DomainError, EntityId, SearchEntityType, SystemClock,
+    CreateTaskInput, DomainError, EntityId, PagedResult, SearchEntityType, SystemClock,
 };
+use crate::domain::{page_limit, page_offset};
 use crate::infrastructure::db::Database;
 use crate::infrastructure::settings::SettingsService;
 use crate::platform::ocr;
@@ -357,28 +358,22 @@ impl ClipboardService {
         Ok(())
     }
 
-    pub fn query(&self, query: ClipboardQuery) -> Result<Vec<ClipboardItem>, DomainError> {
+    pub fn query(&self, query: ClipboardQuery) -> Result<PagedResult<ClipboardItem>, DomainError> {
         let conn = self.connect()?;
-        let limit = query.limit.unwrap_or(200).clamp(1, 1000);
-        let mut sql = String::from(
-            "SELECT c.id, c.content, c.content_hash, c.source_app, c.favorite, c.use_count, c.last_used_at,
-                    c.created_at, c.updated_at, c.revision, c.kind, c.asset_id,
-                    a.width, a.height
-             FROM clipboard_items c
-             LEFT JOIN assets a ON a.id = c.asset_id AND a.deleted_at IS NULL
-             WHERE c.deleted_at IS NULL",
-        );
+        let limit = page_limit(query.limit);
+        let offset = page_offset(query.offset);
+        let mut filters = String::new();
         let mut values: Vec<Box<dyn rusqlite::types::ToSql>> = Vec::new();
         if query.favorites_only.unwrap_or(false) {
-            sql.push_str(" AND c.favorite = 1");
+            filters.push_str(" AND c.favorite = 1");
         }
         if let Some(kind) = query.kind {
-            sql.push_str(" AND c.kind = ?");
+            filters.push_str(" AND c.kind = ?");
             values.push(Box::new(kind.as_str().to_string()));
         }
         if let Some(search) = query.search.as_ref().map(|s| s.trim().to_string()) {
             if !search.is_empty() {
-                sql.push_str(
+                filters.push_str(
                     " AND (c.content LIKE ? ESCAPE '\\'
                       OR EXISTS (
                         SELECT 1 FROM derived_texts d
@@ -396,8 +391,25 @@ impl ClipboardService {
                 values.push(Box::new(pattern));
             }
         }
-        sql.push_str(" ORDER BY c.favorite DESC, c.created_at DESC LIMIT ?");
+
+        let from_clause = " FROM clipboard_items c
+             LEFT JOIN assets a ON a.id = c.asset_id AND a.deleted_at IS NULL
+             WHERE c.deleted_at IS NULL";
+        let count_sql = format!("SELECT COUNT(*){from_clause}{filters}");
+        let params_ref: Vec<&dyn rusqlite::types::ToSql> =
+            values.iter().map(|v| v.as_ref()).collect();
+        let total: i64 = conn
+            .query_row(&count_sql, params_ref.as_slice(), |row| row.get(0))
+            .map_err(internal)?;
+
+        let sql = format!(
+            "SELECT c.id, c.content, c.content_hash, c.source_app, c.favorite, c.use_count, c.last_used_at,
+                    c.created_at, c.updated_at, c.revision, c.kind, c.asset_id,
+                    a.width, a.height{from_clause}{filters}
+             ORDER BY c.favorite DESC, c.created_at DESC LIMIT ? OFFSET ?"
+        );
         values.push(Box::new(limit));
+        values.push(Box::new(offset));
         let params_ref: Vec<&dyn rusqlite::types::ToSql> =
             values.iter().map(|v| v.as_ref()).collect();
         let mut stmt = conn.prepare(&sql).map_err(internal)?;
@@ -408,7 +420,7 @@ impl ClipboardService {
         for item in &mut items {
             let _ = self.attach_thumb(item);
         }
-        Ok(items)
+        Ok(PagedResult::new(items, total, offset))
     }
 
     pub fn set_favorite(&self, id: EntityId, favorite: bool) -> Result<ClipboardItem, DomainError> {

@@ -10,7 +10,7 @@ use crate::application::templates::{
 use crate::domain::{
     parse_capture, AppError, ClipboardItem, ClipboardKind, ClipboardQuery,
     ConvertMemoryToTaskResult, CreateMemoryInput, CreateReminderInput, CreateTaskInput, EntityId,
-    EntityLink, LinkInput, Memory, MemoryQuery, ParsedCapture, RecurrenceRule, Reminder,
+    EntityLink, LinkInput, Memory, MemoryQuery, PagedResult, ParsedCapture, RecurrenceRule, Reminder,
     ReminderOccurrence, SearchEntityType, SearchQuery, SearchResults, SmartListKind, SnoozePreset,
     Tag, Task, TaskList, TaskQuery, TodayTasks, UpdateMemoryInput, UpdateReminderInput,
     UpdateTaskInput,
@@ -211,7 +211,10 @@ pub fn task_get(state: State<'_, AppState>, id: EntityId) -> Result<Task, AppErr
 }
 
 #[tauri::command]
-pub fn task_query(state: State<'_, AppState>, query: TaskQuery) -> Result<Vec<Task>, AppError> {
+pub fn task_query(
+    state: State<'_, AppState>,
+    query: TaskQuery,
+) -> Result<PagedResult<Task>, AppError> {
     state.tasks.query_tasks(query).map_err(Into::into)
 }
 
@@ -461,8 +464,13 @@ pub fn task_counts(state: State<'_, AppState>) -> Result<TaskCounts, AppError> {
 pub fn task_smart_list(
     state: State<'_, AppState>,
     kind: SmartListKind,
-) -> Result<Vec<Task>, AppError> {
-    state.tasks.smart_list(kind).map_err(Into::into)
+    limit: Option<i64>,
+    offset: Option<i64>,
+) -> Result<PagedResult<Task>, AppError> {
+    state
+        .tasks
+        .smart_list(kind, limit, offset)
+        .map_err(Into::into)
 }
 
 #[tauri::command]
@@ -626,7 +634,7 @@ pub fn memory_get(state: State<'_, AppState>, id: EntityId) -> Result<Memory, Ap
 pub fn memory_query(
     state: State<'_, AppState>,
     query: MemoryQuery,
-) -> Result<Vec<Memory>, AppError> {
+) -> Result<PagedResult<Memory>, AppError> {
     state.memories.query(query).map_err(Into::into)
 }
 
@@ -782,7 +790,7 @@ fn emit_clipboard_change(app: &AppHandle, item: &ClipboardItem, change: &str) {
 pub fn clipboard_query(
     state: State<'_, AppState>,
     query: ClipboardQuery,
-) -> Result<Vec<ClipboardItem>, AppError> {
+) -> Result<PagedResult<ClipboardItem>, AppError> {
     state.clipboard.query(query).map_err(Into::into)
 }
 

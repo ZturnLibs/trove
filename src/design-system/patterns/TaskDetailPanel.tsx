@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { AttachmentsSection } from "@/design-system/patterns/AttachmentsSection";
+import { RecurrencePicker } from "@/design-system/patterns/RecurrencePicker";
 import { Button } from "@/design-system/primitives/Button";
 import { ConfirmButton } from "@/design-system/patterns/ConfirmButton";
 import { Input } from "@/design-system/primitives/Input";
@@ -12,6 +13,7 @@ import {
   type UpdateReminderInput,
   type UpdateTaskInput,
 } from "@/ipc/client";
+import { recurrenceLabel } from "@/lib/recurrence";
 import { useRecentActions } from "@/stores/recent-actions";
 
 export function TaskDetailPanel({
@@ -332,7 +334,7 @@ export function TaskDetailPanel({
 function TaskRemindersSection({ taskId }: { taskId: string }) {
   const queryClient = useQueryClient();
   const [fireAt, setFireAt] = useState("");
-  const [recurring, setRecurring] = useState(false);
+  const [recurrence, setRecurrence] = useState<Reminder["recurrence"]>(null);
   const [editingId, setEditingId] = useState<string | null>(null);
 
   const remindersQuery = useQuery({
@@ -349,18 +351,12 @@ function TaskRemindersSection({ taskId }: { taskId: string }) {
         taskId,
         fireAt: normalized.replace(" ", "T"),
         timezone: Intl.DateTimeFormat().resolvedOptions().timeZone,
-        recurrence: recurring
-          ? {
-              version: 1,
-              frequency: "daily",
-              interval: 1,
-              timezone: Intl.DateTimeFormat().resolvedOptions().timeZone,
-            }
-          : null,
+        recurrence,
       });
     },
     onSuccess: () => {
       setFireAt("");
+      setRecurrence(null);
       void queryClient.invalidateQueries({ queryKey: ["reminders"] });
       void queryClient.invalidateQueries({ queryKey: ["tasks"] });
     },
@@ -378,15 +374,8 @@ function TaskRemindersSection({ taskId }: { taskId: string }) {
     <section className="space-y-2 border-t border-border pt-3">
       <div className="flex items-center justify-between">
         <h3 className="text-[12px] font-medium">提醒</h3>
-        <label className="flex items-center gap-1 text-[11px] text-muted">
-          <input
-            type="checkbox"
-            checked={recurring}
-            onChange={(e) => setRecurring(e.target.checked)}
-          />
-          每天重复
-        </label>
       </div>
+      <RecurrencePicker value={recurrence} onChange={setRecurrence} compact />
       <div className="flex gap-2">
         <Input
           type="datetime-local"
@@ -408,7 +397,9 @@ function TaskRemindersSection({ taskId }: { taskId: string }) {
             <div className="flex items-center justify-between gap-2 text-[12px]">
               <span className="truncate">
                 {reminder.nextFireAt.replace("T", " ")}
-                {reminder.recurrence ? " · 周期" : ""}
+                {reminder.recurrence
+                  ? ` · ${recurrenceLabel(reminder.recurrence)}`
+                  : ""}
                 {!reminder.enabled ? " · 已停用" : ""}
               </span>
               <div className="flex shrink-0 gap-1">
@@ -458,7 +449,7 @@ function TaskReminderEditRow({
 }) {
   const queryClient = useQueryClient();
   const [fireAt, setFireAt] = useState(reminder.nextFireAt.slice(0, 16));
-  const [recurring, setRecurring] = useState(!!reminder.recurrence);
+  const [recurrence, setRecurrence] = useState(reminder.recurrence);
   const [enabled, setEnabled] = useState(reminder.enabled);
   const [error, setError] = useState<string | null>(null);
 
@@ -484,14 +475,7 @@ function TaskReminderEditRow({
       title: reminder.title,
       notes: reminder.notes,
       fireAt: normalized.replace(" ", "T"),
-      recurrence: recurring
-        ? (reminder.recurrence ?? {
-            version: 1,
-            frequency: "daily",
-            interval: 1,
-            timezone: Intl.DateTimeFormat().resolvedOptions().timeZone,
-          })
-        : null,
+      recurrence,
       enabled,
       endAt: reminder.endAt,
     });
@@ -504,15 +488,8 @@ function TaskReminderEditRow({
         value={fireAt}
         onChange={(e) => setFireAt(e.target.value)}
       />
+      <RecurrencePicker value={recurrence} onChange={setRecurrence} compact />
       <div className="flex items-center gap-3 text-[11px] text-muted">
-        <label className="flex items-center gap-1">
-          <input
-            type="checkbox"
-            checked={recurring}
-            onChange={(e) => setRecurring(e.target.checked)}
-          />
-          每天重复
-        </label>
         <label className="flex items-center gap-1">
           <input
             type="checkbox"
