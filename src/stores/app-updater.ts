@@ -22,14 +22,6 @@ function isUpdaterEnabled(): boolean {
   return isTauriRuntime() && !import.meta.env.DEV;
 }
 
-function updaterCheckOptions(): { target?: string } {
-  if (typeof navigator === "undefined") return {};
-  if (/Mac/i.test(navigator.userAgent)) {
-    return { target: "macos-universal" };
-  }
-  return {};
-}
-
 function readLastCheckedAt(): string | null {
   try {
     return localStorage.getItem(LAST_CHECKED_KEY);
@@ -94,7 +86,7 @@ export const useAppUpdater = create<AppUpdaterState>((set, get) => ({
     set({ phase: "checking", error: null, progress: null });
 
     try {
-      const update = await check(updaterCheckOptions());
+      const update = await check();
       const checkedAt = new Date().toISOString();
       writeLastCheckedAt(checkedAt);
 
