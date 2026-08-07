@@ -1,6 +1,7 @@
 import { useMemo, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Clock } from "lucide-react";
+import { RecurrencePicker } from "@/design-system/patterns/RecurrencePicker";
 import { TaskDetailPanel } from "@/design-system/patterns/TaskDetailPanel";
 import { TaskRow } from "@/design-system/patterns/TaskRow";
 import { EmptyState } from "@/components/PageScaffold";
@@ -14,7 +15,9 @@ import {
   type Task,
   type TodayReminderItem,
   type UpdateReminderInput,
+  type RecurrenceRule,
 } from "@/ipc/client";
+import { recurrenceLabel } from "@/lib/recurrence";
 import {
   NewTaskButton,
   SplitTaskLayout,
@@ -60,7 +63,9 @@ function ReminderRow({
         <div className="truncate">{item.reminder.title}</div>
         <div className="text-[11px] text-muted">
           {time}
-          {item.reminder.recurrence ? " · 周期" : ""}
+          {item.reminder.recurrence
+            ? ` · ${recurrenceLabel(item.reminder.recurrence)}`
+            : ""}
           {item.reminder.taskId ? " · 任务提醒" : ""}
         </div>
       </div>
@@ -107,6 +112,9 @@ function ReminderEditForm({
     (initialFireAt ?? reminder.nextFireAt).slice(0, 16),
   );
   const [enabled, setEnabled] = useState(reminder.enabled);
+  const [recurrence, setRecurrence] = useState<RecurrenceRule | null>(
+    reminder.recurrence,
+  );
   const [error, setError] = useState<string | null>(null);
 
   const updateMutation = useMutation({
@@ -140,7 +148,7 @@ function ReminderEditForm({
       title,
       notes,
       fireAt: normalized.replace(" ", "T"),
-      recurrence: reminder.recurrence,
+      recurrence,
       enabled,
       endAt: reminder.endAt,
     });
@@ -169,6 +177,7 @@ function ReminderEditForm({
           className="w-full resize-none rounded-[var(--radius-control)] border border-border bg-surface-raised p-2 text-[13px] text-foreground outline-none focus:ring-2 focus:ring-accent/35"
         />
       </label>
+      <RecurrencePicker value={recurrence} onChange={setRecurrence} />
       <label className="flex items-center gap-2 text-[12px] text-muted">
         <input
           type="checkbox"
@@ -237,7 +246,9 @@ function AllReminderRow({
           <div className="truncate">{reminder.title}</div>
           <div className="text-[11px] text-muted">
             {reminder.nextFireAt.replace("T", " ").slice(0, 16)}
-            {reminder.recurrence ? " · 周期" : ""}
+            {reminder.recurrence
+              ? ` · ${recurrenceLabel(reminder.recurrence)}`
+              : ""}
             {reminder.taskId ? " · 任务提醒" : ""}
             {!reminder.enabled ? " · 已停用" : ""}
           </div>

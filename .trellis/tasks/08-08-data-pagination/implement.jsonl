@@ -1,0 +1,3 @@
+{"file": ".trellis/spec/frontend/index.md", "reason": "Frontend list pages and hook patterns for paged loading"}
+{"file": ".trellis/spec/frontend/state-management.md", "reason": "React Query usage for server state and invalidation"}
+{"file": "docs/next-iteration-roadmap.md", "reason": "v1.2.1 §4.1 pagination requirements and acceptance baseline"}

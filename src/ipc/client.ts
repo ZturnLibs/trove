@@ -164,6 +164,14 @@ export type TaskQuery = {
   dueTo?: string;
   dueNull?: boolean;
   completedSince?: string;
+  limit?: number;
+  offset?: number;
+};
+
+export type PagedResult<T> = {
+  items: T[];
+  total: number;
+  hasMore: boolean;
 };
 
 export type RecurrenceFrequency =
@@ -302,6 +310,8 @@ export type MemoryQuery = {
   tagId?: string;
   quickInsertOnly?: boolean;
   search?: string;
+  limit?: number;
+  offset?: number;
 };
 
 export type SmartListKind =
@@ -397,6 +407,7 @@ export type ClipboardQuery = {
   favoritesOnly?: boolean;
   search?: string;
   limit?: number;
+  offset?: number;
   kind?: ClipboardKind;
 };
 
@@ -461,7 +472,8 @@ export const ipc = {
     invoke<Task>("task_create_recurring", { input, recurrence }),
   taskUpdate: (input: UpdateTaskInput) => invoke<Task>("task_update", { input }),
   taskGet: (id: string) => invoke<Task>("task_get", { id }),
-  taskQuery: (query: TaskQuery = {}) => invoke<Task[]>("task_query", { query }),
+  taskQuery: (query: TaskQuery = {}) =>
+    invoke<PagedResult<Task>>("task_query", { query }),
   taskToday: () => invoke<TodayTasks>("task_today"),
   taskComplete: (id: string) => invoke<Task>("task_complete", { id }),
   taskUncomplete: (id: string) => invoke<Task>("task_uncomplete", { id }),
@@ -473,8 +485,8 @@ export const ipc = {
     invoke<void>("task_reorder", { orderedIds }),
   taskListTags: () => invoke<Tag[]>("task_list_tags"),
   taskCounts: () => invoke<TaskCounts>("task_counts"),
-  taskSmartList: (kind: SmartListKind) =>
-    invoke<Task[]>("task_smart_list", { kind }),
+  taskSmartList: (kind: SmartListKind, limit?: number, offset?: number) =>
+    invoke<PagedResult<Task>>("task_smart_list", { kind, limit, offset }),
   taskPostpone: (id: string, days = 1) =>
     invoke<Task>("task_postpone", { id, days }),
   nlParseCapture: (text: string) =>
@@ -514,7 +526,7 @@ export const ipc = {
     invoke<Memory>("memory_update", { input }),
   memoryGet: (id: string) => invoke<Memory>("memory_get", { id }),
   memoryQuery: (query: MemoryQuery = {}) =>
-    invoke<Memory[]>("memory_query", { query }),
+    invoke<PagedResult<Memory>>("memory_query", { query }),
   memoryDelete: (id: string) => invoke<void>("memory_delete", { id }),
   memoryConvertToTask: (id: string) =>
     invoke<ConvertMemoryToTaskResult>("memory_convert_to_task", { id }),
@@ -531,7 +543,7 @@ export const ipc = {
       query: { query, types, limit },
     }),
   clipboardQuery: (query: ClipboardQuery = {}) =>
-    invoke<ClipboardItem[]>("clipboard_query", { query }),
+    invoke<PagedResult<ClipboardItem>>("clipboard_query", { query }),
   clipboardGet: (id: string) => invoke<ClipboardItem>("clipboard_get", { id }),
   clipboardSetFavorite: (id: string, favorite: boolean) =>
     invoke<ClipboardItem>("clipboard_set_favorite", { id, favorite }),

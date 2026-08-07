@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState, useCallback } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Pin } from "lucide-react";
 import { MarkdownView } from "@/components/MarkdownView";
@@ -14,6 +14,10 @@ import {
 import { useDomainInvalidation } from "@/features/tasks/useDomainInvalidation";
 import { ipc, type Memory, type UpdateMemoryInput } from "@/ipc/client";
 import { cn } from "@/lib/cn";
+import {
+  PagedListFooter,
+  usePagedQuery,
+} from "@/features/shared/usePagedQuery";
 
 function MemoryDetail({
   memory,
@@ -277,16 +281,30 @@ export function MemoryPage() {
     queryFn: () => ipc.taskListTags(),
   });
 
-  const memoriesQuery = useQuery({
-    queryKey: ["memories", { pinnedOnly, tagId, showArchived, search }],
-    queryFn: () =>
+  const fetchMemories = useCallback(
+    (offset: number, limit: number) =>
       ipc.memoryQuery({
         pinnedOnly: !showArchived && pinnedOnly ? true : undefined,
         tagId: tagId === "all" ? undefined : tagId,
         includeArchived: showArchived ? true : undefined,
         search: search.trim() || undefined,
+        limit,
+        offset,
       }),
-  });
+    [pinnedOnly, search, showArchived, tagId],
+  );
+
+  const {
+    items: memories,
+    total: memoryTotal,
+    hasMore: memoriesHasMore,
+    loading: memoriesLoading,
+    loadingMore: memoriesLoadingMore,
+    loadMore: loadMoreMemories,
+  } = usePagedQuery(
+    ["memories", { pinnedOnly, tagId, showArchived, search }],
+    fetchMemories,
+  );
 
   const smokeNotesQuery = useQuery({
     queryKey: ["smoke-notes"],
@@ -312,20 +330,19 @@ export function MemoryPage() {
   // 新建的记忆出现在列表后解除 createdId 锁定，使后续筛选变化可正常清空选中。
   useEffect(() => {
     if (!createdId) return;
-    if (memoriesQuery.data?.some((m) => m.id === createdId)) {
+    if (memories.some((m) => m.id === createdId)) {
       setCreatedId(null);
     }
-  }, [createdId, memoriesQuery.data]);
+  }, [createdId, memories]);
 
   // 选中项因搜索/标签/归档视图变化而不可见时，清空选中，避免详情显示幽灵项。
   useEffect(() => {
-    const data = memoriesQuery.data;
-    if (!data || !selectedId) return;
+    if (!memories.length || !selectedId) return;
     if (createdId === selectedId) return;
-    if (!data.some((m) => m.id === selectedId)) {
+    if (!memories.some((m) => m.id === selectedId)) {
       setSelectedId(null);
     }
-  }, [selectedId, memoriesQuery.data, createdId]);
+  }, [selectedId, memories, createdId]);
 
   const createMutation = useMutation({
     mutationFn: () => ipc.memoryCreate({ title: "新记忆", body: "" }),
@@ -337,8 +354,8 @@ export function MemoryPage() {
   });
 
   const selected = useMemo(
-    () => memoriesQuery.data?.find((m) => m.id === selectedId) ?? null,
-    [memoriesQuery.data, selectedId],
+    () => memories.find((m) => m.id === selectedId) ?? null,
+    [memories, selectedId],
   );
 
   const hasFilters = search.trim() !== "" || tagId !== "all";
@@ -471,9 +488,9 @@ export function MemoryPage() {
               )}
             </div>
           </div>
-        ) : memoriesQuery.isLoading ? (
+        ) : memoriesLoading ? (
           <div className="p-4 text-[12px] text-muted">加载中…</div>
-        ) : (memoriesQuery.data?.length ?? 0) === 0 ? (
+        ) : memories.length === 0 ? (
           hasFilters ? (
             <EmptyState
               title="没有匹配的记忆"
@@ -501,7 +518,7 @@ export function MemoryPage() {
           )
         ) : (
           <div>
-            {memoriesQuery.data?.map((memory) => (
+            {memories.map((memory) => (
               <button
                 key={memory.id}
                 type="button"
@@ -533,6 +550,13 @@ export function MemoryPage() {
                 </div>
               </button>
             ))}
+            <PagedListFooter
+              shown={memories.length}
+              total={memoryTotal}
+              hasMore={memoriesHasMore}
+              loadingMore={memoriesLoadingMore}
+              onLoadMore={loadMoreMemories}
+            />
           </div>
         )
       }

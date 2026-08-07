@@ -3,8 +3,9 @@ use crate::application::search::SearchService;
 use crate::application::tasks::TaskService;
 use crate::domain::{
     new_id, stamp, ConvertMemoryToTaskResult, CreateMemoryInput, CreateTaskInput, DomainError,
-    EntityId, Memory, MemoryQuery, SearchEntityType, SystemClock, UpdateMemoryInput,
+    EntityId, Memory, MemoryQuery, PagedResult, SearchEntityType, SystemClock, UpdateMemoryInput,
 };
+use crate::domain::{page_limit, page_offset};
 use crate::infrastructure::db::Database;
 use rusqlite::{params, Connection, OptionalExtension};
 
@@ -147,38 +148,51 @@ impl MemoryService {
         Ok(memory)
     }
 
-    pub fn query(&self, query: MemoryQuery) -> Result<Vec<Memory>, DomainError> {
+    pub fn query(&self, query: MemoryQuery) -> Result<PagedResult<Memory>, DomainError> {
         let conn = self.connect()?;
-        let mut sql = String::from(
-            "SELECT id, title, body, pinned, archived, quick_insert, trigger_word,
-                    created_at, updated_at, revision
-             FROM memories WHERE deleted_at IS NULL",
-        );
+        let limit = page_limit(query.limit);
+        let offset = page_offset(query.offset);
+        let mut filters = String::new();
         let mut values: Vec<Box<dyn rusqlite::types::ToSql>> = Vec::new();
         if !query.include_archived.unwrap_or(false) {
-            sql.push_str(" AND archived = 0");
+            filters.push_str(" AND archived = 0");
         }
         if query.pinned_only.unwrap_or(false) {
-            sql.push_str(" AND pinned = 1");
+            filters.push_str(" AND pinned = 1");
         }
         if query.quick_insert_only.unwrap_or(false) {
-            sql.push_str(" AND quick_insert = 1");
+            filters.push_str(" AND quick_insert = 1");
         }
         if let Some(tag_id) = query.tag_id {
-            sql.push_str(
+            filters.push_str(
                 " AND EXISTS (SELECT 1 FROM memory_tags mt WHERE mt.memory_id = memories.id AND mt.tag_id = ?)",
             );
             values.push(Box::new(tag_id.to_string()));
         }
         if let Some(text) = query.search.as_ref().map(|s| s.trim().to_string()) {
             if !text.is_empty() {
-                sql.push_str(" AND (title LIKE ? ESCAPE '\\' OR body LIKE ? ESCAPE '\\')");
+                filters.push_str(" AND (title LIKE ? ESCAPE '\\' OR body LIKE ? ESCAPE '\\')");
                 let pattern = format!("%{}%", escape_like(&text));
                 values.push(Box::new(pattern.clone()));
                 values.push(Box::new(pattern));
             }
         }
-        sql.push_str(" ORDER BY pinned DESC, updated_at DESC");
+
+        let from_clause = " FROM memories WHERE deleted_at IS NULL";
+        let count_sql = format!("SELECT COUNT(*){from_clause}{filters}");
+        let params_ref: Vec<&dyn rusqlite::types::ToSql> =
+            values.iter().map(|v| v.as_ref()).collect();
+        let total: i64 = conn
+            .query_row(&count_sql, params_ref.as_slice(), |row| row.get(0))
+            .map_err(internal)?;
+
+        let sql = format!(
+            "SELECT id, title, body, pinned, archived, quick_insert, trigger_word,
+                    created_at, updated_at, revision{from_clause}{filters}
+             ORDER BY pinned DESC, updated_at DESC LIMIT ? OFFSET ?"
+        );
+        values.push(Box::new(limit));
+        values.push(Box::new(offset));
         let params_ref: Vec<&dyn rusqlite::types::ToSql> =
             values.iter().map(|v| v.as_ref()).collect();
         let mut stmt = conn.prepare(&sql).map_err(internal)?;
@@ -189,7 +203,7 @@ impl MemoryService {
         for memory in &mut memories {
             self.attach_tags(&conn, memory)?;
         }
-        Ok(memories)
+        Ok(PagedResult::new(memories, total, offset))
     }
 
     pub fn delete(&self, id: EntityId) -> Result<(), DomainError> {
@@ -426,56 +440,46 @@ mod tests {
         // 标题命中
         let by_title = svc
             .query(MemoryQuery {
-                pinned_only: None,
-                include_archived: None,
-                tag_id: None,
-                quick_insert_only: None,
                 search: Some("Alpha".into()),
+                ..Default::default()
             })
             .unwrap();
         assert_eq!(
-            by_title.iter().map(|m| m.id).collect::<Vec<_>>(),
+            by_title.items.iter().map(|m| m.id).collect::<Vec<_>>(),
             vec![alpha.id]
         );
 
         // 正文命中
         let by_body = svc
             .query(MemoryQuery {
-                pinned_only: None,
-                include_archived: None,
-                tag_id: None,
-                quick_insert_only: None,
                 search: Some("keyword".into()),
+                ..Default::default()
             })
             .unwrap();
         assert_eq!(
-            by_body.iter().map(|m| m.id).collect::<Vec<_>>(),
+            by_body.items.iter().map(|m| m.id).collect::<Vec<_>>(),
             vec![beta.id]
         );
 
         // 空白搜索退化为全量
         let blank = svc
             .query(MemoryQuery {
-                pinned_only: None,
-                include_archived: None,
-                tag_id: None,
-                quick_insert_only: None,
                 search: Some("   ".into()),
+                ..Default::default()
             })
             .unwrap();
-        assert_eq!(blank.len(), 3);
+        assert_eq!(blank.items.len(), 3);
+        assert_eq!(blank.total, 3);
+        assert!(!blank.has_more);
 
         // 未命中
         let none = svc
             .query(MemoryQuery {
-                pinned_only: None,
-                include_archived: None,
-                tag_id: None,
-                quick_insert_only: None,
                 search: Some("不存在".into()),
+                ..Default::default()
             })
             .unwrap();
-        assert!(none.is_empty());
+        assert!(none.items.is_empty());
     }
 
     #[test]
@@ -549,27 +553,60 @@ mod tests {
         // `%` 作为字面量：不应命中所有记忆
         let percent = svc
             .query(MemoryQuery {
-                pinned_only: None,
-                include_archived: None,
-                tag_id: None,
-                quick_insert_only: None,
                 search: Some("50%".into()),
+                ..Default::default()
             })
             .unwrap();
-        assert_eq!(percent.len(), 1);
-        assert_eq!(percent[0].title, "折扣 50% off");
+        assert_eq!(percent.items.len(), 1);
+        assert_eq!(percent.items[0].title, "折扣 50% off");
 
         // `_` 作为字面量：不应把 100200 当通配符命中
         let underscore = svc
             .query(MemoryQuery {
-                pinned_only: None,
-                include_archived: None,
-                tag_id: None,
-                quick_insert_only: None,
                 search: Some("100_200".into()),
+                ..Default::default()
             })
             .unwrap();
-        assert_eq!(underscore.len(), 1);
-        assert_eq!(underscore[0].body, "下划线 100_200");
+        assert_eq!(underscore.items.len(), 1);
+        assert_eq!(underscore.items[0].body, "下划线 100_200");
+    }
+
+    #[test]
+    fn query_pagination_returns_total_and_has_more() {
+        let dir = tempdir().unwrap();
+        let db = Database::open(dir.path().join("m.db")).unwrap();
+        let svc = MemoryService::new(db);
+        for i in 0..5 {
+            svc.create(CreateMemoryInput {
+                title: format!("Item {i}"),
+                body: None,
+                pinned: None,
+                quick_insert: None,
+                trigger_word: None,
+                tag_names: None,
+            })
+            .unwrap();
+        }
+
+        let page1 = svc
+            .query(MemoryQuery {
+                limit: Some(2),
+                offset: Some(0),
+                ..Default::default()
+            })
+            .unwrap();
+        assert_eq!(page1.items.len(), 2);
+        assert_eq!(page1.total, 5);
+        assert!(page1.has_more);
+
+        let page3 = svc
+            .query(MemoryQuery {
+                limit: Some(2),
+                offset: Some(4),
+                ..Default::default()
+            })
+            .unwrap();
+        assert_eq!(page3.items.len(), 1);
+        assert!(!page3.has_more);
     }
 }
