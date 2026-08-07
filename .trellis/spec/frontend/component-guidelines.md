@@ -60,11 +60,11 @@ Questions to answer:
 
 ## Branding / App Icons
 
-**品牌标识**：Trove 用宝藏箱 + 字母 T 标记，品牌蓝单色。
+**品牌标识**：Trove 用开放宝箱 + 字母 T 轮廓 + 中央菱形宝石镂空，应用图标源图带品牌蓝渐变（`#3b82f6` → `#2563eb` → `#1d4ed8`）；应用内组件为 `currentColor` 单色。
 - 应用内 Logo 一律使用 `src/components/BrandLogo.tsx`（内联 SVG，`fill="currentColor"`），
   通过 `text-accent` 继承主题色（亮 `#2563eb` / 暗 `#5b8def`），明暗主题自动适配。
-- 例：侧边栏 `<BrandLogo className="h-5 w-5 text-accent" />`，Onboarding
-  `<BrandLogo className="h-12 w-12 text-accent" />`。
+- 例：侧边栏 `<BrandLogo className="h-5 w-5 text-accent" />`（`variant="mono"` 默认），About / Onboarding
+  `<BrandLogo variant="brand" className="h-16 w-16" />`（品牌蓝渐变，不依赖主题色）。
 
 **再生成应用图标**（改 Logo 后必须执行）：
 
@@ -74,9 +74,9 @@ pnpm tauri icon design/logo.svg
 rm -rf src-tauri/icons/android src-tauri/icons/ios   # 项目无移动端，删除 CLI 顺带产物
 ```
 
-- `tauri icon` 会覆盖 `src-tauri/icons/`（icns/ico/各尺寸 PNG），
-  `tauri.conf.json` `bundle.icon` 引用的文件名不变；托盘与窗口图标经
-  `app.default_window_icon()` 自动生效。
+- 托盘与窗口图标经 `app.default_window_icon()` 自动生效。
+- **macOS 原生 About 面板**（应用菜单 → 关于 Trove）：须在 `menu_bar.rs` 的 `AboutMetadata.icon` 显式传入
+  `app.default_window_icon().cloned()`；系统不会自动用 bundle 图标更新该对话框。
 - favicon：`public/logo.svg`，`index.html` 引用 `/logo.svg`。
 - **Forbidden**：不要直接改 `src-tauri/icons/` 里的 PNG 产物，一律改 `design/logo.svg` 源图再生成。
 

@@ -312,10 +312,13 @@ pub fn setup_app_menu(app: &AppHandle) -> tauri::Result<()> {
     let menu = {
         use tauri::menu::AboutMetadata;
         let about_meta = AboutMetadata {
+            name: Some("Trove".to_string()),
             version: Some(env!("CARGO_PKG_VERSION").to_string()),
             short_version: Some(env!("CARGO_PKG_VERSION").to_string()),
             comments: Some("本地优先的个人工作台：任务、提醒、记忆与剪切板".to_string()),
             copyright: Some("© 2026 Trove".to_string()),
+            // macOS 原生 About 面板不会自动读取 bundle 图标；需显式传入当前应用图标。
+            icon: app.default_window_icon().cloned(),
             ..Default::default()
         };
         let about = PredefinedMenuItem::about(app, Some("关于 Trove"), Some(about_meta))?;

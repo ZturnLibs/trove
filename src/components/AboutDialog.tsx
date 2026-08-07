@@ -31,7 +31,7 @@ export function AboutDialog({
         aria-modal="true"
         aria-label="关于 Trove"
       >
-        <BrandLogo className="mx-auto h-14 w-14 text-accent" />
+        <BrandLogo variant="brand" className="mx-auto h-16 w-16" />
         <h2 className="mt-3 text-[16px] font-semibold">Trove</h2>
         <p className="mt-1 text-[12px] text-muted">
           版本 {healthQuery.data?.appVersion ?? "…"}

@@ -1,15 +1,18 @@
-<svg xmlns="http://www.w3.org/2000/svg" width="1024" height="1024" viewBox="0 0 1024 1024">
-  <!-- Trove 品牌标：宝藏箱 + 字母 T（宽箱盖 = T 横杠，窄箱体 = T 竖笔），品牌蓝单色 -->
+<svg xmlns="http://www.w3.org/2000/svg" width="1024" height="1024" viewBox="0 0 32 32" fill="none">
+  <!-- Trove favicon / 关于对话框：开放宝箱 + T 轮廓，品牌蓝渐变 -->
   <defs>
-    <mask id="keyhole">
-      <rect width="1024" height="1024" fill="#ffffff"/>
-      <circle cx="512" cy="682" r="70" fill="#000000"/>
+    <linearGradient id="brand" x1="16" y1="5.8" x2="16" y2="28.2" gradientUnits="userSpaceOnUse">
+      <stop offset="0%" stop-color="#3b82f6"/>
+      <stop offset="55%" stop-color="#2563eb"/>
+      <stop offset="100%" stop-color="#1d4ed8"/>
+    </linearGradient>
+    <mask id="gem">
+      <rect width="32" height="32" fill="#ffffff"/>
+      <path d="M16 19.5 L17.55 21.35 L16 23.2 L14.45 21.35 Z" fill="#000000"/>
     </mask>
   </defs>
-  <g fill="#2563eb" mask="url(#keyhole)">
-    <!-- 箱盖（T 横杠）：顶部圆角宽条 -->
-    <path d="M144 320 a96 96 0 0 1 96 -96 h544 a96 96 0 0 1 96 96 v192 H144 z"/>
-    <!-- 箱体（T 竖笔）：底部圆角窄条，与箱盖之间留开口缝 -->
-    <path d="M320 576 h384 v224 a64 64 0 0 1 -64 64 h-256 a64 64 0 0 1 -64 -64 z"/>
+  <g fill="url(#brand)" mask="url(#gem)">
+    <path d="M4 11.2 C4 8.1 6.6 5.8 9.8 5.8 H22.2 C25.4 5.8 28 8.1 28 11.2 V13.2 H4 Z"/>
+    <path d="M9.8 14.2 H22.2 V23.8 C22.2 26.4 20.2 28.2 16 28.2 C11.8 28.2 9.8 26.4 9.8 23.8 Z"/>
   </g>
 </svg>
