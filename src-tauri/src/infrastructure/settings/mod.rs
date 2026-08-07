@@ -19,6 +19,8 @@ pub struct AppSettings {
     pub clipboard_excluded_apps: Vec<String>,
     #[serde(default = "default_true")]
     pub auto_backup_on_launch: bool,
+    #[serde(default = "default_true")]
+    pub auto_check_updates: bool,
     #[serde(default = "default_backup_keep")]
     pub backup_retention_count: u32,
     #[serde(default)]
@@ -69,6 +71,7 @@ impl Default for AppSettings {
             clipboard_max_items: 500,
             clipboard_excluded_apps: crate::domain::default_excluded_apps(),
             auto_backup_on_launch: true,
+            auto_check_updates: true,
             backup_retention_count: 10,
             onboarding_completed: false,
         }
@@ -200,5 +203,13 @@ mod tests {
         updated.theme = ThemePreference::Dark;
         service.save(&updated).unwrap();
         assert_eq!(service.get().unwrap().theme, ThemePreference::Dark);
+    }
+
+    #[test]
+    fn auto_check_updates_defaults_true() {
+        let dir = tempdir().unwrap();
+        let db = Database::open(dir.path().join("workbench.db")).unwrap();
+        let service = SettingsService::new(db);
+        assert!(service.get().unwrap().auto_check_updates);
     }
 }

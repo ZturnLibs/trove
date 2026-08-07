@@ -25,6 +25,7 @@ export type AppSettings = {
   clipboardMaxItems: number;
   clipboardExcludedApps: string[];
   autoBackupOnLaunch: boolean;
+  autoCheckUpdates: boolean;
   backupRetentionCount: number;
   onboardingCompleted: boolean;
 };
