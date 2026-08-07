@@ -105,7 +105,7 @@ export function MainShell() {
     <div className="flex h-full bg-surface text-foreground">
       <aside className="flex w-[200px] shrink-0 flex-col border-r border-border bg-sidebar">
         <div className="flex h-11 items-center gap-2 px-3 text-[15px] font-semibold tracking-tight">
-          <BrandLogo className="h-5 w-5 text-accent" />
+          <BrandLogo className="h-5 w-5" />
           <span className="truncate">Trove</span>
         </div>
         <nav className="flex flex-1 flex-col gap-0.5 px-2 py-1">

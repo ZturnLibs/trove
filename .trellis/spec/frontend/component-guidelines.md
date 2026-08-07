@@ -60,33 +60,45 @@ Questions to answer:
 
 ## Branding / App Icons
 
-**品牌标识**：Trove 用开放宝箱 + 字母 T 轮廓 + 中央菱形宝石镂空，应用图标源图带品牌蓝渐变（`#3b82f6` → `#2563eb` → `#1d4ed8`）；应用内组件为 `currentColor` 单色。
-- 应用内 Logo 一律使用 `src/components/BrandLogo.tsx`（内联 SVG，`fill="currentColor"`），
-  通过 `text-accent` 继承主题色（亮 `#2563eb` / 暗 `#5b8def`），明暗主题自动适配。
-- 例：侧边栏 `<BrandLogo className="h-5 w-5 text-accent" />`（`variant="mono"` 默认），About / Onboarding
-  `<BrandLogo variant="brand" className="h-16 w-16" />`（品牌蓝渐变，不依赖主题色）。
+**品牌标识**：Trove 开放宝箱 + T 轮廓 + 菱形宝石。
 
-**再生成应用图标**（改 Logo 后必须执行）：
+- **应用图标源图**（`design/logo.svg` → Dock / 窗口 / favicon）：**满铺白色方形底板**（四角不透明）；圆角由 macOS / Windows 系统在 Dock / 任务栏自动裁切，源图勿自行 `rx` 圆角（否则 Dock 四角透明、看起来无背景）。
+- **应用内 UI**（`BrandLogo` 默认 `variant="brand"`）：白底圆角底板（半径 = 边长 × 22.37%），模拟系统图标外观。几何常量见 `src/components/brand-logo-assets.ts`。
+
+- 应用内 Logo 一律使用 `src/components/BrandLogo.tsx`；默认 `variant="brand"`（白底 + 渐变）。
+- `variant="mono"` 仅用于需透明底 + `currentColor` 的极少数场景。
+- 例：`<BrandLogo className="h-5 w-5" />`（侧边栏 / About / Onboarding 均同）。
+
+**再生成全部图标资产**（改 Logo 后必须执行）：
 
 ```bash
-# 源图为 1024×1024 方形透明 SVG，位于 design/logo.svg
-pnpm tauri icon design/logo.svg
-rm -rf src-tauri/icons/android src-tauri/icons/ios   # 项目无移动端，删除 CLI 顺带产物
+pnpm icons
+```
 
-# macOS 菜单栏托盘模板图标（纯黑剪影，系统渲染为白色）
+或分步：
+
+```bash
+# 应用图标（Dock / 窗口 / About 系统面板）
+pnpm tauri icon design/logo.svg
+rm -rf src-tauri/icons/android src-tauri/icons/ios
+
+# macOS 菜单栏托盘模板（纯黑剪影，无白底）
 npx @resvg/resvg-js-cli design/logo-tray.svg src-tauri/icons/tray-icon.png
 cp src-tauri/icons/tray-icon.png src-tauri/icons/tray-icon@2x.png
 sips -z 64 64 src-tauri/icons/tray-icon@2x.png
+
+# favicon 与源图保持一致
+cp design/logo.svg public/logo.svg
 ```
 
-- **macOS 托盘**：`design/logo-tray.svg` → `tray-icon.png`；`setup_tray` 加载该图并设 `icon_as_template(true)`，菜单栏显示白色模板图标。
-- **Windows 托盘**：仍用彩色 `default_window_icon()`。
+- **macOS 托盘**：`design/logo-tray.svg`（与主标记同 scale，透明底）；`icon_as_template(true)`。
+- **Windows 托盘**：彩色 `default_window_icon()`（来自 `design/logo.svg` 生成集）。
 - **macOS 原生 About 面板**（应用菜单 → 关于 Trove）：须在 `menu_bar.rs` 的 `AboutMetadata.icon` 显式传入
   `app.default_window_icon().cloned()`；系统不会自动用 bundle 图标更新该对话框。
 - favicon：`public/logo.svg`，`index.html` 引用 `/logo.svg`。
 - **Forbidden**：不要直接改 `src-tauri/icons/` 里的 PNG 产物，一律改 `design/logo.svg` 源图再生成。
 
-**Related**: `design/logo.svg`、`src/components/BrandLogo.tsx`、`src-tauri/icons/`。
+**Related**: `design/logo.svg`、`design/logo-tray.svg`、`src/components/brand-logo-assets.ts`、`src/components/BrandLogo.tsx`、`src-tauri/icons/`。
 
 ---
 

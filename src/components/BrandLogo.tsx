@@ -1,28 +1,40 @@
 import { useId } from "react";
+import {
+  APPLE_ICON_RADIUS,
+  BRAND_GRADIENT_STOPS,
+  BRAND_LOGO_BODY,
+  BRAND_LOGO_GEM,
+  BRAND_LOGO_LID,
+  BRAND_LOGO_VIEWBOX,
+  BRAND_MARK_TRANSFORM,
+  BRAND_PLATE_FILL,
+} from "@/components/brand-logo-assets";
 import { cn } from "@/lib/cn";
 
-type BrandLogoVariant = "mono" | "brand";
+type BrandLogoVariant = "brand" | "mono";
 
 export function BrandLogo({
   className,
-  variant = "mono",
+  variant = "brand",
 }: {
   className?: string;
+  /** brand: white Apple-style plate + blue gradient; mono: transparent + currentColor */
   variant?: BrandLogoVariant;
 }) {
   const maskId = useId();
   const gradientId = useId();
-  const fill = variant === "brand" ? `url(#${gradientId})` : "currentColor";
+  const isBrand = variant === "brand";
+  const fill = isBrand ? `url(#${gradientId})` : "currentColor";
 
   return (
     <svg
-      viewBox="0 0 32 32"
+      viewBox={`0 0 ${BRAND_LOGO_VIEWBOX} ${BRAND_LOGO_VIEWBOX}`}
       className={cn("shrink-0", className)}
       fill="none"
       aria-hidden="true"
     >
       <defs>
-        {variant === "brand" ? (
+        {isBrand ? (
           <linearGradient
             id={gradientId}
             x1="16"
@@ -31,19 +43,31 @@ export function BrandLogo({
             y2="28.2"
             gradientUnits="userSpaceOnUse"
           >
-            <stop offset="0%" stopColor="#3b82f6" />
-            <stop offset="55%" stopColor="#2563eb" />
-            <stop offset="100%" stopColor="#1d4ed8" />
+            {BRAND_GRADIENT_STOPS.map((stop) => (
+              <stop key={stop.offset} offset={stop.offset} stopColor={stop.color} />
+            ))}
           </linearGradient>
         ) : null}
         <mask id={maskId}>
-          <rect width="32" height="32" fill="white" />
-          <path d="M16 19.5 L17.55 21.35 L16 23.2 L14.45 21.35 Z" fill="black" />
+          <rect width={BRAND_LOGO_VIEWBOX} height={BRAND_LOGO_VIEWBOX} fill="white" />
+          <path d={BRAND_LOGO_GEM} fill="black" />
         </mask>
       </defs>
-      <g fill={fill} mask={`url(#${maskId})`}>
-        <path d="M4 11.2 C4 8.1 6.6 5.8 9.8 5.8 H22.2 C25.4 5.8 28 8.1 28 11.2 V13.2 H4 Z" />
-        <path d="M9.8 14.2 H22.2 V23.8 C22.2 26.4 20.2 28.2 16 28.2 C11.8 28.2 9.8 26.4 9.8 23.8 Z" />
+      {isBrand ? (
+        <rect
+          width={BRAND_LOGO_VIEWBOX}
+          height={BRAND_LOGO_VIEWBOX}
+          rx={APPLE_ICON_RADIUS}
+          fill={BRAND_PLATE_FILL}
+        />
+      ) : null}
+      <g
+        transform={isBrand ? BRAND_MARK_TRANSFORM : undefined}
+        fill={fill}
+        mask={`url(#${maskId})`}
+      >
+        <path d={BRAND_LOGO_LID} />
+        <path d={BRAND_LOGO_BODY} />
       </g>
     </svg>
   );
