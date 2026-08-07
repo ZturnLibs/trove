@@ -36,13 +36,7 @@ jobs:
             echo "::error::标签 (${TAG}) 与应用版本不一致（package.json=${PKG_VERSION}, tauri.conf=${CONF_VERSION}）"
             exit 1
           fi
-          CARGO_VERSION=$(python3 - <<'PY'
-import re, pathlib
-text = pathlib.Path("src-tauri/Cargo.toml").read_text()
-m = re.search(r'^version = "([^"]+)"', text, re.M)
-print(m.group(1) if m else "")
-PY
-)
+          CARGO_VERSION=$(node -e "const m=require('fs').readFileSync('src-tauri/Cargo.toml','utf8').match(/^version = \\\"([^\\\"]+)\\\"/m); console.log(m?m[1]:'');")
           echo "Cargo.toml : ${CARGO_VERSION}"
           if [ "${CARGO_VERSION}" != "${TAG}" ]; then
             echo "::error::Cargo.toml 版本 (${CARGO_VERSION}) 与标签 (${TAG}) 不一致"
