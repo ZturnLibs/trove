@@ -203,4 +203,47 @@ mod tests {
         db.migrate(None).unwrap();
         assert_eq!(db.health_check().unwrap().schema_version, 9);
     }
+
+    #[test]
+    fn migrate_creates_backup_before_pending_migration() {
+        use rusqlite::Connection;
+
+        let dir = tempdir().unwrap();
+        let db_path = dir.path().join("workbench.db");
+        let backup_dir = dir.path().join("backups");
+
+        let conn = Connection::open(&db_path).unwrap();
+        conn.execute_batch(
+            "CREATE TABLE IF NOT EXISTS schema_migrations (
+                version INTEGER PRIMARY KEY NOT NULL,
+                applied_at TEXT NOT NULL
+            );",
+        )
+        .unwrap();
+        for (version, sql) in MIGRATIONS.iter().take(8) {
+            conn.execute_batch(sql).unwrap();
+            conn.execute(
+                "INSERT INTO schema_migrations (version, applied_at) VALUES (?1, 'test')",
+                [version],
+            )
+            .unwrap();
+        }
+        drop(conn);
+
+        let db = Database { path: db_path.clone() };
+        db.migrate(Some(&backup_dir)).unwrap();
+        assert_eq!(db.health_check().unwrap().schema_version, 9);
+
+        let backups: Vec<_> = std::fs::read_dir(&backup_dir)
+            .unwrap()
+            .filter_map(|e| e.ok())
+            .filter(|e| {
+                e.path()
+                    .file_name()
+                    .and_then(|n| n.to_str())
+                    .is_some_and(|n| n.starts_with("workbench-pre-migrate-v8-"))
+            })
+            .collect();
+        assert_eq!(backups.len(), 1);
+    }
 }

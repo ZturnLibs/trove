@@ -24,7 +24,23 @@ pub fn recognize_png(png_bytes: &[u8]) -> OcrResult {
             }
         }
     }
-    #[cfg(not(target_os = "macos"))]
+    #[cfg(target_os = "windows")]
+    {
+        match windows::recognize_png(png_bytes) {
+            Ok(text) => OcrResult {
+                text: text.trim().to_string(),
+                engine_version: "windows-media-ocr-1".into(),
+            },
+            Err(err) => {
+                tracing::debug!(error = %err, "local OCR unavailable or failed");
+                OcrResult {
+                    text: String::new(),
+                    engine_version: "windows-media-ocr-1".into(),
+                }
+            }
+        }
+    }
+    #[cfg(all(not(target_os = "macos"), not(target_os = "windows")))]
     {
         let _ = png_bytes;
         OcrResult {
@@ -91,5 +107,80 @@ print(lines.joined(separator: "\n"))
             return Err(format!("swift OCR failed: {err}"));
         }
         String::from_utf8(output.stdout).map_err(|e| e.to_string())
+    }
+}
+
+#[cfg(target_os = "windows")]
+mod windows {
+    //! Uses Windows.Media.Ocr on-device; requires language packs for target scripts.
+    use windows::core::HSTRING;
+    use windows::Globalization::Language;
+    use windows::Graphics::Imaging::BitmapDecoder;
+    use windows::Media::Ocr::OcrEngine;
+    use windows::Storage::{FileAccessMode, StorageFile};
+
+    pub fn recognize_png(png_bytes: &[u8]) -> Result<String, String> {
+        let dir = std::env::temp_dir().join("workbench-ocr");
+        std::fs::create_dir_all(&dir).map_err(|e| e.to_string())?;
+        let png_path = dir.join(format!("{}.png", uuid::Uuid::new_v4()));
+        std::fs::write(&png_path, png_bytes).map_err(|e| e.to_string())?;
+
+        let path = png_path.to_string_lossy().replace("\\\\?\\", "");
+        let result = recognize_path(&path);
+        let _ = std::fs::remove_file(&png_path);
+        result
+    }
+
+    fn recognize_path(path: &str) -> Result<String, String> {
+        let file = StorageFile::GetFileFromPathAsync(&HSTRING::from(path))
+            .map_err(|e| e.to_string())?
+            .get()
+            .map_err(|e| e.to_string())?;
+
+        let stream = file
+            .OpenAsync(FileAccessMode::Read)
+            .map_err(|e| e.to_string())?
+            .get()
+            .map_err(|e| e.to_string())?;
+
+        let decoder = BitmapDecoder::CreateAsync(&stream)
+            .map_err(|e| e.to_string())?
+            .get()
+            .map_err(|e| e.to_string())?;
+
+        let bitmap = decoder
+            .GetSoftwareBitmapAsync()
+            .map_err(|e| e.to_string())?
+            .get()
+            .map_err(|e| e.to_string())?;
+
+        let engine = create_engine()?;
+        let text = engine
+            .RecognizeAsync(&bitmap)
+            .map_err(|e| e.to_string())?
+            .get()
+            .map_err(|e| e.to_string())?
+            .Text()
+            .map_err(|e| e.to_string())?
+            .to_string();
+
+        Ok(text)
+    }
+
+    fn create_engine() -> Result<OcrEngine, String> {
+        if let Ok(engine) = OcrEngine::TryCreateFromUserProfileLanguages() {
+            return Ok(engine);
+        }
+
+        let languages = OcrEngine::AvailableRecognizerLanguages().map_err(|e| e.to_string())?;
+        let count = languages.Size().map_err(|e| e.to_string())?;
+        if count == 0 {
+            return Err("no OCR language packs installed".into());
+        }
+
+        let language = languages.GetAt(0).map_err(|e| e.to_string())?;
+        let tag = language.LanguageTag().map_err(|e| e.to_string())?;
+        let lang = Language::CreateLanguage(&tag).map_err(|e| e.to_string())?;
+        OcrEngine::TryCreateFromLanguage(&lang).map_err(|e| e.to_string())
     }
 }

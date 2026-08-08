@@ -1,8 +1,8 @@
 {
-  "id": "recurrence-ui",
-  "name": "recurrence-ui",
-  "title": "周期提醒 UI 补全（v1.2.1）",
-  "description": "",
+  "id": "windows-ocr",
+  "name": "windows-ocr",
+  "title": "Windows OCR 本地识别",
+  "description": "v1.2.1 路线图 4.3：接入 Windows.Media.Ocr",
   "status": "in_progress",
   "dev_type": null,
   "scope": null,
