@@ -103,6 +103,19 @@ export type TaskList = {
   revision: number;
 };
 
+export type ListDeleteDisposition =
+  | "moveToInbox"
+  | "archiveTasks"
+  | "forceDelete";
+
+export type DeleteListResult = {
+  listId: string;
+  listName: string;
+  disposition: ListDeleteDisposition;
+  taskIds: string[];
+  archivedTaskIds: string[];
+};
+
 export type Tag = {
   id: string;
   name: string;
@@ -164,6 +177,7 @@ export type TaskQuery = {
   dueTo?: string;
   dueNull?: boolean;
   completedSince?: string;
+  search?: string;
   limit?: number;
   offset?: number;
 };
@@ -409,6 +423,9 @@ export type ClipboardQuery = {
   limit?: number;
   offset?: number;
   kind?: ClipboardKind;
+  sourceApp?: string;
+  dateFrom?: string;
+  dateTo?: string;
 };
 
 export type ConvertMemoryToTaskResult = {
@@ -467,6 +484,13 @@ export const ipc = {
   smokeNoteDelete: (id: string) => invoke<void>("smoke_note_delete", { id }),
   taskListLists: () => invoke<TaskList[]>("task_list_lists"),
   taskListCreate: (name: string) => invoke<TaskList>("task_list_create", { name }),
+  taskListUpdate: (id: string, name: string) =>
+    invoke<TaskList>("task_list_update", { id, name }),
+  taskListTodoCount: (id: string) => invoke<number>("task_list_todo_count", { id }),
+  taskListDelete: (id: string, disposition: ListDeleteDisposition) =>
+    invoke<DeleteListResult>("task_list_delete", { id, disposition }),
+  taskListUndoDelete: (result: DeleteListResult) =>
+    invoke<TaskList>("task_list_undo_delete", { result }),
   taskCreate: (input: CreateTaskInput) => invoke<Task>("task_create", { input }),
   taskCreateRecurring: (input: CreateTaskInput, recurrence: RecurrenceRule) =>
     invoke<Task>("task_create_recurring", { input, recurrence }),
@@ -544,6 +568,7 @@ export const ipc = {
     }),
   clipboardQuery: (query: ClipboardQuery = {}) =>
     invoke<PagedResult<ClipboardItem>>("clipboard_query", { query }),
+  clipboardListSourceApps: () => invoke<string[]>("clipboard_list_source_apps"),
   clipboardGet: (id: string) => invoke<ClipboardItem>("clipboard_get", { id }),
   clipboardSetFavorite: (id: string, favorite: boolean) =>
     invoke<ClipboardItem>("clipboard_set_favorite", { id, favorite }),
