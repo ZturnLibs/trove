@@ -1,7 +1,7 @@
 use crate::domain::{
-    local_today, new_id, stamp, validate_due_date, validate_due_time, CreateTaskInput, DomainError,
-    EntityId, ListKind, PagedResult, SmartListKind, SystemClock, Tag, Task, TaskList,
-    TaskPriority, TaskQuery, TaskStatus, TodayTasks, UpdateTaskInput,
+    local_today, new_id, stamp, validate_due_date, validate_due_time, CreateTaskInput, DeleteListResult,
+    DomainError, EntityId, ListDeleteDisposition, ListKind, PagedResult, SmartListKind, SystemClock,
+    Tag, Task, TaskList, TaskPriority, TaskQuery, TaskStatus, TodayTasks, UpdateTaskInput,
 };
 use crate::domain::{page_limit, page_offset};
 use crate::infrastructure::db::Database;
@@ -97,6 +97,190 @@ impl TaskService {
         .optional()
         .map_err(internal)?
         .ok_or_else(|| DomainError::NotFound("清单不存在".into()))
+    }
+
+    pub fn update_list(&self, id: EntityId, name: String) -> Result<TaskList, DomainError> {
+        let list = self.get_list(id)?;
+        if list.kind == ListKind::Inbox {
+            return Err(DomainError::Validation("收件箱名称不可修改".into()));
+        }
+        let name = name.trim().to_string();
+        if name.is_empty() {
+            return Err(DomainError::Validation("清单名称不能为空".into()));
+        }
+        let now = stamp(&self.clock);
+        let conn = self.connect()?;
+        conn.execute(
+            "UPDATE task_lists SET name = ?1, updated_at = ?2, revision = revision + 1
+             WHERE id = ?3 AND deleted_at IS NULL",
+            params![name, now, id.to_string()],
+        )
+        .map_err(internal)?;
+        self.get_list(id)
+    }
+
+    pub fn count_list_todo_tasks(&self, list_id: EntityId) -> Result<i64, DomainError> {
+        let _ = self.get_list(list_id)?;
+        let conn = self.connect()?;
+        conn.query_row(
+            "SELECT COUNT(*) FROM tasks
+             WHERE list_id = ?1 AND status = 'todo' AND deleted_at IS NULL",
+            [list_id.to_string()],
+            |row| row.get(0),
+        )
+        .map_err(internal)
+    }
+
+    pub fn delete_list(
+        &self,
+        id: EntityId,
+        disposition: ListDeleteDisposition,
+    ) -> Result<DeleteListResult, DomainError> {
+        let list = self.get_list(id)?;
+        if list.kind == ListKind::Inbox {
+            return Err(DomainError::Validation("收件箱不可删除".into()));
+        }
+        let conn = self.connect()?;
+        let now = stamp(&self.clock);
+        let task_ids = self.task_ids_in_list(&conn, id)?;
+        let mut archived_task_ids = Vec::new();
+
+        match disposition {
+            ListDeleteDisposition::MoveToInbox => {
+                let inbox_id = self.inbox_list_id()?;
+                conn.execute(
+                    "UPDATE tasks SET list_id = ?1, updated_at = ?2, revision = revision + 1
+                     WHERE list_id = ?3 AND deleted_at IS NULL",
+                    params![inbox_id.to_string(), now, id.to_string()],
+                )
+                .map_err(internal)?;
+            }
+            ListDeleteDisposition::ArchiveTasks => {
+                let mut stmt = conn
+                    .prepare(
+                        "SELECT id FROM tasks
+                         WHERE list_id = ?1 AND status = 'todo' AND deleted_at IS NULL",
+                    )
+                    .map_err(internal)?;
+                archived_task_ids = stmt
+                    .query_map([id.to_string()], |row| {
+                        let raw: String = row.get(0)?;
+                        raw.parse().map_err(|e| {
+                            rusqlite::Error::FromSqlConversionFailure(
+                                0,
+                                rusqlite::types::Type::Text,
+                                Box::new(e),
+                            )
+                        })
+                    })
+                    .map_err(internal)?
+                    .collect::<Result<Vec<_>, _>>()
+                    .map_err(internal)?;
+                conn.execute(
+                    "UPDATE tasks SET status = 'archived', updated_at = ?1, revision = revision + 1
+                     WHERE list_id = ?2 AND status = 'todo' AND deleted_at IS NULL",
+                    params![now, id.to_string()],
+                )
+                .map_err(internal)?;
+                let inbox_id = self.inbox_list_id()?;
+                conn.execute(
+                    "UPDATE tasks SET list_id = ?1, updated_at = ?2, revision = revision + 1
+                     WHERE list_id = ?3 AND status != 'todo' AND deleted_at IS NULL",
+                    params![inbox_id.to_string(), now, id.to_string()],
+                )
+                .map_err(internal)?;
+            }
+            ListDeleteDisposition::ForceDelete => {
+                conn.execute(
+                    "UPDATE tasks SET deleted_at = ?1, updated_at = ?1, revision = revision + 1
+                     WHERE list_id = ?2 AND deleted_at IS NULL",
+                    params![now, id.to_string()],
+                )
+                .map_err(internal)?;
+            }
+        }
+
+        conn.execute(
+            "UPDATE task_lists SET deleted_at = ?1, updated_at = ?1, revision = revision + 1
+             WHERE id = ?2 AND deleted_at IS NULL",
+            params![now, id.to_string()],
+        )
+        .map_err(internal)?;
+
+        Ok(DeleteListResult {
+            list_id: id,
+            list_name: list.name,
+            disposition,
+            task_ids,
+            archived_task_ids,
+        })
+    }
+
+    pub fn undo_delete_list(&self, result: DeleteListResult) -> Result<TaskList, DomainError> {
+        let conn = self.connect()?;
+        let now = stamp(&self.clock);
+        conn.execute(
+            "UPDATE task_lists SET deleted_at = NULL, updated_at = ?1, revision = revision + 1
+             WHERE id = ?2",
+            params![now, result.list_id.to_string()],
+        )
+        .map_err(internal)?;
+
+        match result.disposition {
+            ListDeleteDisposition::MoveToInbox | ListDeleteDisposition::ArchiveTasks => {
+                for task_id in result.task_ids {
+                    conn.execute(
+                        "UPDATE tasks SET list_id = ?1, updated_at = ?2, revision = revision + 1
+                         WHERE id = ?3 AND deleted_at IS NULL",
+                        params![result.list_id.to_string(), now, task_id.to_string()],
+                    )
+                    .map_err(internal)?;
+                }
+                for task_id in result.archived_task_ids {
+                    conn.execute(
+                        "UPDATE tasks SET status = 'todo', updated_at = ?1, revision = revision + 1
+                         WHERE id = ?2 AND deleted_at IS NULL",
+                        params![now, task_id.to_string()],
+                    )
+                    .map_err(internal)?;
+                }
+            }
+            ListDeleteDisposition::ForceDelete => {
+                for task_id in result.task_ids {
+                    conn.execute(
+                        "UPDATE tasks SET deleted_at = NULL, updated_at = ?1, revision = revision + 1
+                         WHERE id = ?2",
+                        params![now, task_id.to_string()],
+                    )
+                    .map_err(internal)?;
+                }
+            }
+        }
+
+        self.get_list(result.list_id)
+    }
+
+    fn task_ids_in_list(
+        &self,
+        conn: &Connection,
+        list_id: EntityId,
+    ) -> Result<Vec<EntityId>, DomainError> {
+        let mut stmt = conn
+            .prepare("SELECT id FROM tasks WHERE list_id = ?1 AND deleted_at IS NULL")
+            .map_err(internal)?;
+        let rows = stmt
+            .query_map([list_id.to_string()], |row| {
+                let raw: String = row.get(0)?;
+                raw.parse().map_err(|e| {
+                    rusqlite::Error::FromSqlConversionFailure(
+                        0,
+                        rusqlite::types::Type::Text,
+                        Box::new(e),
+                    )
+                })
+            })
+            .map_err(internal)?;
+        collect_rows(rows)
     }
 
     pub fn inbox_list_id(&self) -> Result<EntityId, DomainError> {
@@ -568,6 +752,14 @@ impl TaskService {
             );
             values.push(Box::new(tag_id.to_string()));
         }
+        if let Some(text) = query.search.as_ref().map(|s| s.trim().to_string()) {
+            if !text.is_empty() {
+                filters.push_str(" AND (t.title LIKE ? ESCAPE '\\' OR t.notes LIKE ? ESCAPE '\\')");
+                let pattern = format!("%{}%", escape_like(&text));
+                values.push(Box::new(pattern.clone()));
+                values.push(Box::new(pattern));
+            }
+        }
         if query.due_null.unwrap_or(false) {
             filters.push_str(" AND t.due_date IS NULL");
         }
@@ -917,6 +1109,13 @@ fn internal<E: std::fmt::Display>(err: E) -> DomainError {
     DomainError::Internal(err.to_string())
 }
 
+fn escape_like(value: &str) -> String {
+    value
+        .replace('\\', "\\\\")
+        .replace('%', "\\%")
+        .replace('_', "\\_")
+}
+
 fn parse_id(value: String) -> Result<EntityId, rusqlite::Error> {
     value.parse().map_err(|e| {
         rusqlite::Error::FromSqlConversionFailure(0, rusqlite::types::Type::Text, Box::new(e))
@@ -1122,5 +1321,72 @@ mod tests {
             .unwrap();
         assert_eq!(last.items.len(), 1);
         assert!(!last.has_more);
+    }
+
+    #[test]
+    fn update_list_rename_and_query_search() {
+        let svc = open_service();
+        let list = svc.create_list("Projects".into()).unwrap();
+        let updated = svc.update_list(list.id, "Work".into()).unwrap();
+        assert_eq!(updated.name, "Work");
+
+        let task = svc
+            .create_task(CreateTaskInput {
+                title: "alpha task".into(),
+                notes: Some("contains beta keyword".into()),
+                priority: None,
+                list_id: Some(list.id),
+                due_date: None,
+                due_time: None,
+                tag_names: None,
+            })
+            .unwrap();
+
+        let by_title = svc
+            .query_tasks(TaskQuery {
+                search: Some("alpha".into()),
+                ..Default::default()
+            })
+            .unwrap();
+        assert!(by_title.items.iter().any(|t| t.id == task.id));
+
+        let by_notes = svc
+            .query_tasks(TaskQuery {
+                search: Some("beta".into()),
+                ..Default::default()
+            })
+            .unwrap();
+        assert!(by_notes.items.iter().any(|t| t.id == task.id));
+    }
+
+    #[test]
+    fn delete_list_moves_tasks_and_undo_restores() {
+        let svc = open_service();
+        let list = svc.create_list("Temp".into()).unwrap();
+        let task = svc
+            .create_task(CreateTaskInput {
+                title: "move me".into(),
+                notes: None,
+                priority: None,
+                list_id: Some(list.id),
+                due_date: None,
+                due_time: None,
+                tag_names: None,
+            })
+            .unwrap();
+
+        let result = svc
+            .delete_list(list.id, ListDeleteDisposition::MoveToInbox)
+            .unwrap();
+        assert_eq!(result.task_ids, vec![task.id]);
+        assert!(svc.get_list(list.id).is_err());
+
+        let moved = svc.get_task(task.id).unwrap();
+        assert_eq!(moved.list_kind, ListKind::Inbox);
+
+        let restored = svc.undo_delete_list(result).unwrap();
+        assert_eq!(restored.name, "Temp");
+        let back = svc.get_task(task.id).unwrap();
+        assert_eq!(back.list_id, list.id);
     }
 }

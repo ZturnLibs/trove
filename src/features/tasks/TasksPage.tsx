@@ -1,4 +1,4 @@
-import { useCallback, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { TaskDetailPanel } from "@/design-system/patterns/TaskDetailPanel";
 import { TaskRow } from "@/design-system/patterns/TaskRow";
@@ -8,9 +8,12 @@ import { Input } from "@/design-system/primitives/Input";
 import { ConfirmButton } from "@/design-system/patterns/ConfirmButton";
 import {
   ipc,
+  type DeleteListResult,
+  type ListDeleteDisposition,
   type SavedView,
   type SmartListKind,
   type Task,
+  type TaskList,
   type TaskPriority,
   type TaskStatus,
 } from "@/ipc/client";
@@ -46,8 +49,18 @@ export function TasksPage() {
   const [priority, setPriority] = useState<TaskPriority | "all">("all");
   const [tagId, setTagId] = useState<string | null>(null);
   const [smart, setSmart] = useState<SmartListKind | "none">("none");
+  const [search, setSearch] = useState("");
   const [newListName, setNewListName] = useState("");
   const [createdId, setCreatedId] = useState<string | null>(null);
+  const [listMenu, setListMenu] = useState<{
+    list: TaskList;
+    x: number;
+    y: number;
+  } | null>(null);
+  const [deleteTarget, setDeleteTarget] = useState<{
+    list: TaskList;
+    todoCount: number;
+  } | null>(null);
   const [showViewInput, setShowViewInput] = useState(false);
   const [viewName, setViewName] = useState("");
   const [selectedViewId, setSelectedViewId] = useState<string>("");
@@ -126,11 +139,12 @@ export function TasksPage() {
             includeArchived: status === "archived",
             priority: priority === "all" ? undefined : priority,
             tagId: tagId ?? undefined,
+            search: search.trim() || undefined,
             limit,
             offset,
           })
         : ipc.taskSmartList(smart, limit, offset),
-    [listId, priority, smart, status, tagId],
+    [listId, priority, search, smart, status, tagId],
   );
 
   const {
@@ -141,7 +155,7 @@ export function TasksPage() {
     loadingMore: tasksLoadingMore,
     loadMore: loadMoreTasks,
   } = usePagedQuery(
-    ["tasks", "list", listId, status, priority, smart, tagId],
+    ["tasks", "list", listId, status, priority, smart, tagId, search],
     fetchTasks,
   );
 
@@ -166,6 +180,78 @@ export function TasksPage() {
       setNewListName("");
     },
   });
+
+  const updateListMutation = useMutation({
+    mutationFn: ({ id, name }: { id: string; name: string }) =>
+      ipc.taskListUpdate(id, name),
+    onSuccess: () => {
+      void queryClient.invalidateQueries({ queryKey: ["task-lists"] });
+    },
+  });
+
+  const deleteListMutation = useMutation({
+    mutationFn: ({
+      id,
+      disposition,
+    }: {
+      id: string;
+      disposition: ListDeleteDisposition;
+    }) => ipc.taskListDelete(id, disposition),
+    onSuccess: (result: DeleteListResult) => {
+      void queryClient.invalidateQueries({ queryKey: ["task-lists"] });
+      void queryClient.invalidateQueries({ queryKey: ["tasks"] });
+      if (listId === result.listId) setListId("all");
+      setDeleteTarget(null);
+      useRecentActions.getState().push({
+        label: `删除清单「${result.listName}」`,
+        undo: async () => {
+          await ipc.taskListUndoDelete(result);
+          void queryClient.invalidateQueries({ queryKey: ["task-lists"] });
+          void queryClient.invalidateQueries({ queryKey: ["tasks"] });
+        },
+      });
+    },
+  });
+
+  useEffect(() => {
+    if (!listMenu) return;
+    const close = () => setListMenu(null);
+    window.addEventListener("click", close);
+    window.addEventListener("scroll", close, true);
+    return () => {
+      window.removeEventListener("click", close);
+      window.removeEventListener("scroll", close, true);
+    };
+  }, [listMenu]);
+
+  const beginDeleteList = async (list: TaskList) => {
+    setListMenu(null);
+    const todoCount = await ipc.taskListTodoCount(list.id);
+    if (todoCount > 0) {
+      setDeleteTarget({ list, todoCount });
+      return;
+    }
+    deleteListMutation.mutate({ id: list.id, disposition: "moveToInbox" });
+  };
+
+  const beginRenameList = (list: TaskList) => {
+    setListMenu(null);
+    const next = window.prompt("重命名清单", list.name);
+    if (!next?.trim() || next.trim() === list.name) return;
+    updateListMutation.mutate({ id: list.id, name: next.trim() });
+  };
+
+  const customLists = useMemo(
+    () => (listsQuery.data ?? []).filter((list) => list.kind === "custom"),
+    [listsQuery.data],
+  );
+
+  const hasActiveFilters =
+    smart !== "none" ||
+    status !== "active" ||
+    priority !== "all" ||
+    tagId !== null ||
+    search.trim().length > 0;
 
   const toggleMutation = useMutation({
     mutationFn: async (task: Task) => {
@@ -218,6 +304,7 @@ export function TasksPage() {
         : (listsQuery.data?.find((l) => l.id === listId)?.name ?? "任务");
 
   return (
+    <>
     <SplitTaskLayout
       title={listName}
       description={
@@ -238,6 +325,12 @@ export function TasksPage() {
           </select>
           {smart === "none" ? (
             <>
+              <Input
+                className="h-7 w-36"
+                value={search}
+                onChange={(e) => setSearch(e.target.value)}
+                placeholder="搜索任务…"
+              />
               <select
                 className="h-7 rounded-[var(--radius-control)] border border-border bg-surface-raised px-2 text-[12px]"
                 value={listId}
@@ -392,25 +485,52 @@ export function TasksPage() {
       list={
         <div>
           {smart === "none" ? (
-            <div className="flex gap-2 border-b border-border p-2">
-              <Input
-                value={newListName}
-                onChange={(e) => setNewListName(e.target.value)}
-                placeholder="新建清单…"
-                onKeyDown={(e) => {
-                  if (e.key === "Enter" && newListName.trim()) {
-                    createListMutation.mutate(newListName.trim());
-                  }
-                }}
-              />
-              <Button
-                size="sm"
-                variant="secondary"
-                disabled={!newListName.trim() || createListMutation.isPending}
-                onClick={() => createListMutation.mutate(newListName.trim())}
-              >
-                添加清单
-              </Button>
+            <div className="border-b border-border">
+              <div className="flex gap-2 border-b border-border p-2">
+                <Input
+                  value={newListName}
+                  onChange={(e) => setNewListName(e.target.value)}
+                  placeholder="新建清单…"
+                  onKeyDown={(e) => {
+                    if (e.key === "Enter" && newListName.trim()) {
+                      createListMutation.mutate(newListName.trim());
+                    }
+                  }}
+                />
+                <Button
+                  size="sm"
+                  variant="secondary"
+                  disabled={!newListName.trim() || createListMutation.isPending}
+                  onClick={() => createListMutation.mutate(newListName.trim())}
+                >
+                  添加清单
+                </Button>
+              </div>
+              {customLists.length > 0 ? (
+                <div className="flex flex-wrap gap-1.5 px-2 py-2">
+                  {customLists.map((list) => (
+                    <button
+                      key={list.id}
+                      type="button"
+                      className={`rounded-[var(--radius-control)] border px-2 py-1 text-[11px] ${
+                        listId === list.id
+                          ? "border-foreground bg-surface-raised text-foreground"
+                          : "border-border text-muted hover:text-foreground"
+                      }`}
+                      onClick={() => setListId(list.id)}
+                      onContextMenu={(e) => {
+                        e.preventDefault();
+                        setListMenu({ list, x: e.clientX, y: e.clientY });
+                      }}
+                    >
+                      {list.name}
+                    </button>
+                  ))}
+                  <span className="self-center text-[10px] text-muted">
+                    右键清单可重命名或删除
+                  </span>
+                </div>
+              ) : null}
             </div>
           ) : null}
           {tasksLoading ? (
@@ -418,20 +538,14 @@ export function TasksPage() {
           ) : tasks.length === 0 ? (
             <EmptyState
               title={
-                smart !== "none" ||
-                status !== "active" ||
-                priority !== "all" ||
-                tagId !== null
+                hasActiveFilters
                   ? "没有匹配的任务"
                   : listId === "all"
                     ? "还没有任务"
                     : "这个清单还是空的"
               }
               body={
-                smart !== "none" ||
-                status !== "active" ||
-                priority !== "all" ||
-                tagId !== null
+                hasActiveFilters
                   ? "调整筛选条件，或新建任务。"
                   : "把收件箱里的任务移过来，或直接新建。"
               }
@@ -440,10 +554,7 @@ export function TasksPage() {
                 onClick: () => createMutation.mutate(),
               }}
               secondaryAction={
-                smart !== "none" ||
-                status !== "active" ||
-                priority !== "all" ||
-                tagId !== null
+                hasActiveFilters
                   ? {
                       label: "清除筛选",
                       onClick: () => {
@@ -451,6 +562,7 @@ export function TasksPage() {
                         setStatus("active");
                         setPriority("all");
                         setTagId(null);
+                        setSearch("");
                       },
                     }
                   : undefined
@@ -487,5 +599,91 @@ export function TasksPage() {
         />
       }
     />
+    {listMenu ? (
+      <div
+        className="fixed z-50 min-w-[8rem] rounded-[var(--radius-control)] border border-border bg-surface py-1 shadow-lg"
+        style={{ left: listMenu.x, top: listMenu.y }}
+        onClick={(e) => e.stopPropagation()}
+      >
+        <button
+          type="button"
+          className="block w-full px-3 py-1.5 text-left text-[12px] hover:bg-surface-raised"
+          onClick={() => beginRenameList(listMenu.list)}
+        >
+          重命名
+        </button>
+        <button
+          type="button"
+          className="block w-full px-3 py-1.5 text-left text-[12px] text-destructive hover:bg-surface-raised"
+          onClick={() => void beginDeleteList(listMenu.list)}
+        >
+          删除…
+        </button>
+      </div>
+    ) : null}
+    {deleteTarget ? (
+      <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/30 p-4">
+        <div
+          className="w-full max-w-sm rounded-[var(--radius-panel)] border border-border bg-surface p-4 shadow-lg"
+          onClick={(e) => e.stopPropagation()}
+        >
+          <h3 className="text-[13px] font-medium text-foreground">
+            删除清单「{deleteTarget.list.name}」
+          </h3>
+          <p className="mt-2 text-[12px] text-muted">
+            清单内还有 {deleteTarget.todoCount} 个未完成任务，请选择处理方式：
+          </p>
+          <div className="mt-4 flex flex-col gap-2">
+            <Button
+              size="sm"
+              variant="secondary"
+              disabled={deleteListMutation.isPending}
+              onClick={() =>
+                deleteListMutation.mutate({
+                  id: deleteTarget.list.id,
+                  disposition: "moveToInbox",
+                })
+              }
+            >
+              移动到收件箱
+            </Button>
+            <Button
+              size="sm"
+              variant="secondary"
+              disabled={deleteListMutation.isPending}
+              onClick={() =>
+                deleteListMutation.mutate({
+                  id: deleteTarget.list.id,
+                  disposition: "archiveTasks",
+                })
+              }
+            >
+              归档未完成任务
+            </Button>
+            <Button
+              size="sm"
+              variant="danger"
+              disabled={deleteListMutation.isPending}
+              onClick={() =>
+                deleteListMutation.mutate({
+                  id: deleteTarget.list.id,
+                  disposition: "forceDelete",
+                })
+              }
+            >
+              强制删除（含任务）
+            </Button>
+            <Button
+              size="sm"
+              variant="ghost"
+              onClick={() => setDeleteTarget(null)}
+            >
+              取消
+            </Button>
+          </div>
+        </div>
+      </div>
+    ) : null}
+  </>
   );
 }

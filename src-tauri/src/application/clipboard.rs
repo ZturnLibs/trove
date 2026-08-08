@@ -380,16 +380,27 @@ impl ClipboardService {
                         WHERE d.asset_id = c.asset_id AND d.kind = 'ocr' AND d.text LIKE ? ESCAPE '\\'
                       ))",
                 );
-                let pattern = format!(
-                    "%{}%",
-                    search
-                        .replace('\\', "\\\\")
-                        .replace('%', "\\%")
-                        .replace('_', "\\_")
-                );
+                let pattern = format!("%{}%", escape_like(&search));
                 values.push(Box::new(pattern.clone()));
                 values.push(Box::new(pattern));
             }
+        }
+        if let Some(ref app) = query
+            .source_app
+            .as_ref()
+            .map(|s| s.trim().to_string())
+            .filter(|s| !s.is_empty())
+        {
+            filters.push_str(" AND c.source_app = ?");
+            values.push(Box::new(app.clone()));
+        }
+        if let Some(ref from) = query.date_from {
+            filters.push_str(" AND date(c.created_at) >= date(?)");
+            values.push(Box::new(from.clone()));
+        }
+        if let Some(ref to) = query.date_to {
+            filters.push_str(" AND date(c.created_at) <= date(?)");
+            values.push(Box::new(to.clone()));
         }
 
         let from_clause = " FROM clipboard_items c
@@ -421,6 +432,21 @@ impl ClipboardService {
             let _ = self.attach_thumb(item);
         }
         Ok(PagedResult::new(items, total, offset))
+    }
+
+    pub fn list_source_apps(&self) -> Result<Vec<String>, DomainError> {
+        let conn = self.connect()?;
+        let mut stmt = conn
+            .prepare(
+                "SELECT DISTINCT source_app FROM clipboard_items
+                 WHERE deleted_at IS NULL AND source_app IS NOT NULL AND source_app != ''
+                 ORDER BY source_app COLLATE NOCASE",
+            )
+            .map_err(internal)?;
+        let rows = stmt
+            .query_map([], |row| row.get(0))
+            .map_err(internal)?;
+        collect(rows)
     }
 
     pub fn set_favorite(&self, id: EntityId, favorite: bool) -> Result<ClipboardItem, DomainError> {
@@ -720,6 +746,13 @@ fn map_item(row: &rusqlite::Row<'_>) -> Result<ClipboardItem, rusqlite::Error> {
 
 fn internal<E: std::fmt::Display>(err: E) -> DomainError {
     DomainError::Internal(err.to_string())
+}
+
+fn escape_like(value: &str) -> String {
+    value
+        .replace('\\', "\\\\")
+        .replace('%', "\\%")
+        .replace('_', "\\_")
 }
 
 fn collect<T, E>(rows: impl IntoIterator<Item = Result<T, E>>) -> Result<Vec<T>, DomainError>
