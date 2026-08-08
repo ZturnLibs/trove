@@ -208,6 +208,8 @@ export function ClipboardPage() {
   const queryClient = useQueryClient();
   const [search, setSearch] = useState("");
   const [favoritesOnly, setFavoritesOnly] = useState(false);
+  const [sourceApp, setSourceApp] = useState<string>("all");
+  const [dateRange, setDateRange] = useState<"all" | "7d" | "30d">("all");
   const [selectedId, setSelectedId] = useState<string | null>(null);
 
   const settingsQuery = useQuery({
@@ -220,15 +222,32 @@ export function ClipboardPage() {
     queryFn: () => ipc.appHealth(),
   });
 
+  const sourceAppsQuery = useQuery({
+    queryKey: ["clipboard", "source-apps"],
+    queryFn: () => ipc.clipboardListSourceApps(),
+  });
+
+  const dateFilter = useMemo(() => {
+    if (dateRange === "all") return { dateFrom: undefined, dateTo: undefined };
+    const to = new Date();
+    const from = new Date();
+    from.setDate(from.getDate() - (dateRange === "7d" ? 7 : 30));
+    const fmt = (d: Date) => d.toISOString().slice(0, 10);
+    return { dateFrom: fmt(from), dateTo: fmt(to) };
+  }, [dateRange]);
+
   const fetchClipboard = useCallback(
     (offset: number, limit: number) =>
       ipc.clipboardQuery({
         favoritesOnly: favoritesOnly || undefined,
         search: search.trim() || undefined,
+        sourceApp: sourceApp === "all" ? undefined : sourceApp,
+        dateFrom: dateFilter.dateFrom,
+        dateTo: dateFilter.dateTo,
         limit,
         offset,
       }),
-    [favoritesOnly, search],
+    [dateFilter.dateFrom, dateFilter.dateTo, favoritesOnly, search, sourceApp],
   );
 
   const {
@@ -238,7 +257,11 @@ export function ClipboardPage() {
     loading: clipLoading,
     loadingMore: clipLoadingMore,
     loadMore: loadMoreClipboard,
-  } = usePagedQuery(["clipboard", favoritesOnly, search], fetchClipboard, 300);
+  } = usePagedQuery(
+    ["clipboard", favoritesOnly, search, sourceApp, dateRange],
+    fetchClipboard,
+    300,
+  );
   const selected = useMemo(
     () => items.find((item) => item.id === selectedId) ?? null,
     [items, selectedId],
@@ -306,6 +329,29 @@ export function ClipboardPage() {
             onChange={(e) => setSearch(e.target.value)}
             placeholder="搜索历史…"
           />
+          <select
+            className="h-8 rounded-[var(--radius-control)] border border-border bg-surface-raised px-2 text-[12px]"
+            value={sourceApp}
+            onChange={(e) => setSourceApp(e.target.value)}
+          >
+            <option value="all">全部来源</option>
+            {(sourceAppsQuery.data ?? []).map((app) => (
+              <option key={app} value={app}>
+                {app}
+              </option>
+            ))}
+          </select>
+          <select
+            className="h-8 rounded-[var(--radius-control)] border border-border bg-surface-raised px-2 text-[12px]"
+            value={dateRange}
+            onChange={(e) =>
+              setDateRange(e.target.value as "all" | "7d" | "30d")
+            }
+          >
+            <option value="all">全部时间</option>
+            <option value="7d">最近 7 天</option>
+            <option value="30d">最近 30 天</option>
+          </select>
           <Button
             size="sm"
             variant={capturing ? "secondary" : "default"}

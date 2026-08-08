@@ -13,7 +13,7 @@ use crate::domain::{
     EntityLink, LinkInput, Memory, MemoryQuery, PagedResult, ParsedCapture, RecurrenceRule, Reminder,
     ReminderOccurrence, SearchEntityType, SearchQuery, SearchResults, SmartListKind, SnoozePreset,
     Tag, Task, TaskList, TaskQuery, TodayTasks, UpdateMemoryInput, UpdateReminderInput,
-    UpdateTaskInput,
+    UpdateTaskInput, DeleteListResult, ListDeleteDisposition,
 };
 use crate::infrastructure::db::DbHealth;
 use crate::infrastructure::settings::{AppSettings, ShortcutSettings};
@@ -179,6 +179,40 @@ pub fn task_list_lists(state: State<'_, AppState>) -> Result<Vec<TaskList>, AppE
 #[tauri::command]
 pub fn task_list_create(state: State<'_, AppState>, name: String) -> Result<TaskList, AppError> {
     state.tasks.create_list(name).map_err(Into::into)
+}
+
+#[tauri::command]
+pub fn task_list_update(
+    state: State<'_, AppState>,
+    id: EntityId,
+    name: String,
+) -> Result<TaskList, AppError> {
+    state.tasks.update_list(id, name).map_err(Into::into)
+}
+
+#[tauri::command]
+pub fn task_list_todo_count(state: State<'_, AppState>, id: EntityId) -> Result<i64, AppError> {
+    state.tasks.count_list_todo_tasks(id).map_err(Into::into)
+}
+
+#[tauri::command]
+pub fn task_list_delete(
+    state: State<'_, AppState>,
+    id: EntityId,
+    disposition: ListDeleteDisposition,
+) -> Result<DeleteListResult, AppError> {
+    state.tasks.delete_list(id, disposition).map_err(Into::into)
+}
+
+#[tauri::command]
+pub fn task_list_undo_delete(
+    state: State<'_, AppState>,
+    result: DeleteListResult,
+) -> Result<TaskList, AppError> {
+    state
+        .tasks
+        .undo_delete_list(result)
+        .map_err(Into::into)
 }
 
 #[tauri::command]
@@ -792,6 +826,11 @@ pub fn clipboard_query(
     query: ClipboardQuery,
 ) -> Result<PagedResult<ClipboardItem>, AppError> {
     state.clipboard.query(query).map_err(Into::into)
+}
+
+#[tauri::command]
+pub fn clipboard_list_source_apps(state: State<'_, AppState>) -> Result<Vec<String>, AppError> {
+    state.clipboard.list_source_apps().map_err(Into::into)
 }
 
 #[tauri::command]

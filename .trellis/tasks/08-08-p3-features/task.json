@@ -1,8 +1,8 @@
 {
-  "id": "windows-ocr",
-  "name": "windows-ocr",
-  "title": "Windows OCR 本地识别",
-  "description": "v1.2.1 路线图 4.3：接入 Windows.Media.Ocr",
+  "id": "p3-features",
+  "name": "p3-features",
+  "title": "v1.2.1 P3 功能补全",
+  "description": "清单管理、任务搜索、剪切板筛选",
   "status": "in_progress",
   "dev_type": null,
   "scope": null,

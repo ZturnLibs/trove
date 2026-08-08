@@ -101,6 +101,24 @@ pub struct TaskList {
     pub revision: Revision,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub enum ListDeleteDisposition {
+    MoveToInbox,
+    ArchiveTasks,
+    ForceDelete,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct DeleteListResult {
+    pub list_id: EntityId,
+    pub list_name: String,
+    pub disposition: ListDeleteDisposition,
+    pub task_ids: Vec<EntityId>,
+    pub archived_task_ids: Vec<EntityId>,
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct Tag {
@@ -175,6 +193,7 @@ pub struct TaskQuery {
     pub due_null: Option<bool>,
     /// completed_at date >= YYYY-MM-DD (local)
     pub completed_since: Option<String>,
+    pub search: Option<String>,
     pub limit: Option<i64>,
     pub offset: Option<i64>,
 }

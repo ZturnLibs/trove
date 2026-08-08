@@ -74,6 +74,9 @@ pub struct ClipboardQuery {
     pub limit: Option<i64>,
     pub offset: Option<i64>,
     pub kind: Option<ClipboardKind>,
+    pub source_app: Option<String>,
+    pub date_from: Option<String>,
+    pub date_to: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
