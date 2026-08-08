@@ -831,6 +831,60 @@ mod tests {
     }
 
     #[test]
+    fn query_filters_by_source_app_and_date_range() {
+        let dir = tempdir().unwrap();
+        let svc = svc(dir.path());
+        let chrome = svc
+            .capture_text("from chrome".into(), Some("Google Chrome".into()))
+            .unwrap()
+            .unwrap();
+        let vscode = svc
+            .capture_text("from vscode".into(), Some("VS Code".into()))
+            .unwrap()
+            .unwrap();
+
+        let chrome_only = svc
+            .query(ClipboardQuery {
+                source_app: Some("Google Chrome".into()),
+                ..Default::default()
+            })
+            .unwrap();
+        assert_eq!(chrome_only.total, 1);
+        assert_eq!(chrome_only.items[0].id, chrome.id);
+
+        {
+            let conn = svc.connect().unwrap();
+            conn.execute(
+                "UPDATE clipboard_items SET created_at = '2020-01-01T00:00:00' WHERE id = ?1",
+                [chrome.id.to_string()],
+            )
+            .unwrap();
+        }
+
+        let recent = svc
+            .query(ClipboardQuery {
+                date_from: Some("2025-01-01".into()),
+                ..Default::default()
+            })
+            .unwrap();
+        assert_eq!(recent.total, 1);
+        assert_eq!(recent.items[0].id, vscode.id);
+
+        let old_only = svc
+            .query(ClipboardQuery {
+                date_to: Some("2021-01-01".into()),
+                ..Default::default()
+            })
+            .unwrap();
+        assert_eq!(old_only.total, 1);
+        assert_eq!(old_only.items[0].id, chrome.id);
+
+        let apps = svc.list_source_apps().unwrap();
+        assert!(apps.contains(&"Google Chrome".to_string()));
+        assert!(apps.contains(&"VS Code".to_string()));
+    }
+
+    #[test]
     fn soft_deleted_unlinked_image_is_reclaimed_by_gc() {
         let dir = tempdir().unwrap();
         let svc = svc(dir.path());
