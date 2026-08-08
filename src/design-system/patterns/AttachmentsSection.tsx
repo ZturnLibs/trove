@@ -168,7 +168,7 @@ function ImagePicker({
     queryKey: ["clipboard", "images"],
     queryFn: () => ipc.clipboardQuery({ kind: "image", limit: 60 }),
   });
-  const items = historyQuery.data ?? [];
+  const items = historyQuery.data?.items ?? [];
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center p-6">

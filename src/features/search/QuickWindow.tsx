@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { emit, listen } from "@tauri-apps/api/event";
 import { useQuery } from "@tanstack/react-query";
+import { RecurrencePicker } from "@/design-system/patterns/RecurrencePicker";
 import { Button } from "@/design-system/primitives/Button";
 import { Input } from "@/design-system/primitives/Input";
 import {
@@ -8,7 +9,9 @@ import {
   type SearchEntityType,
   type SearchHit,
   type TaskPriority,
+  type RecurrenceRule,
 } from "@/ipc/client";
+import { recurrenceLabel } from "@/lib/recurrence";
 import { useUiStore, type QuickMode } from "@/stores/ui";
 import { cn } from "@/lib/cn";
 
@@ -36,7 +39,7 @@ export function QuickWindow() {
   const [dueDate, setDueDate] = useState("");
   const [fireAt, setFireAt] = useState("");
   const [priority, setPriority] = useState<TaskPriority>("none");
-  const [daily, setDaily] = useState(false);
+  const [recurrence, setRecurrence] = useState<RecurrenceRule | null>(null);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [searchText, setSearchText] = useState("");
@@ -62,7 +65,7 @@ export function QuickWindow() {
         setDueDate("");
         setFireAt("");
         setPriority("none");
-        setDaily(false);
+        setRecurrence(null);
         setAmbiguous([]);
         setParsedHint(null);
         setError(null);
@@ -78,6 +81,7 @@ export function QuickWindow() {
   useEffect(() => {
     inputRef.current?.focus();
     setError(null);
+    setRecurrence(null);
   }, [mode, captureType]);
 
   useEffect(() => {
@@ -104,13 +108,15 @@ export function QuickWindow() {
           // dueTime is HH:MM for tasks
         }
         setPriority(parsed.priority);
-        setDaily(parsed.recurrence?.frequency === "daily");
+        if (parsed.recurrence) setRecurrence(parsed.recurrence);
         setAmbiguous(parsed.ambiguousFields);
         const bits = [
           parsed.dueDate ? `日期 ${parsed.dueDate}` : null,
           parsed.dueTime ? `时间 ${parsed.dueTime}` : null,
           parsed.priority !== "none" ? `优先级 ${parsed.priority}` : null,
-          parsed.recurrence ? `重复 ${parsed.recurrence.frequency}` : null,
+          parsed.recurrence
+            ? `重复 ${recurrenceLabel(parsed.recurrence)}`
+            : null,
         ].filter(Boolean);
         setParsedHint(
           bits.length
@@ -164,7 +170,7 @@ export function QuickWindow() {
     ];
   }, [searchQuery.data]);
 
-  const clipItems = clipQuery.data ?? [];
+  const clipItems = clipQuery.data?.items ?? [];
 
   // 快速记录模式下：输入恰好等于某 quickInsert 记忆的触发词时，提供「展开」入口。
   const snippetHit = useMemo(() => {
@@ -173,7 +179,7 @@ export function QuickWindow() {
     const q = title.trim().toLowerCase();
     if (!q) return null;
     return (
-      (snippetsQuery.data ?? []).find(
+      (snippetsQuery.data?.items ?? []).find(
         (m) => m.triggerWord && m.triggerWord.trim().toLowerCase() === q,
       ) ?? null
     );
@@ -274,7 +280,7 @@ export function QuickWindow() {
     if (hit.entityType === "memory") {
       // Prefer copy for quick-insert style reuse.
       const memories = await ipc.memoryQuery({ quickInsertOnly: true });
-      const snippet = memories.find((m) => m.id === hit.entityId);
+      const snippet = memories.items.find((m) => m.id === hit.entityId);
       if (snippet) {
         await navigator.clipboard.writeText(
           snippet.body || snippet.title,
@@ -338,15 +344,8 @@ export function QuickWindow() {
         const finalDue = dueDate || parsed.dueDate || null;
         const finalPriority =
           priority !== "none" ? priority : parsed.priority !== "none" ? parsed.priority : undefined;
-        const recurrence = daily
-          ? parsed.recurrence ?? {
-              version: 1,
-              frequency: "daily" as const,
-              interval: 1,
-              timezone: Intl.DateTimeFormat().resolvedOptions().timeZone,
-            }
-          : parsed.recurrence;
-        if (recurrence) {
+        const finalRecurrence = recurrence ?? parsed.recurrence ?? null;
+        if (finalRecurrence) {
           await ipc.taskCreateRecurring(
             {
               title: finalTitle,
@@ -354,7 +353,7 @@ export function QuickWindow() {
               dueTime: parsed.dueTime,
               priority: finalPriority,
             },
-            recurrence,
+            finalRecurrence,
           );
         } else {
           await ipc.taskCreate({
@@ -371,14 +370,7 @@ export function QuickWindow() {
           title: value,
           fireAt: normalized.replace(" ", "T"),
           timezone: Intl.DateTimeFormat().resolvedOptions().timeZone,
-          recurrence: daily
-            ? {
-                version: 1,
-                frequency: "daily",
-                interval: 1,
-                timezone: Intl.DateTimeFormat().resolvedOptions().timeZone,
-              }
-            : null,
+          recurrence,
         });
       } else if (captureType === "memory") {
         await ipc.memoryCreate({
@@ -393,7 +385,7 @@ export function QuickWindow() {
       setDueDate("");
       setFireAt("");
       setPriority("none");
-      setDaily(false);
+      setRecurrence(null);
       setAmbiguous([]);
       setParsedHint(null);
       await ipc.windowHideQuick();
@@ -542,17 +534,14 @@ export function QuickWindow() {
               <p className="text-[11px] text-muted">{parsedHint}</p>
             ) : null}
             {captureType === "task" ? (
-              <label className="flex items-center gap-2 text-[12px] text-muted">
-                <input
-                  type="checkbox"
-                  checked={daily}
-                  onChange={(e) => setDaily(e.target.checked)}
-                />
-                每天重复
-              </label>
+              <RecurrencePicker
+                value={recurrence}
+                onChange={setRecurrence}
+                compact
+              />
             ) : null}
             {captureType === "reminder" ? (
-              <div className="grid grid-cols-2 gap-2">
+              <div className="space-y-2">
                 <label className="space-y-1 text-[11px] text-muted">
                   提醒时间
                   <Input
@@ -561,14 +550,11 @@ export function QuickWindow() {
                     onChange={(e) => setFireAt(e.target.value)}
                   />
                 </label>
-                <label className="flex items-end gap-2 pb-1 text-[12px] text-muted">
-                  <input
-                    type="checkbox"
-                    checked={daily}
-                    onChange={(e) => setDaily(e.target.checked)}
-                  />
-                  每天重复
-                </label>
+                <RecurrencePicker
+                  value={recurrence}
+                  onChange={setRecurrence}
+                  compact
+                />
               </div>
             ) : null}
             {captureType === "memory" ? (

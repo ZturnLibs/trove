@@ -1,4 +1,4 @@
-import { useMemo, useState } from "react";
+import { useCallback, useMemo, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { TaskDetailPanel } from "@/design-system/patterns/TaskDetailPanel";
 import { TaskRow } from "@/design-system/patterns/TaskRow";
@@ -21,6 +21,10 @@ import {
 import { useDomainInvalidation } from "@/features/tasks/useDomainInvalidation";
 import { useTaskRename } from "@/features/tasks/useTaskRename";
 import { useRecentActions } from "@/stores/recent-actions";
+import {
+  PagedListFooter,
+  usePagedQuery,
+} from "@/features/shared/usePagedQuery";
 
 const smartLists: { id: SmartListKind | "none"; label: string }[] = [
   { id: "none", label: "清单视图" },
@@ -113,9 +117,8 @@ export function TasksPage() {
     );
   };
 
-  const tasksQuery = useQuery({
-    queryKey: ["tasks", "list", listId, status, priority, smart, tagId],
-    queryFn: () =>
+  const fetchTasks = useCallback(
+    (offset: number, limit: number) =>
       smart === "none"
         ? ipc.taskQuery({
             listId: listId === "all" ? undefined : listId,
@@ -123,9 +126,24 @@ export function TasksPage() {
             includeArchived: status === "archived",
             priority: priority === "all" ? undefined : priority,
             tagId: tagId ?? undefined,
+            limit,
+            offset,
           })
-        : ipc.taskSmartList(smart),
-  });
+        : ipc.taskSmartList(smart, limit, offset),
+    [listId, priority, smart, status, tagId],
+  );
+
+  const {
+    items: tasks,
+    total: taskTotal,
+    hasMore: tasksHasMore,
+    loading: tasksLoading,
+    loadingMore: tasksLoadingMore,
+    loadMore: loadMoreTasks,
+  } = usePagedQuery(
+    ["tasks", "list", listId, status, priority, smart, tagId],
+    fetchTasks,
+  );
 
   const createMutation = useMutation({
     mutationFn: () =>
@@ -174,8 +192,8 @@ export function TasksPage() {
 
   const reorderMutation = useMutation({
     mutationFn: async (direction: "up" | "down") => {
-      if (!selectedId || !tasksQuery.data) return;
-      const list = [...tasksQuery.data];
+      if (!selectedId || tasks.length === 0) return;
+      const list = [...tasks];
       const index = list.findIndex((t) => t.id === selectedId);
       if (index < 0) return;
       const target = direction === "up" ? index - 1 : index + 1;
@@ -188,8 +206,8 @@ export function TasksPage() {
   });
 
   const selected = useMemo(
-    () => tasksQuery.data?.find((t) => t.id === selectedId) ?? null,
-    [tasksQuery.data, selectedId],
+    () => tasks.find((t) => t.id === selectedId) ?? null,
+    [tasks, selectedId],
   );
 
   const listName =
@@ -395,9 +413,9 @@ export function TasksPage() {
               </Button>
             </div>
           ) : null}
-          {tasksQuery.isLoading ? (
+          {tasksLoading ? (
             <div className="p-4 text-[12px] text-muted">加载中…</div>
-          ) : (tasksQuery.data?.length ?? 0) === 0 ? (
+          ) : tasks.length === 0 ? (
             <EmptyState
               title={
                 smart !== "none" ||
@@ -439,16 +457,25 @@ export function TasksPage() {
               }
             />
           ) : (
-            tasksQuery.data?.map((task) => (
-              <TaskRow
-                key={task.id}
-                task={task}
-                selected={selectedId === task.id}
-                onSelect={() => setSelectedId(task.id)}
-                onToggleComplete={() => toggleMutation.mutate(task)}
-                onRename={rename}
+            <>
+              {tasks.map((task) => (
+                <TaskRow
+                  key={task.id}
+                  task={task}
+                  selected={selectedId === task.id}
+                  onSelect={() => setSelectedId(task.id)}
+                  onToggleComplete={() => toggleMutation.mutate(task)}
+                  onRename={rename}
+                />
+              ))}
+              <PagedListFooter
+                shown={tasks.length}
+                total={taskTotal}
+                hasMore={tasksHasMore}
+                loadingMore={tasksLoadingMore}
+                onLoadMore={loadMoreTasks}
               />
-            ))
+            </>
           )}
         </div>
       }

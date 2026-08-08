@@ -49,9 +49,23 @@ pub fn detect_capabilities() -> PlatformCapabilities {
             available: true,
             notes: "关闭主窗口会隐藏到托盘；只有「退出」才会结束进程。".into(),
         },
-        ocr: CapabilityStatus {
-            available: cfg!(target_os = "macos"),
-            notes: "macOS 使用本机 Vision 识别图片文字；其他平台暂不支持，图片无法按文字搜索。".into(),
-        },
+        ocr: ocr_capability(),
+    }
+}
+
+fn ocr_capability() -> CapabilityStatus {
+    CapabilityStatus {
+        available: cfg!(any(target_os = "macos", target_os = "windows")),
+        notes: ocr_capability_notes(),
+    }
+}
+
+fn ocr_capability_notes() -> String {
+    if cfg!(target_os = "macos") {
+        "macOS 使用本机 Vision 识别图片文字。".into()
+    } else if cfg!(target_os = "windows") {
+        "Windows 使用本机 Media OCR 识别图片文字；需安装对应语言包。".into()
+    } else {
+        "当前平台暂不支持，图片无法按文字搜索。".into()
     }
 }

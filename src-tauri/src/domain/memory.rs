@@ -51,6 +51,8 @@ pub struct MemoryQuery {
     pub tag_id: Option<EntityId>,
     pub quick_insert_only: Option<bool>,
     pub search: Option<String>,
+    pub limit: Option<i64>,
+    pub offset: Option<i64>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]

@@ -1,8 +1,9 @@
 use crate::domain::{
     local_today, new_id, stamp, validate_due_date, validate_due_time, CreateTaskInput, DomainError,
-    EntityId, ListKind, SmartListKind, SystemClock, Tag, Task, TaskList, TaskPriority, TaskQuery,
-    TaskStatus, TodayTasks, UpdateTaskInput,
+    EntityId, ListKind, PagedResult, SmartListKind, SystemClock, Tag, Task, TaskList,
+    TaskPriority, TaskQuery, TaskStatus, TodayTasks, UpdateTaskInput,
 };
+use crate::domain::{page_limit, page_offset};
 use crate::infrastructure::db::Database;
 use rusqlite::{params, Connection, OptionalExtension};
 
@@ -537,65 +538,81 @@ impl TaskService {
         Ok(task)
     }
 
-    pub fn query_tasks(&self, query: TaskQuery) -> Result<Vec<Task>, DomainError> {
+    pub fn query_tasks(&self, query: TaskQuery) -> Result<PagedResult<Task>, DomainError> {
         let conn = self.connect()?;
-        let mut sql = String::from(
-            "SELECT t.id, t.title, t.notes, t.status, t.priority, t.list_id,
-                    l.name, l.kind, t.due_date, t.due_time, t.completed_at, t.sort_order, t.series_id,
-                    t.created_at, t.updated_at, t.revision
-             FROM tasks t
-             JOIN task_lists l ON l.id = t.list_id
-             WHERE t.deleted_at IS NULL",
-        );
+        let limit = page_limit(query.limit);
+        let offset = page_offset(query.offset);
+        let mut filters = String::new();
         let mut values: Vec<Box<dyn rusqlite::types::ToSql>> = Vec::new();
 
         if query.inbox_only.unwrap_or(false) {
-            sql.push_str(" AND l.kind = 'inbox'");
+            filters.push_str(" AND l.kind = 'inbox'");
         }
         if let Some(list_id) = query.list_id {
-            sql.push_str(" AND t.list_id = ?");
+            filters.push_str(" AND t.list_id = ?");
             values.push(Box::new(list_id.to_string()));
         }
         if let Some(status) = query.status {
-            sql.push_str(" AND t.status = ?");
+            filters.push_str(" AND t.status = ?");
             values.push(Box::new(status.as_str().to_string()));
         } else if !query.include_archived.unwrap_or(false) {
-            sql.push_str(" AND t.status != 'archived'");
+            filters.push_str(" AND t.status != 'archived'");
         }
         if let Some(priority) = query.priority {
-            sql.push_str(" AND t.priority = ?");
+            filters.push_str(" AND t.priority = ?");
             values.push(Box::new(priority.as_str().to_string()));
         }
         if let Some(tag_id) = query.tag_id {
-            sql.push_str(" AND EXISTS (SELECT 1 FROM task_tags tt WHERE tt.task_id = t.id AND tt.tag_id = ?)");
+            filters.push_str(
+                " AND EXISTS (SELECT 1 FROM task_tags tt WHERE tt.task_id = t.id AND tt.tag_id = ?)",
+            );
             values.push(Box::new(tag_id.to_string()));
         }
         if query.due_null.unwrap_or(false) {
-            sql.push_str(" AND t.due_date IS NULL");
+            filters.push_str(" AND t.due_date IS NULL");
         }
         if let Some(ref from) = query.due_from {
-            sql.push_str(" AND t.due_date IS NOT NULL AND t.due_date >= ?");
+            filters.push_str(" AND t.due_date IS NOT NULL AND t.due_date >= ?");
             values.push(Box::new(from.clone()));
         }
         if let Some(ref to) = query.due_to {
-            sql.push_str(" AND t.due_date IS NOT NULL AND t.due_date <= ?");
+            filters.push_str(" AND t.due_date IS NOT NULL AND t.due_date <= ?");
             values.push(Box::new(to.clone()));
         }
         if let Some(ref since) = query.completed_since {
-            sql.push_str(
+            filters.push_str(
                 " AND t.status = 'completed' AND t.completed_at IS NOT NULL AND date(t.completed_at, 'localtime') >= ?",
             );
             values.push(Box::new(since.clone()));
         }
 
-        if query.completed_since.is_some() {
-            sql.push_str(" ORDER BY t.completed_at DESC, t.updated_at DESC");
+        let order_by = if query.completed_since.is_some() {
+            " ORDER BY t.completed_at DESC, t.updated_at DESC"
         } else {
-            sql.push_str(" ORDER BY t.sort_order ASC, t.created_at DESC");
-        }
+            " ORDER BY t.sort_order ASC, t.created_at DESC"
+        };
 
+        let from_clause = " FROM tasks t
+             JOIN task_lists l ON l.id = t.list_id
+             WHERE t.deleted_at IS NULL";
+
+        let count_sql = format!("SELECT COUNT(*){from_clause}{filters}");
         let params_ref: Vec<&dyn rusqlite::types::ToSql> =
             values.iter().map(|v| v.as_ref()).collect();
+        let total: i64 = conn
+            .query_row(&count_sql, params_ref.as_slice(), |row| row.get(0))
+            .map_err(internal)?;
+
+        let sql = format!(
+            "SELECT t.id, t.title, t.notes, t.status, t.priority, t.list_id,
+                    l.name, l.kind, t.due_date, t.due_time, t.completed_at, t.sort_order, t.series_id,
+                    t.created_at, t.updated_at, t.revision{from_clause}{filters}{order_by} LIMIT ? OFFSET ?"
+        );
+        values.push(Box::new(limit));
+        values.push(Box::new(offset));
+        let params_ref: Vec<&dyn rusqlite::types::ToSql> =
+            values.iter().map(|v| v.as_ref()).collect();
+
         let mut stmt = conn.prepare(&sql).map_err(internal)?;
         let rows = stmt
             .query_map(params_ref.as_slice(), map_task_row)
@@ -604,14 +621,19 @@ impl TaskService {
         for task in &mut tasks {
             self.attach_tags(&conn, task)?;
         }
-        Ok(tasks)
+        Ok(PagedResult::new(tasks, total, offset))
     }
 
-    pub fn smart_list(&self, kind: SmartListKind) -> Result<Vec<Task>, DomainError> {
+    pub fn smart_list(
+        &self,
+        kind: SmartListKind,
+        limit: Option<i64>,
+        offset: Option<i64>,
+    ) -> Result<PagedResult<Task>, DomainError> {
         let today = local_today(&self.clock);
         let today_date = chrono::NaiveDate::parse_from_str(&today, "%Y-%m-%d")
             .map_err(|e| DomainError::Internal(e.to_string()))?;
-        let query = match kind {
+        let mut query = match kind {
             SmartListKind::Tomorrow => {
                 let tomorrow = (today_date + chrono::Duration::days(1))
                     .format("%Y-%m-%d")
@@ -664,6 +686,8 @@ impl TaskService {
                 }
             }
         };
+        query.limit = limit;
+        query.offset = offset;
         self.query_tasks(query)
     }
 
@@ -1060,5 +1084,43 @@ mod tests {
         // Unarchiving a non-archived task is a no-op.
         let again = svc.unarchive_task(task.id).unwrap();
         assert_eq!(again.status, TaskStatus::Todo);
+    }
+
+    #[test]
+    fn query_tasks_pagination() {
+        let svc = open_service();
+        for i in 0..5 {
+            svc.create_task(CreateTaskInput {
+                title: format!("task {i}"),
+                notes: None,
+                priority: None,
+                list_id: None,
+                due_date: None,
+                due_time: None,
+                tag_names: None,
+            })
+            .unwrap();
+        }
+
+        let page = svc
+            .query_tasks(TaskQuery {
+                limit: Some(2),
+                offset: Some(0),
+                ..Default::default()
+            })
+            .unwrap();
+        assert_eq!(page.items.len(), 2);
+        assert!(page.total >= 5);
+        assert!(page.has_more);
+
+        let last = svc
+            .query_tasks(TaskQuery {
+                limit: Some(100),
+                offset: Some(page.total - 1),
+                ..Default::default()
+            })
+            .unwrap();
+        assert_eq!(last.items.len(), 1);
+        assert!(!last.has_more);
     }
 }

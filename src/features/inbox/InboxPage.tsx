@@ -31,6 +31,8 @@ export function InboxPage() {
       ipc.taskQuery({ inboxOnly: true, status: "todo" }),
   });
 
+  const inboxTasks = inboxQuery.data?.items ?? [];
+
   const createMutation = useMutation({
     mutationFn: () => ipc.taskCreate({ title: "新任务" }),
     onSuccess: (task) => {
@@ -42,7 +44,7 @@ export function InboxPage() {
 
   const toggleMutation = useMutation({
     mutationFn: async (id: string) => {
-      const task = inboxQuery.data?.find((t) => t.id === id);
+      const task = inboxTasks.find((t) => t.id === id);
       if (!task) return;
       if (task.status === "completed") await ipc.taskUncomplete(id);
       else await ipc.taskComplete(id);
@@ -52,7 +54,7 @@ export function InboxPage() {
 
   const moveUp = useMutation({
     mutationFn: async (id: string) => {
-      const list = [...(inboxQuery.data ?? [])];
+      const list = [...inboxTasks];
       const index = list.findIndex((t) => t.id === id);
       if (index <= 0) return;
       const [item] = list.splice(index, 1);
@@ -64,7 +66,7 @@ export function InboxPage() {
 
   const moveDown = useMutation({
     mutationFn: async (id: string) => {
-      const list = [...(inboxQuery.data ?? [])];
+      const list = [...inboxTasks];
       const index = list.findIndex((t) => t.id === id);
       if (index < 0 || index >= list.length - 1) return;
       const [item] = list.splice(index, 1);
@@ -75,14 +77,14 @@ export function InboxPage() {
   });
 
   const selected = useMemo(
-    () => inboxQuery.data?.find((t) => t.id === selectedId) ?? null,
-    [inboxQuery.data, selectedId],
+    () => inboxTasks.find((t) => t.id === selectedId) ?? null,
+    [inboxTasks, selectedId],
   );
 
   return (
     <SplitTaskLayout
       title="收件箱"
-      description={`${inboxQuery.data?.length ?? 0} 项待整理`}
+      description={`${inboxQuery.data?.total ?? inboxTasks.length} 项待整理`}
       actions={
         <>
           {selectedId ? (
@@ -101,7 +103,7 @@ export function InboxPage() {
       list={
         inboxQuery.isLoading ? (
           <div className="p-4 text-[12px] text-muted">加载中…</div>
-        ) : (inboxQuery.data?.length ?? 0) === 0 ? (
+        ) : inboxTasks.length === 0 ? (
           <EmptyState
             title="收件箱为空"
             body="新任务会先出现在这里。可用全局快捷键随时捕获。"
@@ -117,7 +119,7 @@ export function InboxPage() {
           />
         ) : (
           <div>
-            {inboxQuery.data?.map((task) => (
+            {inboxTasks.map((task) => (
               <TaskRow
                 key={task.id}
                 task={task}
