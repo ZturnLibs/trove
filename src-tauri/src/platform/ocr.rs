@@ -172,7 +172,10 @@ mod windows {
             return Ok(engine);
         }
 
-        let languages = OcrEngine::AvailableRecognizerLanguages().map_err(|e| e.to_string())?;
+        let languages = OcrEngine::IOcrEngineStatics(|statics| {
+            statics.AvailableRecognizerLanguages()
+        })
+        .map_err(|e| e.to_string())?;
         let count = languages.Size().map_err(|e| e.to_string())?;
         if count == 0 {
             return Err("no OCR language packs installed".into());
