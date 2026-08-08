@@ -172,18 +172,13 @@ mod windows {
             return Ok(engine);
         }
 
-        let languages = OcrEngine::IOcrEngineStatics(|statics| {
-            statics.AvailableRecognizerLanguages()
-        })
-        .map_err(|e| e.to_string())?;
-        let count = languages.Size().map_err(|e| e.to_string())?;
-        if count == 0 {
-            return Err("no OCR language packs installed".into());
+        for tag in ["zh-CN", "en-US", "en"] {
+            let lang = Language::CreateLanguage(&HSTRING::from(tag)).map_err(|e| e.to_string())?;
+            if let Ok(engine) = OcrEngine::TryCreateFromLanguage(&lang) {
+                return Ok(engine);
+            }
         }
 
-        let language = languages.GetAt(0).map_err(|e| e.to_string())?;
-        let tag = language.LanguageTag().map_err(|e| e.to_string())?;
-        let lang = Language::CreateLanguage(&tag).map_err(|e| e.to_string())?;
-        OcrEngine::TryCreateFromLanguage(&lang).map_err(|e| e.to_string())
+        Err("no OCR language packs installed".into())
     }
 }
