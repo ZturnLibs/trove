@@ -1,9 +1,10 @@
-import { useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
+import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { Check } from "lucide-react";
 import { useSortable } from "@dnd-kit/sortable";
 import { CSS } from "@dnd-kit/utilities";
 import { Input } from "@/design-system/primitives/Input";
-import type { Task } from "@/ipc/client";
+import { ipc, type Task } from "@/ipc/client";
 import { cn } from "@/lib/cn";
 
 const priorityLabel: Record<Task["priority"], string> = {
@@ -13,6 +14,20 @@ const priorityLabel: Record<Task["priority"], string> = {
   high: "高",
 };
 
+function toDateString(d: Date): string {
+  const year = d.getFullYear();
+  const month = String(d.getMonth() + 1).padStart(2, "0");
+  const day = String(d.getDate()).padStart(2, "0");
+  return `${year}-${month}-${day}`;
+}
+
+function addDays(dateStr: string, days: number): string {
+  const [y, m, d] = dateStr.split("-").map(Number);
+  const dt = new Date(y, m - 1, d);
+  dt.setDate(dt.getDate() + days);
+  return toDateString(dt);
+}
+
 export type TaskRowProps = {
   task: Task;
   selected?: boolean;
@@ -21,9 +36,56 @@ export type TaskRowProps = {
   onToggleComplete: () => void;
   /** If provided, double-clicking the title edits it in place (optimistic). */
   onRename?: (task: Task, title: string) => void | Promise<void>;
+  /**
+   * Overrides the default due-date save (`ipc.taskUpdate` + `["tasks"]`
+   * invalidation). Receives the row task and the next dueDate/dueTime.
+   */
+  onUpdateDue?: (
+    task: Task,
+    dueDate: string | null,
+    dueTime: string | null,
+  ) => void;
   /** The row is being dragged; dim it while dragging. */
   isDragging?: boolean;
 };
+
+/**
+ * Default due-date persistence for TaskRow: full `ipc.taskUpdate` (every other
+ * field preserved) followed by a `["tasks"]` invalidate so all lists refresh.
+ * Callers can pass `onUpdateDue` to TaskRow to take over persistence.
+ */
+function useDueUpdate(
+  task: Task,
+  onUpdateDue?: TaskRowProps["onUpdateDue"],
+) {
+  const queryClient = useQueryClient();
+  const mutation = useMutation({
+    mutationFn: (input: { dueDate: string | null; dueTime: string | null }) =>
+      ipc.taskUpdate({
+        id: task.id,
+        title: task.title,
+        notes: task.notes,
+        priority: task.priority,
+        listId: task.listId,
+        dueDate: input.dueDate,
+        dueTime: input.dueTime,
+        tagNames: task.tagNames,
+      }),
+    onSuccess: () => {
+      void queryClient.invalidateQueries({ queryKey: ["tasks"] });
+    },
+  });
+  return useCallback(
+    (dueDate: string | null, dueTime: string | null) => {
+      if (onUpdateDue) {
+        onUpdateDue(task, dueDate, dueTime);
+        return;
+      }
+      mutation.mutate({ dueDate, dueTime });
+    },
+    [task, onUpdateDue, mutation],
+  );
+}
 
 export function TaskRow({
   task,
@@ -32,12 +94,17 @@ export function TaskRow({
   onSelect,
   onToggleComplete,
   onRename,
+  onUpdateDue,
   isDragging,
 }: TaskRowProps) {
   const done = task.status === "completed";
   const [editing, setEditing] = useState(false);
   const [draft, setDraft] = useState(task.title);
   const inputRef = useRef<HTMLInputElement>(null);
+  const [dueMenu, setDueMenu] = useState<{ x: number; y: number } | null>(null);
+  const [customDate, setCustomDate] = useState("");
+  const [customTime, setCustomTime] = useState("");
+  const applyDue = useDueUpdate(task, onUpdateDue);
 
   useEffect(() => {
     if (editing) {
@@ -47,6 +114,37 @@ export function TaskRow({
       });
     }
   }, [editing]);
+
+  // Reset the custom inputs to the task's current values whenever the menu opens.
+  useEffect(() => {
+    if (dueMenu) {
+      setCustomDate(task.dueDate ?? "");
+      setCustomTime(task.dueTime ?? "");
+    }
+  }, [dueMenu, task.dueDate, task.dueTime]);
+
+  // Close on outside click, scroll, or Esc (matches the listMenu pattern).
+  useEffect(() => {
+    if (!dueMenu) return;
+    const close = () => setDueMenu(null);
+    const onKeyDown = (event: KeyboardEvent) => {
+      if (event.key === "Escape") close();
+    };
+    window.addEventListener("click", close);
+    window.addEventListener("scroll", close, true);
+    window.addEventListener("keydown", onKeyDown);
+    return () => {
+      window.removeEventListener("click", close);
+      window.removeEventListener("scroll", close, true);
+      window.removeEventListener("keydown", onKeyDown);
+    };
+  }, [dueMenu]);
+
+  // A fixed menu inside the sortable wrapper's transformed element would be
+  // mispositioned relative to the viewport, so close it when a drag starts.
+  useEffect(() => {
+    if (isDragging) setDueMenu(null);
+  }, [isDragging]);
 
   const startEdit = () => {
     setDraft(task.title);
@@ -65,6 +163,25 @@ export function TaskRow({
     setDraft(task.title);
     setEditing(false);
   };
+
+  const openDueMenu = (event: { clientX: number; clientY: number }) => {
+    setDueMenu({ x: event.clientX, y: event.clientY });
+  };
+
+  const saveDue = (dueDate: string | null, dueTime: string | null) => {
+    setDueMenu(null);
+    if (dueDate === task.dueDate && dueTime === task.dueTime) return;
+    applyDue(dueDate, dueTime);
+  };
+
+  const today = toDateString(new Date());
+  const quickOptions = [
+    { label: "今天", value: today },
+    { label: "明天", value: addDays(today, 1) },
+    { label: "后天", value: addDays(today, 2) },
+    { label: "+3 天", value: addDays(today, 3) },
+    { label: "+7 天", value: addDays(today, 7) },
+  ];
 
   return (
     <div
@@ -146,15 +263,95 @@ export function TaskRow({
         <span className="shrink-0 text-[11px] text-muted">重复</span>
       ) : null}
       {task.dueDate ? (
-        <span
+        <button
+          type="button"
+          title="设置截止日期"
+          onClick={(event) => {
+            event.stopPropagation();
+            openDueMenu(event);
+          }}
+          onKeyDown={(event) => event.stopPropagation()}
           className={cn(
-            "shrink-0 text-[11px] text-muted",
+            "shrink-0 cursor-pointer text-[11px] text-muted hover:text-foreground",
             overdue && !done && "text-danger",
           )}
         >
           {task.dueDate}
           {task.dueTime ? ` ${task.dueTime}` : ""}
-        </span>
+        </button>
+      ) : (
+        <button
+          type="button"
+          title="设置截止日期"
+          onClick={(event) => {
+            event.stopPropagation();
+            openDueMenu(event);
+          }}
+          onKeyDown={(event) => event.stopPropagation()}
+          className="shrink-0 cursor-pointer text-[11px] text-muted opacity-0 transition-opacity group-hover:opacity-100 focus-visible:opacity-100 hover:text-foreground"
+        >
+          无日期
+        </button>
+      )}
+      {dueMenu ? (
+        <div
+          className="fixed z-50 min-w-[10rem] rounded-[var(--radius-control)] border border-border bg-surface py-1 shadow-lg"
+          style={{ left: dueMenu.x, top: dueMenu.y }}
+          onClick={(event) => event.stopPropagation()}
+          onKeyDown={(event) => event.stopPropagation()}
+        >
+          {quickOptions.map((option) => (
+            <button
+              key={option.value}
+              type="button"
+              className={cn(
+                "block w-full px-3 py-1.5 text-left text-[12px] hover:bg-surface-raised",
+                option.value === task.dueDate &&
+                  "bg-surface-raised text-foreground",
+              )}
+              onClick={(event) => {
+                event.stopPropagation();
+                saveDue(option.value, task.dueTime);
+              }}
+            >
+              {option.label}
+            </button>
+          ))}
+          <div className="flex items-center gap-1 border-t border-border px-2 py-1.5">
+            <Input
+              type="date"
+              value={customDate}
+              onChange={(event) => setCustomDate(event.target.value)}
+              className="h-7 min-w-0 flex-1 px-1.5 text-[12px]"
+            />
+            <Input
+              type="time"
+              value={customTime}
+              onChange={(event) => setCustomTime(event.target.value)}
+              className="h-7 w-[5.5rem] shrink-0 px-1.5 text-[12px]"
+            />
+            <button
+              type="button"
+              className="shrink-0 rounded px-2 py-1 text-[12px] hover:bg-surface-raised"
+              onClick={(event) => {
+                event.stopPropagation();
+                saveDue(customDate || null, customTime || null);
+              }}
+            >
+              保存
+            </button>
+          </div>
+          <button
+            type="button"
+            className="block w-full px-3 py-1.5 text-left text-[12px] text-destructive hover:bg-surface-raised"
+            onClick={(event) => {
+              event.stopPropagation();
+              saveDue(null, null);
+            }}
+          >
+            清除日期
+          </button>
+        </div>
       ) : null}
     </div>
   );
