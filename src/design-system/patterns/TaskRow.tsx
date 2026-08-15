@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState } from "react";
+import type { DragEvent } from "react";
 import { Check } from "lucide-react";
 import { Input } from "@/design-system/primitives/Input";
 import type { Task } from "@/ipc/client";
@@ -18,6 +19,14 @@ export function TaskRow({
   onSelect,
   onToggleComplete,
   onRename,
+  draggable,
+  isDragging,
+  isDropTarget,
+  dropPosition,
+  onDragStart,
+  onDragOver,
+  onDrop,
+  onDragEnd,
 }: {
   task: Task;
   selected?: boolean;
@@ -26,6 +35,18 @@ export function TaskRow({
   onToggleComplete: () => void;
   /** If provided, double-clicking the title edits it in place (optimistic). */
   onRename?: (task: Task, title: string) => void | Promise<void>;
+  /** Enables native HTML5 drag on the row (used for drag-to-reorder). */
+  draggable?: boolean;
+  /** The row itself is being dragged. */
+  isDragging?: boolean;
+  /** A dragged row is hovering over this row; show an insertion indicator. */
+  isDropTarget?: boolean;
+  /** Where the insertion indicator goes relative to this row. */
+  dropPosition?: "before" | "after";
+  onDragStart?: (event: DragEvent<HTMLDivElement>) => void;
+  onDragOver?: (event: DragEvent<HTMLDivElement>) => void;
+  onDrop?: (event: DragEvent<HTMLDivElement>) => void;
+  onDragEnd?: (event: DragEvent<HTMLDivElement>) => void;
 }) {
   const done = task.status === "completed";
   const [editing, setEditing] = useState(false);
@@ -63,7 +84,12 @@ export function TaskRow({
     <div
       role="button"
       tabIndex={0}
+      draggable={draggable && !editing}
       onClick={onSelect}
+      onDragStart={onDragStart}
+      onDragOver={onDragOver}
+      onDrop={onDrop}
+      onDragEnd={onDragEnd}
       onKeyDown={(event) => {
         if (event.key === "Enter" || event.key === " ") {
           event.preventDefault();
@@ -71,8 +97,9 @@ export function TaskRow({
         }
       }}
       className={cn(
-        "group flex h-9 cursor-default items-center gap-2 border-b border-border px-3 text-[13px] hover:bg-row-hover",
+        "group relative flex h-9 cursor-default items-center gap-2 border-b border-border px-3 text-[13px] hover:bg-row-hover",
         selected && "bg-row-active",
+        isDragging && "opacity-50",
       )}
     >
       <button
@@ -146,6 +173,14 @@ export function TaskRow({
           {task.dueDate}
           {task.dueTime ? ` ${task.dueTime}` : ""}
         </span>
+      ) : null}
+      {isDropTarget ? (
+        <div
+          className={cn(
+            "pointer-events-none absolute inset-x-0 z-10 h-[2px] bg-accent",
+            dropPosition === "before" ? "top-0" : "bottom-0",
+          )}
+        />
       ) : null}
     </div>
   );

@@ -1,4 +1,5 @@
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import type { DragEvent } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { TaskDetailPanel } from "@/design-system/patterns/TaskDetailPanel";
 import { TaskRow } from "@/design-system/patterns/TaskRow";
@@ -64,6 +65,14 @@ export function TasksPage() {
   const [showViewInput, setShowViewInput] = useState(false);
   const [viewName, setViewName] = useState("");
   const [selectedViewId, setSelectedViewId] = useState<string>("");
+  const [dragId, setDragId] = useState<string | null>(null);
+  const [dropTarget, setDropTarget] = useState<{
+    id: string;
+    position: "before" | "after";
+  } | null>(null);
+  // Browsers synthesize a click on the source row after a drag ends; suppress
+  // clicks inside this window so reordering never accidentally selects a task.
+  const suppressClickUntilRef = useRef(0);
 
   const listsQuery = useQuery({
     queryKey: ["task-lists"],
@@ -277,19 +286,77 @@ export function TasksPage() {
   });
 
   const reorderMutation = useMutation({
-    mutationFn: async (direction: "up" | "down") => {
-      if (!selectedId || tasks.length === 0) return;
-      const list = [...tasks];
-      const index = list.findIndex((t) => t.id === selectedId);
-      if (index < 0) return;
-      const target = direction === "up" ? index - 1 : index + 1;
-      if (target < 0 || target >= list.length) return;
-      const [item] = list.splice(index, 1);
-      list.splice(target, 0, item);
-      await ipc.taskReorder(list.map((t) => t.id));
-    },
+    mutationFn: (orderedIds: string[]) => ipc.taskReorder(orderedIds),
     onSuccess: () => void queryClient.invalidateQueries({ queryKey: ["tasks"] }),
   });
+
+  const moveSelected = (direction: "up" | "down") => {
+    if (!selectedId || tasks.length === 0) return;
+    const list = [...tasks];
+    const index = list.findIndex((t) => t.id === selectedId);
+    if (index < 0) return;
+    const target = direction === "up" ? index - 1 : index + 1;
+    if (target < 0 || target >= list.length) return;
+    const [item] = list.splice(index, 1);
+    list.splice(target, 0, item);
+    reorderMutation.mutate(list.map((t) => t.id));
+  };
+
+  const handleSelect = (id: string) => {
+    if (Date.now() < suppressClickUntilRef.current) return;
+    setSelectedId(id);
+  };
+
+  const handleDragStart = (id: string) => (event: DragEvent) => {
+    setDragId(id);
+    event.dataTransfer.setData("text/plain", id);
+    event.dataTransfer.effectAllowed = "move";
+  };
+
+  const handleDragOver = (id: string) => (event: DragEvent) => {
+    if (!dragId || dragId === id) return;
+    event.preventDefault();
+    event.dataTransfer.dropEffect = "move";
+    const rect = event.currentTarget.getBoundingClientRect();
+    const position =
+      event.clientY < rect.top + rect.height / 2 ? "before" : "after";
+    setDropTarget((prev) =>
+      prev?.id === id && prev.position === position ? prev : { id, position },
+    );
+  };
+
+  const handleDrop = (id: string) => (event: DragEvent) => {
+    event.preventDefault();
+    if (!dragId) return;
+    const rect = event.currentTarget.getBoundingClientRect();
+    const position =
+      event.clientY < rect.top + rect.height / 2 ? "before" : "after";
+    applyDragReorder(dragId, id, position);
+    setDragId(null);
+    setDropTarget(null);
+  };
+
+  const handleDragEnd = () => {
+    suppressClickUntilRef.current = Date.now() + 300;
+    setDragId(null);
+    setDropTarget(null);
+  };
+
+  const applyDragReorder = (
+    fromId: string,
+    targetId: string,
+    position: "before" | "after",
+  ) => {
+    if (fromId === targetId || tasks.length < 2) return;
+    const list = tasks.filter((t) => t.id !== fromId);
+    const targetIndex = list.findIndex((t) => t.id === targetId);
+    const dragged = tasks.find((t) => t.id === fromId);
+    if (targetIndex < 0 || !dragged) return;
+    list.splice(position === "after" ? targetIndex + 1 : targetIndex, 0, dragged);
+    const orderedIds = list.map((t) => t.id);
+    if (orderedIds.join("|") === tasks.map((t) => t.id).join("|")) return;
+    reorderMutation.mutate(orderedIds);
+  };
 
   const selected = useMemo(
     () => tasks.find((t) => t.id === selectedId) ?? null,
@@ -464,14 +531,14 @@ export function TasksPage() {
                   <Button
                     size="sm"
                     variant="secondary"
-                    onClick={() => reorderMutation.mutate("up")}
+                    onClick={() => moveSelected("up")}
                   >
                     上移
                   </Button>
                   <Button
                     size="sm"
                     variant="secondary"
-                    onClick={() => reorderMutation.mutate("down")}
+                    onClick={() => moveSelected("down")}
                   >
                     下移
                   </Button>
@@ -575,9 +642,17 @@ export function TasksPage() {
                   key={task.id}
                   task={task}
                   selected={selectedId === task.id}
-                  onSelect={() => setSelectedId(task.id)}
+                  onSelect={() => handleSelect(task.id)}
                   onToggleComplete={() => toggleMutation.mutate(task)}
                   onRename={rename}
+                  draggable={smart === "none"}
+                  isDragging={dragId === task.id}
+                  isDropTarget={dropTarget?.id === task.id}
+                  dropPosition={dropTarget?.position}
+                  onDragStart={handleDragStart(task.id)}
+                  onDragOver={handleDragOver(task.id)}
+                  onDrop={handleDrop(task.id)}
+                  onDragEnd={handleDragEnd}
                 />
               ))}
               <PagedListFooter
