@@ -4794,7 +4794,7 @@ dependencies = [
 
 [[package]]
 name = "trove"
-version = "1.2.4"
+version = "1.2.7"
 dependencies = [
  "base64 0.22.1",
  "chrono",

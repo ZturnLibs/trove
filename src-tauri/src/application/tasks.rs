@@ -1,7 +1,8 @@
 use crate::domain::{
-    local_today, new_id, stamp, validate_due_date, validate_due_time, CreateTaskInput, DeleteListResult,
-    DomainError, EntityId, ListDeleteDisposition, ListKind, PagedResult, SmartListKind, SystemClock,
-    Tag, Task, TaskList, TaskPriority, TaskQuery, TaskStatus, TodayTasks, UpdateTaskInput,
+    local_today, new_id, stamp, validate_due_date, validate_due_time, CreateTaskInput,
+    DeleteListResult, DomainError, EntityId, ListDeleteDisposition, ListKind, PagedResult,
+    SmartListKind, SystemClock, Tag, Task, TaskList, TaskPriority, TaskQuery, TaskStatus,
+    TodayTasks, UpdateTaskInput,
 };
 use crate::domain::{page_limit, page_offset};
 use crate::infrastructure::db::Database;
@@ -686,17 +687,63 @@ impl TaskService {
         Ok(())
     }
 
+    /// Rewrites sort_order for the given tasks, numbered per list.
+    ///
+    /// sort_order is list-local: creation assigns MAX(sort_order)+1 within a
+    /// list and list queries filter by list_id. Writing global 0..n-1 across
+    /// lists (as the old implementation did) corrupts other lists' ordering.
+    /// Group ordered_ids by list_id (preserving drag order) and number each
+    /// group from 0, leaving tasks outside ordered_ids untouched.
     pub fn reorder_tasks(&self, ordered_ids: Vec<EntityId>) -> Result<(), DomainError> {
+        if ordered_ids.is_empty() {
+            return Ok(());
+        }
         let conn = self.connect()?;
         let now = stamp(&self.clock);
+
+        let placeholders = vec!["?"; ordered_ids.len()].join(", ");
+        let mut id_to_list: std::collections::HashMap<EntityId, EntityId> =
+            std::collections::HashMap::new();
+        {
+            let mut stmt = conn
+                .prepare(&format!(
+                    "SELECT id, list_id FROM tasks
+                     WHERE id IN ({placeholders}) AND deleted_at IS NULL"
+                ))
+                .map_err(internal)?;
+            let id_strings: Vec<String> = ordered_ids.iter().map(|id| id.to_string()).collect();
+            let params_ref: Vec<&dyn rusqlite::types::ToSql> = id_strings
+                .iter()
+                .map(|s| s as &dyn rusqlite::types::ToSql)
+                .collect();
+            let rows = stmt
+                .query_map(params_ref.as_slice(), |row| {
+                    Ok((parse_id(row.get(0)?)?, parse_id(row.get(1)?)?))
+                })
+                .map_err(internal)?;
+            for row in rows {
+                let (id, list_id) = row.map_err(internal)?;
+                id_to_list.insert(id, list_id);
+            }
+        }
+
         let tx = conn.unchecked_transaction().map_err(internal)?;
-        for (index, id) in ordered_ids.iter().enumerate() {
-            tx.execute(
-                "UPDATE tasks SET sort_order = ?1, updated_at = ?2, revision = revision + 1
-                 WHERE id = ?3 AND deleted_at IS NULL",
-                params![index as f64, now, id.to_string()],
-            )
-            .map_err(internal)?;
+        let mut per_list: std::collections::HashMap<EntityId, Vec<EntityId>> =
+            std::collections::HashMap::new();
+        for id in &ordered_ids {
+            if let Some(list_id) = id_to_list.get(id) {
+                per_list.entry(*list_id).or_default().push(*id);
+            }
+        }
+        for ids in per_list.values() {
+            for (index, id) in ids.iter().enumerate() {
+                tx.execute(
+                    "UPDATE tasks SET sort_order = ?1, updated_at = ?2, revision = revision + 1
+                     WHERE id = ?3 AND deleted_at IS NULL",
+                    params![index as f64, now, id.to_string()],
+                )
+                .map_err(internal)?;
+            }
         }
         tx.commit().map_err(internal)?;
         Ok(())
@@ -1388,5 +1435,142 @@ mod tests {
         assert_eq!(restored.name, "Temp");
         let back = svc.get_task(task.id).unwrap();
         assert_eq!(back.list_id, list.id);
+    }
+
+    fn list_order_ids(svc: &TaskService, list_id: EntityId) -> Vec<EntityId> {
+        svc.query_tasks(TaskQuery {
+            list_id: Some(list_id),
+            limit: Some(100),
+            ..Default::default()
+        })
+        .unwrap()
+        .items
+        .into_iter()
+        .map(|t| t.id)
+        .collect()
+    }
+
+    #[test]
+    fn reorder_tasks_rewrites_sort_order_per_list() {
+        let svc = open_service();
+        let list = svc.create_list("Projects".into()).unwrap();
+        let t1 = svc
+            .create_task(CreateTaskInput {
+                title: "one".into(),
+                notes: None,
+                priority: None,
+                list_id: Some(list.id),
+                due_date: None,
+                due_time: None,
+                tag_names: None,
+            })
+            .unwrap();
+        let t2 = svc
+            .create_task(CreateTaskInput {
+                title: "two".into(),
+                notes: None,
+                priority: None,
+                list_id: Some(list.id),
+                due_date: None,
+                due_time: None,
+                tag_names: None,
+            })
+            .unwrap();
+        let t3 = svc
+            .create_task(CreateTaskInput {
+                title: "three".into(),
+                notes: None,
+                priority: None,
+                list_id: Some(list.id),
+                due_date: None,
+                due_time: None,
+                tag_names: None,
+            })
+            .unwrap();
+        assert_eq!(list_order_ids(&svc, list.id), vec![t1.id, t2.id, t3.id]);
+
+        // Move t3 to the front within the single list.
+        svc.reorder_tasks(vec![t3.id, t1.id, t2.id]).unwrap();
+        assert_eq!(list_order_ids(&svc, list.id), vec![t3.id, t1.id, t2.id]);
+        assert_eq!(svc.get_task(t3.id).unwrap().sort_order, 0.0);
+        assert_eq!(svc.get_task(t1.id).unwrap().sort_order, 1.0);
+        assert_eq!(svc.get_task(t2.id).unwrap().sort_order, 2.0);
+    }
+
+    #[test]
+    fn reorder_tasks_cross_list_keeps_lists_independent() {
+        let svc = open_service();
+        let list_a = svc.create_list("A".into()).unwrap();
+        let list_b = svc.create_list("B".into()).unwrap();
+        let create_in = |title: &str, list: EntityId| {
+            svc.create_task(CreateTaskInput {
+                title: title.into(),
+                notes: None,
+                priority: None,
+                list_id: Some(list),
+                due_date: None,
+                due_time: None,
+                tag_names: None,
+            })
+            .unwrap()
+        };
+        let a1 = create_in("a1", list_a.id);
+        let a2 = create_in("a2", list_a.id);
+        let a3 = create_in("a3", list_a.id);
+        let b1 = create_in("b1", list_b.id);
+        let b2 = create_in("b2", list_b.id);
+        assert_eq!(list_order_ids(&svc, list_a.id), vec![a1.id, a2.id, a3.id]);
+        assert_eq!(list_order_ids(&svc, list_b.id), vec![b1.id, b2.id]);
+
+        // Simulate a today-view drag: interleave both lists.
+        svc.reorder_tasks(vec![a2.id, b2.id, a3.id, a1.id, b1.id])
+            .unwrap();
+
+        // Each list keeps its own sequence, numbered 0..n-1 within the list.
+        assert_eq!(list_order_ids(&svc, list_a.id), vec![a2.id, a3.id, a1.id]);
+        assert_eq!(list_order_ids(&svc, list_b.id), vec![b2.id, b1.id]);
+        for (t, expected) in [
+            (a2.id, 0.0),
+            (a3.id, 1.0),
+            (a1.id, 2.0),
+            (b2.id, 0.0),
+            (b1.id, 1.0),
+        ] {
+            assert_eq!(svc.get_task(t).unwrap().sort_order, expected);
+        }
+    }
+
+    #[test]
+    fn reorder_tasks_leaves_untouched_tasks_alone() {
+        let svc = open_service();
+        let list = svc.create_list("Projects".into()).unwrap();
+        let t1 = svc
+            .create_task(CreateTaskInput {
+                title: "one".into(),
+                notes: None,
+                priority: None,
+                list_id: Some(list.id),
+                due_date: None,
+                due_time: None,
+                tag_names: None,
+            })
+            .unwrap();
+        let t2 = svc
+            .create_task(CreateTaskInput {
+                title: "two".into(),
+                notes: None,
+                priority: None,
+                list_id: Some(list.id),
+                due_date: None,
+                due_time: None,
+                tag_names: None,
+            })
+            .unwrap();
+        let before = svc.get_task(t1.id).unwrap().sort_order;
+
+        // Reorder only t2; t1 must keep its sort_order.
+        svc.reorder_tasks(vec![t2.id]).unwrap();
+        assert_eq!(svc.get_task(t1.id).unwrap().sort_order, before);
+        assert_eq!(svc.get_task(t2.id).unwrap().sort_order, 0.0);
     }
 }
