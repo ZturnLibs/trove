@@ -18,7 +18,7 @@ import { TaskDetailPanel } from "@/design-system/patterns/TaskDetailPanel";
 import { SortableTaskRow, TaskRow } from "@/design-system/patterns/TaskRow";
 import { EmptyState } from "@/components/PageScaffold";
 import { Button } from "@/design-system/primitives/Button";
-import { ipc } from "@/ipc/client";
+import { ipc, type PagedResult, type Task } from "@/ipc/client";
 import { formatShortcutLabel } from "@/lib/shortcuts";
 import {
   NewTaskButton,
@@ -128,6 +128,18 @@ export function InboxPage() {
       newIndex,
     );
     if (orderedIds.join("|") === inboxTasks.map((t) => t.id).join("|")) return;
+    queryClient.setQueryData<PagedResult<Task>>(["tasks", "inbox"], (old) => {
+      if (!old) return old;
+      const order = new Map(orderedIds.map((id, i) => [id, i]));
+      return {
+        ...old,
+        items: [...old.items].sort(
+          (a, b) =>
+            (order.get(a.id) ?? Number.MAX_SAFE_INTEGER) -
+            (order.get(b.id) ?? Number.MAX_SAFE_INTEGER),
+        ),
+      };
+    });
     reorderMutation.mutate(orderedIds);
   };
 

@@ -171,6 +171,17 @@ export function TasksPage() {
     [listId, priority, search, smart, status, tagId],
   );
 
+  const taskListQueryKey = [
+    "tasks",
+    "list",
+    listId,
+    status,
+    priority,
+    smart,
+    tagId,
+    search,
+  ];
+
   const {
     items: tasks,
     total: taskTotal,
@@ -178,10 +189,7 @@ export function TasksPage() {
     loading: tasksLoading,
     loadingMore: tasksLoadingMore,
     loadMore: loadMoreTasks,
-  } = usePagedQuery(
-    ["tasks", "list", listId, status, priority, smart, tagId, search],
-    fetchTasks,
-  );
+  } = usePagedQuery(taskListQueryKey, fetchTasks);
 
   const createMutation = useMutation({
     mutationFn: () =>
@@ -340,6 +348,15 @@ export function TasksPage() {
       newIndex,
     );
     if (orderedIds.join("|") === tasks.map((t) => t.id).join("|")) return;
+    queryClient.setQueryData<Task[]>(taskListQueryKey, (old) => {
+      if (!old) return old;
+      const order = new Map(orderedIds.map((id, i) => [id, i]));
+      return [...old].sort(
+        (a, b) =>
+          (order.get(a.id) ?? Number.MAX_SAFE_INTEGER) -
+          (order.get(b.id) ?? Number.MAX_SAFE_INTEGER),
+      );
+    });
     reorderMutation.mutate(orderedIds);
   };
 

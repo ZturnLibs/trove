@@ -28,6 +28,7 @@ import {
   type Reminder,
   type Task,
   type TodayReminderItem,
+  type TodayTasks,
   type UpdateReminderInput,
   type RecurrenceRule,
 } from "@/ipc/client";
@@ -373,6 +374,18 @@ export function TodayPage() {
       newIndex,
     );
     if (orderedIds.join("|") === dueToday.map((t) => t.id).join("|")) return;
+    queryClient.setQueryData<TodayTasks>(["tasks", "today"], (old) => {
+      if (!old) return old;
+      const order = new Map(orderedIds.map((id, i) => [id, i]));
+      return {
+        ...old,
+        dueToday: [...old.dueToday].sort(
+          (a, b) =>
+            (order.get(a.id) ?? Number.MAX_SAFE_INTEGER) -
+            (order.get(b.id) ?? Number.MAX_SAFE_INTEGER),
+        ),
+      };
+    });
     reorderMutation.mutate(orderedIds);
   };
 
