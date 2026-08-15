@@ -1,9 +1,23 @@
-import { useMemo, useState } from "react";
+import { useMemo, useRef, useState } from "react";
+import {
+  DndContext,
+  DragOverlay,
+  PointerSensor,
+  closestCenter,
+  useSensor,
+  useSensors,
+} from "@dnd-kit/core";
+import type { DragEndEvent, DragStartEvent } from "@dnd-kit/core";
+import {
+  SortableContext,
+  arrayMove,
+  verticalListSortingStrategy,
+} from "@dnd-kit/sortable";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Clock } from "lucide-react";
 import { RecurrencePicker } from "@/design-system/patterns/RecurrencePicker";
 import { TaskDetailPanel } from "@/design-system/patterns/TaskDetailPanel";
-import { TaskRow } from "@/design-system/patterns/TaskRow";
+import { SortableTaskRow, TaskRow } from "@/design-system/patterns/TaskRow";
 import { EmptyState } from "@/components/PageScaffold";
 import { NotificationPermissionBanner } from "@/components/NotificationPermissionBanner";
 import { Button } from "@/design-system/primitives/Button";
@@ -302,10 +316,18 @@ export function TodayPage() {
   const [completedCollapsed, setCompletedCollapsed] = useState(true);
   const [createdId, setCreatedId] = useState<string | null>(null);
   const [quickTitle, setQuickTitle] = useState("");
+  const [activeDragId, setActiveDragId] = useState<string | null>(null);
+  const suppressClickUntilRef = useRef(0);
   const [quickError, setQuickError] = useState<string | null>(null);
   const [showAllReminders, setShowAllReminders] = useState(false);
   const [editingReminder, setEditingReminder] = useState(false);
   const [editingAllId, setEditingAllId] = useState<string | null>(null);
+
+  const sensors = useSensors(
+    useSensor(PointerSensor, {
+      activationConstraint: { distance: 8 },
+    }),
+  );
 
   const todayQuery = useQuery({
     queryKey: ["tasks", "today"],
@@ -317,6 +339,53 @@ export function TodayPage() {
     queryFn: () => ipc.reminderListAll(),
     enabled: showAllReminders,
   });
+
+  const reorderMutation = useMutation({
+    mutationFn: (orderedIds: string[]) => ipc.taskReorder(orderedIds),
+    onSuccess: () => {
+      void queryClient.invalidateQueries({ queryKey: ["tasks", "today"] });
+      void queryClient.invalidateQueries({ queryKey: ["tasks"] });
+    },
+  });
+
+  const handleTodaySelect = (id: string) => {
+    if (Date.now() < suppressClickUntilRef.current) return;
+    setSelectedId(id);
+    setSelectedReminderId(null);
+  };
+
+  const handleDragStart = (event: DragStartEvent) => {
+    setActiveDragId(String(event.active.id));
+  };
+
+  const handleDragEnd = (event: DragEndEvent) => {
+    const { active, over } = event;
+    setActiveDragId(null);
+    suppressClickUntilRef.current = Date.now() + 300;
+    const dueToday = todayQuery.data?.dueToday ?? [];
+    if (!over || active.id === over.id) return;
+    const oldIndex = dueToday.findIndex((t) => t.id === active.id);
+    const newIndex = dueToday.findIndex((t) => t.id === over.id);
+    if (oldIndex < 0 || newIndex < 0) return;
+    const orderedIds = arrayMove(
+      dueToday.map((t) => t.id),
+      oldIndex,
+      newIndex,
+    );
+    if (orderedIds.join("|") === dueToday.map((t) => t.id).join("|")) return;
+    reorderMutation.mutate(orderedIds);
+  };
+
+  const handleDragCancel = () => {
+    setActiveDragId(null);
+    suppressClickUntilRef.current = Date.now() + 300;
+  };
+
+  const activeDragTask = useMemo(
+    () =>
+      todayQuery.data?.dueToday.find((t) => t.id === activeDragId) ?? null,
+    [todayQuery.data, activeDragId],
+  );
 
   const createMutation = useMutation({
     mutationFn: () =>
@@ -622,19 +691,40 @@ export function TodayPage() {
               ))}
             </TaskGroup>
             <TaskGroup title="今日任务" count={data?.dueToday.length ?? 0}>
-              {data?.dueToday.map((task) => (
-                <TaskRow
-                  key={task.id}
-                  task={task}
-                  selected={selectedId === task.id}
-                  onSelect={() => {
-                    setSelectedId(task.id);
-                    setSelectedReminderId(null);
-                  }}
-                  onToggleComplete={() => toggleMutation.mutate(task)}
-                  onRename={rename}
-                />
-              ))}
+              <DndContext
+                sensors={sensors}
+                collisionDetection={closestCenter}
+                onDragStart={handleDragStart}
+                onDragEnd={handleDragEnd}
+                onDragCancel={handleDragCancel}
+              >
+                <SortableContext
+                  items={data?.dueToday.map((t) => t.id) ?? []}
+                  strategy={verticalListSortingStrategy}
+                >
+                  {data?.dueToday.map((task) => (
+                    <SortableTaskRow
+                      key={task.id}
+                      task={task}
+                      selected={selectedId === task.id}
+                      onSelect={() => handleTodaySelect(task.id)}
+                      onToggleComplete={() => toggleMutation.mutate(task)}
+                      onRename={rename}
+                    />
+                  ))}
+                </SortableContext>
+                <DragOverlay>
+                  {activeDragTask ? (
+                    <div className="rounded-md bg-surface shadow-lg ring-1 ring-border">
+                      <TaskRow
+                        task={activeDragTask}
+                        onSelect={() => {}}
+                        onToggleComplete={() => {}}
+                      />
+                    </div>
+                  ) : null}
+                </DragOverlay>
+              </DndContext>
             </TaskGroup>
             <TaskGroup
               title="今日已完成"

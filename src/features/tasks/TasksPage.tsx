@@ -1,8 +1,21 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import type { DragEvent } from "react";
+import {
+  DndContext,
+  DragOverlay,
+  PointerSensor,
+  closestCenter,
+  useSensor,
+  useSensors,
+} from "@dnd-kit/core";
+import type { DragEndEvent, DragStartEvent } from "@dnd-kit/core";
+import {
+  SortableContext,
+  arrayMove,
+  verticalListSortingStrategy,
+} from "@dnd-kit/sortable";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { TaskDetailPanel } from "@/design-system/patterns/TaskDetailPanel";
-import { TaskRow } from "@/design-system/patterns/TaskRow";
+import { SortableTaskRow, TaskRow } from "@/design-system/patterns/TaskRow";
 import { EmptyState } from "@/components/PageScaffold";
 import { Button } from "@/design-system/primitives/Button";
 import { Input } from "@/design-system/primitives/Input";
@@ -65,14 +78,16 @@ export function TasksPage() {
   const [showViewInput, setShowViewInput] = useState(false);
   const [viewName, setViewName] = useState("");
   const [selectedViewId, setSelectedViewId] = useState<string>("");
-  const [dragId, setDragId] = useState<string | null>(null);
-  const [dropTarget, setDropTarget] = useState<{
-    id: string;
-    position: "before" | "after";
-  } | null>(null);
-  // Browsers synthesize a click on the source row after a drag ends; suppress
+  const [activeDragId, setActiveDragId] = useState<string | null>(null);
+  // Browsers synthesize a click on the drop target after a drag ends; suppress
   // clicks inside this window so reordering never accidentally selects a task.
   const suppressClickUntilRef = useRef(0);
+
+  const sensors = useSensors(
+    useSensor(PointerSensor, {
+      activationConstraint: { distance: 8 },
+    }),
+  );
 
   const listsQuery = useQuery({
     queryKey: ["task-lists"],
@@ -307,56 +322,36 @@ export function TasksPage() {
     setSelectedId(id);
   };
 
-  const handleDragStart = (id: string) => (event: DragEvent) => {
-    setDragId(id);
-    event.dataTransfer.setData("text/plain", id);
-    event.dataTransfer.effectAllowed = "move";
+  const handleDragStart = (event: DragStartEvent) => {
+    setActiveDragId(String(event.active.id));
   };
 
-  const handleDragOver = (id: string) => (event: DragEvent) => {
-    if (!dragId || dragId === id) return;
-    event.preventDefault();
-    event.dataTransfer.dropEffect = "move";
-    const rect = event.currentTarget.getBoundingClientRect();
-    const position =
-      event.clientY < rect.top + rect.height / 2 ? "before" : "after";
-    setDropTarget((prev) =>
-      prev?.id === id && prev.position === position ? prev : { id, position },
-    );
-  };
-
-  const handleDrop = (id: string) => (event: DragEvent) => {
-    event.preventDefault();
-    if (!dragId) return;
-    const rect = event.currentTarget.getBoundingClientRect();
-    const position =
-      event.clientY < rect.top + rect.height / 2 ? "before" : "after";
-    applyDragReorder(dragId, id, position);
-    setDragId(null);
-    setDropTarget(null);
-  };
-
-  const handleDragEnd = () => {
+  const handleDragEnd = (event: DragEndEvent) => {
+    const { active, over } = event;
+    setActiveDragId(null);
     suppressClickUntilRef.current = Date.now() + 300;
-    setDragId(null);
-    setDropTarget(null);
-  };
-
-  const applyDragReorder = (
-    fromId: string,
-    targetId: string,
-    position: "before" | "after",
-  ) => {
-    if (fromId === targetId || tasks.length < 2) return;
-    const list = tasks.filter((t) => t.id !== fromId);
-    const targetIndex = list.findIndex((t) => t.id === targetId);
-    const dragged = tasks.find((t) => t.id === fromId);
-    if (targetIndex < 0 || !dragged) return;
-    list.splice(position === "after" ? targetIndex + 1 : targetIndex, 0, dragged);
-    const orderedIds = list.map((t) => t.id);
+    if (!over || active.id === over.id) return;
+    const oldIndex = tasks.findIndex((t) => t.id === active.id);
+    const newIndex = tasks.findIndex((t) => t.id === over.id);
+    if (oldIndex < 0 || newIndex < 0) return;
+    const orderedIds = arrayMove(
+      tasks.map((t) => t.id),
+      oldIndex,
+      newIndex,
+    );
     if (orderedIds.join("|") === tasks.map((t) => t.id).join("|")) return;
     reorderMutation.mutate(orderedIds);
   };
+
+  const handleDragCancel = () => {
+    setActiveDragId(null);
+    suppressClickUntilRef.current = Date.now() + 300;
+  };
+
+  const activeDragTask = useMemo(
+    () => tasks.find((t) => t.id === activeDragId) ?? null,
+    [tasks, activeDragId],
+  );
 
   const selected = useMemo(
     () => tasks.find((t) => t.id === selectedId) ?? null,
@@ -637,24 +632,53 @@ export function TasksPage() {
             />
           ) : (
             <>
-              {tasks.map((task) => (
-                <TaskRow
-                  key={task.id}
-                  task={task}
-                  selected={selectedId === task.id}
-                  onSelect={() => handleSelect(task.id)}
-                  onToggleComplete={() => toggleMutation.mutate(task)}
-                  onRename={rename}
-                  draggable={smart === "none"}
-                  isDragging={dragId === task.id}
-                  isDropTarget={dropTarget?.id === task.id}
-                  dropPosition={dropTarget?.position}
-                  onDragStart={handleDragStart(task.id)}
-                  onDragOver={handleDragOver(task.id)}
-                  onDrop={handleDrop(task.id)}
+              {smart === "none" ? (
+                <DndContext
+                  sensors={sensors}
+                  collisionDetection={closestCenter}
+                  onDragStart={handleDragStart}
                   onDragEnd={handleDragEnd}
-                />
-              ))}
+                  onDragCancel={handleDragCancel}
+                >
+                  <SortableContext
+                    items={tasks.map((t) => t.id)}
+                    strategy={verticalListSortingStrategy}
+                  >
+                    {tasks.map((task) => (
+                      <SortableTaskRow
+                        key={task.id}
+                        task={task}
+                        selected={selectedId === task.id}
+                        onSelect={() => handleSelect(task.id)}
+                        onToggleComplete={() => toggleMutation.mutate(task)}
+                        onRename={rename}
+                      />
+                    ))}
+                  </SortableContext>
+                  <DragOverlay>
+                    {activeDragTask ? (
+                      <div className="rounded-md bg-surface shadow-lg ring-1 ring-border">
+                        <TaskRow
+                          task={activeDragTask}
+                          onSelect={() => {}}
+                          onToggleComplete={() => {}}
+                        />
+                      </div>
+                    ) : null}
+                  </DragOverlay>
+                </DndContext>
+              ) : (
+                tasks.map((task) => (
+                  <TaskRow
+                    key={task.id}
+                    task={task}
+                    selected={selectedId === task.id}
+                    onSelect={() => handleSelect(task.id)}
+                    onToggleComplete={() => toggleMutation.mutate(task)}
+                    onRename={rename}
+                  />
+                ))
+              )}
               <PagedListFooter
                 shown={tasks.length}
                 total={taskTotal}

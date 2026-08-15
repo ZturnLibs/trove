@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from "react";
-import type { DragEvent } from "react";
 import { Check } from "lucide-react";
+import { useSortable } from "@dnd-kit/sortable";
+import { CSS } from "@dnd-kit/utilities";
 import { Input } from "@/design-system/primitives/Input";
 import type { Task } from "@/ipc/client";
 import { cn } from "@/lib/cn";
@@ -12,22 +13,7 @@ const priorityLabel: Record<Task["priority"], string> = {
   high: "高",
 };
 
-export function TaskRow({
-  task,
-  selected,
-  overdue,
-  onSelect,
-  onToggleComplete,
-  onRename,
-  draggable,
-  isDragging,
-  isDropTarget,
-  dropPosition,
-  onDragStart,
-  onDragOver,
-  onDrop,
-  onDragEnd,
-}: {
+export type TaskRowProps = {
   task: Task;
   selected?: boolean;
   overdue?: boolean;
@@ -35,19 +21,19 @@ export function TaskRow({
   onToggleComplete: () => void;
   /** If provided, double-clicking the title edits it in place (optimistic). */
   onRename?: (task: Task, title: string) => void | Promise<void>;
-  /** Enables native HTML5 drag on the row (used for drag-to-reorder). */
-  draggable?: boolean;
-  /** The row itself is being dragged. */
+  /** The row is being dragged; dim it while dragging. */
   isDragging?: boolean;
-  /** A dragged row is hovering over this row; show an insertion indicator. */
-  isDropTarget?: boolean;
-  /** Where the insertion indicator goes relative to this row. */
-  dropPosition?: "before" | "after";
-  onDragStart?: (event: DragEvent<HTMLDivElement>) => void;
-  onDragOver?: (event: DragEvent<HTMLDivElement>) => void;
-  onDrop?: (event: DragEvent<HTMLDivElement>) => void;
-  onDragEnd?: (event: DragEvent<HTMLDivElement>) => void;
-}) {
+};
+
+export function TaskRow({
+  task,
+  selected,
+  overdue,
+  onSelect,
+  onToggleComplete,
+  onRename,
+  isDragging,
+}: TaskRowProps) {
   const done = task.status === "completed";
   const [editing, setEditing] = useState(false);
   const [draft, setDraft] = useState(task.title);
@@ -84,12 +70,7 @@ export function TaskRow({
     <div
       role="button"
       tabIndex={0}
-      draggable={draggable && !editing}
       onClick={onSelect}
-      onDragStart={onDragStart}
-      onDragOver={onDragOver}
-      onDrop={onDrop}
-      onDragEnd={onDragEnd}
       onKeyDown={(event) => {
         if (event.key === "Enter" || event.key === " ") {
           event.preventDefault();
@@ -124,6 +105,7 @@ export function TaskRow({
             onChange={(event) => setDraft(event.target.value)}
             onClick={(event) => event.stopPropagation()}
             onDoubleClick={(event) => event.stopPropagation()}
+            onPointerDown={(event) => event.stopPropagation()}
             onKeyDown={(event) => {
               // Keep keystrokes inside the field (the row binds Enter/Space to select).
               event.stopPropagation();
@@ -174,14 +156,38 @@ export function TaskRow({
           {task.dueTime ? ` ${task.dueTime}` : ""}
         </span>
       ) : null}
-      {isDropTarget ? (
-        <div
-          className={cn(
-            "pointer-events-none absolute inset-x-0 z-10 h-[2px] bg-accent",
-            dropPosition === "before" ? "top-0" : "bottom-0",
-          )}
-        />
-      ) : null}
+    </div>
+  );
+}
+
+/**
+ * Sortable wrapper around TaskRow for drag-to-reorder lists.
+ *
+ * Uses PointerSensor with a distance constraint (see the DndContext in the
+ * calling page) so plain clicks, double-click rename and keyboard Enter/Space
+ * selection keep working; keyboard reordering stays on the up/down buttons.
+ * The editing input stops pointer propagation so text selection inside the
+ * rename field never starts a drag.
+ */
+export function SortableTaskRow(props: TaskRowProps) {
+  const {
+    listeners,
+    setNodeRef,
+    transform,
+    transition,
+    isDragging,
+  } = useSortable({ id: props.task.id });
+
+  return (
+    <div
+      ref={setNodeRef}
+      style={{
+        transform: CSS.Transform.toString(transform),
+        transition,
+      }}
+      {...listeners}
+    >
+      <TaskRow {...props} isDragging={isDragging} />
     </div>
   );
 }
