@@ -129,6 +129,32 @@ pub struct Tag {
     pub revision: Revision,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub enum TaskWorkflowState {
+    Active,
+    Waiting,
+}
+
+impl TaskWorkflowState {
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::Active => "active",
+            Self::Waiting => "waiting",
+        }
+    }
+
+    pub fn parse(value: &str) -> Result<Self, DomainError> {
+        match value {
+            "active" => Ok(Self::Active),
+            "waiting" => Ok(Self::Waiting),
+            _ => Err(DomainError::Validation(format!(
+                "invalid workflow state: {value}"
+            ))),
+        }
+    }
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct Task {
@@ -147,6 +173,10 @@ pub struct Task {
     pub series_id: Option<EntityId>,
     pub tag_ids: Vec<EntityId>,
     pub tag_names: Vec<String>,
+    pub workflow_state: TaskWorkflowState,
+    pub available_at: Option<String>,
+    pub waiting_for: Option<String>,
+    pub follow_up_date: Option<String>,
     pub created_at: String,
     pub updated_at: String,
     pub revision: Revision,
@@ -194,6 +224,9 @@ pub struct TaskQuery {
     /// completed_at date >= YYYY-MM-DD (local)
     pub completed_since: Option<String>,
     pub search: Option<String>,
+    pub workflow_state: Option<TaskWorkflowState>,
+    pub deferred_only: Option<bool>,
+    pub waiting_follow_up_due: Option<bool>,
     pub limit: Option<i64>,
     pub offset: Option<i64>,
 }
@@ -207,6 +240,8 @@ pub enum SmartListKind {
     HighPriority,
     NoDue,
     RecentCompleted,
+    Deferred,
+    WaitingFollowUp,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -215,6 +250,9 @@ pub struct TodayTasks {
     pub overdue: Vec<Task>,
     pub due_today: Vec<Task>,
     pub completed_today: Vec<Task>,
+    pub focus: Vec<Task>,
+    pub waiting_follow_up: Vec<Task>,
+    pub focus_carry_suggestions: Vec<Task>,
     pub reminders_today: Vec<super::TodayReminderItem>,
     pub today: String,
 }
@@ -235,6 +273,14 @@ pub fn validate_due_time(value: &str) -> Result<(), DomainError> {
     } else {
         Err(DomainError::Validation("dueTime must be HH:MM".into()))
     }
+}
+
+pub fn validate_due_vs_available(
+    due_date: Option<&str>,
+    available_at: Option<&str>,
+) -> Result<(), DomainError> {
+    super::task_activity::validate_due_vs_available(due_date, available_at)
+        .map_err(DomainError::Validation)
 }
 
 pub fn local_today(_clock: &impl Clock) -> String {

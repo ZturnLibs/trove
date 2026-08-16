@@ -5,6 +5,7 @@ import { useSortable } from "@dnd-kit/sortable";
 import { CSS } from "@dnd-kit/utilities";
 import { Input } from "@/design-system/primitives/Input";
 import { ipc, type Task } from "@/ipc/client";
+import { deferPresets, localTodayString } from "@/lib/defer";
 import { cn } from "@/lib/cn";
 
 const priorityLabel: Record<Task["priority"], string> = {
@@ -36,6 +37,16 @@ export type TaskRowProps = {
   onToggleComplete: () => void;
   /** If provided, double-clicking the title edits it in place (optimistic). */
   onRename?: (task: Task, title: string) => void | Promise<void>;
+  /** Right-click / quick menu: set defer display date (not due date). */
+  onSetDefer?: (task: Task, availableAt: string | null) => void | Promise<void>;
+  /** Right-click: mark task as waiting (opens detail or inline flow). */
+  onMarkWaiting?: (task: Task) => void | Promise<void>;
+  /** Show defer date chip (e.g. in deferred-only list). */
+  showDeferLabel?: boolean;
+  /** Show waiting metadata chip (e.g. in waiting-only list). */
+  showWaitingLabel?: boolean;
+  /** Left accent bar for today's focus list. */
+  inFocus?: boolean;
   /**
    * Overrides the default due-date save (`ipc.taskUpdate` + `["tasks"]`
    * invalidation). Receives the row task and the next dueDate/dueTime.
@@ -47,6 +58,8 @@ export type TaskRowProps = {
   ) => void;
   /** The row is being dragged; dim it while dragging. */
   isDragging?: boolean;
+  /** One-line smart sort reason (today view). */
+  sortHint?: string;
 };
 
 /**
@@ -95,13 +108,22 @@ export function TaskRow({
   onToggleComplete,
   onRename,
   onUpdateDue,
+  onSetDefer,
+  onMarkWaiting,
+  showDeferLabel,
+  showWaitingLabel,
+  inFocus,
   isDragging,
+  sortHint,
 }: TaskRowProps) {
   const done = task.status === "completed";
+  const isWaiting = task.workflowState === "waiting" && !done;
   const [editing, setEditing] = useState(false);
   const [draft, setDraft] = useState(task.title);
   const inputRef = useRef<HTMLInputElement>(null);
   const [dueMenu, setDueMenu] = useState<{ x: number; y: number } | null>(null);
+  const [deferMenu, setDeferMenu] = useState<{ x: number; y: number } | null>(null);
+  const [contextMenu, setContextMenu] = useState<{ x: number; y: number } | null>(null);
   const [customDate, setCustomDate] = useState("");
   const [customTime, setCustomTime] = useState("");
   const applyDue = useDueUpdate(task, onUpdateDue);
@@ -143,8 +165,46 @@ export function TaskRow({
   // A fixed menu inside the sortable wrapper's transformed element would be
   // mispositioned relative to the viewport, so close it when a drag starts.
   useEffect(() => {
-    if (isDragging) setDueMenu(null);
+    if (isDragging) {
+      setDueMenu(null);
+      setDeferMenu(null);
+      setContextMenu(null);
+    }
   }, [isDragging]);
+
+  useEffect(() => {
+    if (!deferMenu) return;
+    const close = () => setDeferMenu(null);
+    const onKeyDown = (event: KeyboardEvent) => {
+      if (event.key === "Escape") close();
+    };
+    window.addEventListener("click", close);
+    window.addEventListener("scroll", close, true);
+    window.addEventListener("keydown", onKeyDown);
+    return () => {
+      window.removeEventListener("click", close);
+      window.removeEventListener("scroll", close, true);
+      window.removeEventListener("keydown", onKeyDown);
+    };
+  }, [deferMenu]);
+
+  useEffect(() => {
+    if (!contextMenu) return;
+    const close = () => setContextMenu(null);
+    const onKeyDown = (event: KeyboardEvent) => {
+      if (event.key === "Escape") close();
+    };
+    window.addEventListener("click", close);
+    window.addEventListener("scroll", close, true);
+    window.addEventListener("keydown", onKeyDown);
+    return () => {
+      window.removeEventListener("click", close);
+      window.removeEventListener("scroll", close, true);
+      window.removeEventListener("keydown", onKeyDown);
+    };
+  }, [contextMenu]);
+
+  const hasWorkflowMenu = Boolean(onSetDefer || onMarkWaiting);
 
   const startEdit = () => {
     setDraft(task.title);
@@ -188,6 +248,17 @@ export function TaskRow({
       role="button"
       tabIndex={0}
       onClick={onSelect}
+      onContextMenu={(event) => {
+        if (done || !hasWorkflowMenu) return;
+        event.preventDefault();
+        if (onSetDefer && onMarkWaiting) {
+          setContextMenu({ x: event.clientX, y: event.clientY });
+        } else if (onSetDefer && !isWaiting) {
+          setDeferMenu({ x: event.clientX, y: event.clientY });
+        } else if (onMarkWaiting) {
+          setContextMenu({ x: event.clientX, y: event.clientY });
+        }
+      }}
       onKeyDown={(event) => {
         if (event.key === "Enter" || event.key === " ") {
           event.preventDefault();
@@ -195,7 +266,9 @@ export function TaskRow({
         }
       }}
       className={cn(
-        "group relative flex h-9 cursor-default items-center gap-2 border-b border-border px-3 text-[13px] hover:bg-row-hover",
+        "group relative flex min-h-9 cursor-default items-center gap-2 border-b border-border px-3 text-[13px] hover:bg-row-hover",
+        sortHint && "py-1",
+        inFocus && "border-l-2 border-l-accent pl-[10px]",
         selected && "bg-row-active",
         isDragging && "opacity-50",
       )}
@@ -248,12 +321,24 @@ export function TaskRow({
               "truncate",
               done && "text-muted line-through",
               overdue && !done && "text-danger",
+              isWaiting && !done && "text-muted",
             )}
           >
+            {isWaiting ? (
+              <span className="text-muted">⏸ </span>
+            ) : null}
             {task.title}
           </div>
         )}
+        {sortHint && !editing ? (
+          <div className="truncate text-[11px] text-muted">{sortHint}</div>
+        ) : null}
       </div>
+      {isWaiting && (showWaitingLabel || task.waitingFor) ? (
+        <span className="max-w-[8rem] shrink-0 truncate text-[11px] text-muted">
+          等待{task.waitingFor ? `：${task.waitingFor}` : ""}
+        </span>
+      ) : null}
       {task.priority !== "none" ? (
         <span className="shrink-0 text-[11px] text-muted">
           {priorityLabel[task.priority]}
@@ -261,6 +346,11 @@ export function TaskRow({
       ) : null}
       {task.seriesId ? (
         <span className="shrink-0 text-[11px] text-muted">重复</span>
+      ) : null}
+      {showDeferLabel && task.availableAt && !done ? (
+        <span className="shrink-0 text-[11px] text-muted">
+          {task.availableAt} 再显示
+        </span>
       ) : null}
       {task.dueDate ? (
         <button
@@ -351,6 +441,71 @@ export function TaskRow({
           >
             清除日期
           </button>
+        </div>
+      ) : null}
+      {deferMenu && onSetDefer && !isWaiting ? (
+        <div
+          className="fixed z-50 min-w-[10rem] rounded-[var(--radius-control)] border border-border bg-surface py-1 shadow-lg"
+          style={{ left: deferMenu.x, top: deferMenu.y }}
+          onClick={(event) => event.stopPropagation()}
+          onKeyDown={(event) => event.stopPropagation()}
+        >
+          <div className="px-3 py-1 text-[10px] text-muted">推迟显示</div>
+          {deferPresets(localTodayString()).map((preset) => (
+            <button
+              key={preset.label}
+              type="button"
+              className="block w-full px-3 py-1.5 text-left text-[12px] hover:bg-surface-raised"
+              onClick={(event) => {
+                event.stopPropagation();
+                setDeferMenu(null);
+                void onSetDefer(task, preset.value);
+              }}
+            >
+              {preset.label}
+            </button>
+          ))}
+        </div>
+      ) : null}
+      {contextMenu ? (
+        <div
+          className="fixed z-50 min-w-[10rem] rounded-[var(--radius-control)] border border-border bg-surface py-1 shadow-lg"
+          style={{ left: contextMenu.x, top: contextMenu.y }}
+          onClick={(event) => event.stopPropagation()}
+          onKeyDown={(event) => event.stopPropagation()}
+        >
+          {onSetDefer && !isWaiting ? (
+            <>
+              <div className="px-3 py-1 text-[10px] text-muted">推迟显示</div>
+              {deferPresets(localTodayString()).map((preset) => (
+                <button
+                  key={preset.label}
+                  type="button"
+                  className="block w-full px-3 py-1.5 text-left text-[12px] hover:bg-surface-raised"
+                  onClick={(event) => {
+                    event.stopPropagation();
+                    setContextMenu(null);
+                    void onSetDefer(task, preset.value);
+                  }}
+                >
+                  {preset.label}
+                </button>
+              ))}
+            </>
+          ) : null}
+          {onMarkWaiting && !isWaiting ? (
+            <button
+              type="button"
+              className="block w-full px-3 py-1.5 text-left text-[12px] hover:bg-surface-raised"
+              onClick={(event) => {
+                event.stopPropagation();
+                setContextMenu(null);
+                void onMarkWaiting(task);
+              }}
+            >
+              标记等待…
+            </button>
+          ) : null}
         </div>
       ) : null}
     </div>

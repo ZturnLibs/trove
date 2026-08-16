@@ -1,20 +1,38 @@
 mod clipboard;
+mod clipboard_classify;
+mod health;
 mod links;
 mod memory;
+mod memory_wikilink;
 mod nl_parse;
 mod page;
 mod recurrence;
 mod reminder;
+mod file_ref;
+mod focus;
+mod review;
 mod task;
+mod task_activity;
+mod today_smart_sort;
+mod url_scheme;
 
 pub use clipboard::*;
+pub use clipboard_classify::classify_clipboard_text;
+pub use health::*;
+pub use file_ref::*;
+pub use focus::*;
+pub use review::*;
 pub use links::*;
 pub use memory::*;
+pub use memory_wikilink::parse_wikilink_titles;
 pub use nl_parse::*;
 pub use page::*;
 pub use recurrence::*;
 pub use reminder::*;
 pub use task::*;
+pub use task_activity::should_apply_active_list_filter;
+pub use today_smart_sort::*;
+pub use url_scheme::*;
 
 use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};

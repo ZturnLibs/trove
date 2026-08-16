@@ -1,0 +1,5 @@
+{"_example": "Fill with {\"file\": \"<path>\", \"reason\": \"<why>\"}. Put spec/research files only — no code paths. Run `python3 .trellis/scripts/get_context.py --mode packages` to list available specs. Delete this line once real entries are added."}
+{"file": ".trellis/tasks/archive/2026-08/08-05-feature-gap-audit/research/gap-audit.md", "reason": "内部功能差距审计基线"}
+{"file": ".trellis/tasks/archive/2026-08/08-08-user-feedback-research/research/user-feedback-report.md", "reason": "外部用户需求与竞品对照"}
+{"file": "docs/post-v1-iteration-design.md", "reason": "v1.3/v1.4 产品设计依据"}
+{"file": "docs/next-iteration-roadmap.md", "reason": "带 todo 的执行路线图"}

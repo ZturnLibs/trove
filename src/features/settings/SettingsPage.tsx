@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import { useNavigate } from "react-router-dom";
 import { PageScaffold } from "@/components/PageScaffold";
 import { Button } from "@/design-system/primitives/Button";
 import { RecurrencePicker } from "@/design-system/patterns/RecurrencePicker";
@@ -17,6 +18,7 @@ import {
   type ThemePreference,
 } from "@/ipc/client";
 import { recurrenceLabel } from "@/lib/recurrence";
+import { QUICK_CAPTURE_SYNTAX } from "@/lib/nl-capture";
 import {
   isAppUpdaterSupported,
   useAppUpdater,
@@ -42,6 +44,7 @@ const PRIORITY_LABEL: Record<TaskPriority, string> = {
 };
 
 export function SettingsPage() {
+  const navigate = useNavigate();
   const queryClient = useQueryClient();
   const fileRef = useRef<HTMLInputElement>(null);
   const healthQuery = useQuery({
@@ -357,6 +360,44 @@ export function SettingsPage() {
         ) : null}
 
         <section className="rounded-[var(--radius-panel)] border border-border bg-surface-raised p-4">
+          <h2 className="text-[13px] font-semibold">工作节奏</h2>
+          <p className="mt-1 text-[12px] text-muted">
+            每周回顾汇总收件箱、逾期、等待等待整理信号，不含效率评分。
+          </p>
+          {settings ? (
+            <label className="mt-3 flex items-center gap-2 text-[12px]">
+              <input
+                type="checkbox"
+                checked={settings.todaySmartSortEnabled}
+                onChange={(e) =>
+                  saveSettings.mutate({
+                    ...settings,
+                    todaySmartSortEnabled: e.target.checked,
+                  })
+                }
+              />
+              今日页智能排序建议（本地算法，可采纳或忽略）
+            </label>
+          ) : null}
+          <div className="mt-3 flex flex-wrap gap-2">
+            <Button
+              size="sm"
+              variant="secondary"
+              onClick={() => navigate("/weekly-review")}
+            >
+              打开每周回顾
+            </Button>
+            <Button
+              size="sm"
+              variant="secondary"
+              onClick={() => navigate("/health")}
+            >
+              打开健康仪表盘
+            </Button>
+          </div>
+        </section>
+
+        <section className="rounded-[var(--radius-panel)] border border-border bg-surface-raised p-4">
           <h2 className="text-[13px] font-semibold">应用状态</h2>
           {healthQuery.isLoading ? (
             <p className="mt-2 text-[12px] text-muted">检查中…</p>
@@ -525,6 +566,7 @@ export function SettingsPage() {
                   "search",
                   "clipboard",
                   "focusMain",
+                  "screenshotRegion",
                 ] as const
               ).map((key) => (
                 <ShortcutRow
@@ -546,6 +588,21 @@ export function SettingsPage() {
               </Button>
             </div>
           ) : null}
+        </section>
+
+        <section className="rounded-[var(--radius-panel)] border border-border bg-surface-raised p-4">
+          <h2 className="text-[13px] font-semibold">快速记录语法</h2>
+          <p className="mt-1 text-[12px] text-muted">
+            在快速窗口「记录 → 任务/提醒」中输入自然语言，Trove 会解析日期、标签与优先级。完整说明见帮助文档。
+          </p>
+          <dl className="mt-3 space-y-2 text-[12px]">
+            {QUICK_CAPTURE_SYNTAX.map((row) => (
+              <div key={row.syntax} className="grid grid-cols-[minmax(0,1.2fr)_minmax(0,1fr)] gap-3">
+                <dt className="font-mono text-[11px] text-foreground">{row.syntax}</dt>
+                <dd className="text-muted">{row.desc}</dd>
+              </div>
+            ))}
+          </dl>
         </section>
 
         <section className="rounded-[var(--radius-panel)] border border-border bg-surface-raised p-4">
@@ -904,6 +961,19 @@ export function SettingsPage() {
                   }
                 />
                 启用剪切板采集
+              </label>
+              <label className="flex items-center gap-2">
+                <input
+                  type="checkbox"
+                  checked={settings.clipboardSmartActionsEnabled}
+                  onChange={(e) =>
+                    saveSettings.mutate({
+                      ...settings,
+                      clipboardSmartActionsEnabled: e.target.checked,
+                    })
+                  }
+                />
+                启用智能行动（类型识别与行动气泡，全程本地）
               </label>
               <label className="flex flex-col gap-1">
                 <span className="text-muted">保留天数（收藏不过期）</span>

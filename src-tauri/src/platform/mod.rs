@@ -1,6 +1,10 @@
 //! Platform capability adapters.
 
 pub mod ocr;
+pub mod screenshot;
+pub mod file_bookmark;
+
+pub use screenshot::{capture_region_png, ScreenshotError};
 
 use serde::Serialize;
 

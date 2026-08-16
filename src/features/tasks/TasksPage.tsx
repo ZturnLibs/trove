@@ -37,6 +37,7 @@ import {
 } from "@/features/tasks/TaskLayout";
 import { useDomainInvalidation } from "@/features/tasks/useDomainInvalidation";
 import { useTaskRename } from "@/features/tasks/useTaskRename";
+import { useFocusSession } from "@/stores/focus-session";
 import { useRecentActions } from "@/stores/recent-actions";
 import {
   PagedListFooter,
@@ -51,18 +52,23 @@ const smartLists: { id: SmartListKind | "none"; label: string }[] = [
   { id: "highPriority", label: "高优先级" },
   { id: "noDue", label: "无日期" },
   { id: "recentCompleted", label: "最近完成" },
+  { id: "deferred", label: "已推迟" },
+  { id: "waitingFollowUp", label: "等待跟进" },
 ];
 
 export function TasksPage() {
   useDomainInvalidation();
   const rename = useTaskRename();
   const queryClient = useQueryClient();
+  const startFocus = useFocusSession((s) => s.start);
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [listId, setListId] = useState<string>("all");
   const [status, setStatus] = useState<TaskStatus | "active">("active");
   const [priority, setPriority] = useState<TaskPriority | "all">("all");
   const [tagId, setTagId] = useState<string | null>(null);
   const [smart, setSmart] = useState<SmartListKind | "none">("none");
+  const [showDeferred, setShowDeferred] = useState(false);
+  const [showWaiting, setShowWaiting] = useState(false);
   const [search, setSearch] = useState("");
   const [newListName, setNewListName] = useState("");
   const [createdId, setCreatedId] = useState<string | null>(null);
@@ -108,7 +114,7 @@ export function TasksPage() {
     mutationFn: () =>
       ipc.savedViewCreate({
         name: viewName.trim(),
-        filter: { listId, status, priority, tagId, smart },
+        filter: { listId, status, priority, tagId, smart, showDeferred, showWaiting },
       }),
     onSuccess: () => {
       void queryClient.invalidateQueries({ queryKey: ["saved-views"] });
@@ -152,6 +158,8 @@ export function TasksPage() {
         ? (nextSmart as SmartListKind | "none")
         : "none",
     );
+    setShowDeferred(f.showDeferred === true);
+    setShowWaiting(f.showWaiting === true);
   };
 
   const fetchTasks = useCallback(
@@ -159,16 +167,23 @@ export function TasksPage() {
       smart === "none"
         ? ipc.taskQuery({
             listId: listId === "all" ? undefined : listId,
-            status: status === "active" ? undefined : status,
+            status:
+              showDeferred || showWaiting
+                ? "todo"
+                : status === "active"
+                  ? undefined
+                  : status,
             includeArchived: status === "archived",
             priority: priority === "all" ? undefined : priority,
             tagId: tagId ?? undefined,
             search: search.trim() || undefined,
+            deferredOnly: showDeferred || undefined,
+            workflowState: showWaiting ? "waiting" : undefined,
             limit,
             offset,
           })
         : ipc.taskSmartList(smart, limit, offset),
-    [listId, priority, search, smart, status, tagId],
+    [listId, priority, search, showDeferred, showWaiting, smart, status, tagId],
   );
 
   const taskListQueryKey = [
@@ -180,6 +195,8 @@ export function TasksPage() {
     smart,
     tagId,
     search,
+    showDeferred,
+    showWaiting,
   ];
 
   const {
@@ -280,10 +297,35 @@ export function TasksPage() {
 
   const hasActiveFilters =
     smart !== "none" ||
+    showDeferred ||
+    showWaiting ||
     status !== "active" ||
     priority !== "all" ||
     tagId !== null ||
     search.trim().length > 0;
+
+  const applyDefer = useCallback(
+    async (task: Task, availableAt: string | null) => {
+      const prev = task.availableAt;
+      await ipc.taskSetDefer(task.id, availableAt);
+      void queryClient.invalidateQueries({ queryKey: ["tasks"] });
+      useRecentActions.getState().push({
+        label: availableAt
+          ? `推迟显示至 ${availableAt}`
+          : "取消推迟显示",
+        undo: async () => {
+          await ipc.taskSetDefer(task.id, prev);
+          void queryClient.invalidateQueries({ queryKey: ["tasks"] });
+        },
+      });
+    },
+    [queryClient],
+  );
+
+  const applyMarkWaiting = useCallback((task: Task) => {
+    setSelectedId(task.id);
+    setCreatedId(task.id);
+  }, []);
 
   const toggleMutation = useMutation({
     mutationFn: async (task: Task) => {
@@ -375,8 +417,11 @@ export function TasksPage() {
     [tasks, selectedId],
   );
 
-  const listName =
-    smart !== "none"
+  const listName = showDeferred
+    ? "已推迟"
+    : showWaiting
+      ? "等待中"
+      : smart !== "none"
       ? (smartLists.find((s) => s.id === smart)?.label ?? "智能列表")
       : listId === "all"
         ? "全部"
@@ -387,14 +432,27 @@ export function TasksPage() {
     <SplitTaskLayout
       title={listName}
       description={
-        smart === "none" ? "按清单管理任务" : "智能列表 · 条件视图，非数据副本"
+        showDeferred
+          ? "推迟显示中的任务 · 到日期后会回到活跃列表"
+          : showWaiting
+            ? "等待外部依赖的任务 · 跟进日到期会出现在今日页"
+            : smart === "none"
+            ? "按清单管理任务"
+            : "智能列表 · 条件视图，非数据副本"
       }
       actions={
         <>
           <select
             className="h-7 rounded-[var(--radius-control)] border border-border bg-surface-raised px-2 text-[12px]"
             value={smart}
-            onChange={(e) => setSmart(e.target.value as SmartListKind | "none")}
+            onChange={(e) => {
+              const next = e.target.value as SmartListKind | "none";
+              setSmart(next);
+              if (next !== "none") {
+                setShowDeferred(false);
+                setShowWaiting(false);
+              }
+            }}
           >
             {smartLists.map((item) => (
               <option key={item.id} value={item.id}>
@@ -461,6 +519,32 @@ export function TasksPage() {
                   </option>
                 ))}
               </select>
+              <Button
+                size="sm"
+                variant={showDeferred ? "secondary" : "ghost"}
+                onClick={() => {
+                  setShowDeferred((v) => !v);
+                  if (!showDeferred) {
+                    setSmart("none");
+                    setShowWaiting(false);
+                  }
+                }}
+              >
+                已推迟
+              </Button>
+              <Button
+                size="sm"
+                variant={showWaiting ? "secondary" : "ghost"}
+                onClick={() => {
+                  setShowWaiting((v) => !v);
+                  if (!showWaiting) {
+                    setSmart("none");
+                    setShowDeferred(false);
+                  }
+                }}
+              >
+                等待中
+              </Button>
             </>
           ) : null}
           {(savedViewsQuery.data ?? []).length > 0 ? (
@@ -617,16 +701,24 @@ export function TasksPage() {
           ) : tasks.length === 0 ? (
             <EmptyState
               title={
-                hasActiveFilters
-                  ? "没有匹配的任务"
-                  : listId === "all"
-                    ? "还没有任务"
-                    : "这个清单还是空的"
+                showDeferred
+                  ? "没有推迟的任务"
+                  : showWaiting
+                    ? "没有等待中的任务"
+                    : hasActiveFilters
+                    ? "没有匹配的任务"
+                    : listId === "all"
+                      ? "还没有任务"
+                      : "这个清单还是空的"
               }
               body={
-                hasActiveFilters
-                  ? "调整筛选条件，或新建任务。"
-                  : "把收件箱里的任务移过来，或直接新建。"
+                showDeferred
+                  ? "推迟显示可以让任务暂时让路，到日期会自动回来。"
+                  : showWaiting
+                    ? "标记等待后任务会离开活跃列表，跟进日到期时出现在今日页。"
+                    : hasActiveFilters
+                    ? "调整筛选条件，或新建任务。"
+                    : "把收件箱里的任务移过来，或直接新建。"
               }
               primaryAction={{
                 label: "新建任务",
@@ -638,6 +730,8 @@ export function TasksPage() {
                       label: "清除筛选",
                       onClick: () => {
                         setSmart("none");
+                        setShowDeferred(false);
+                        setShowWaiting(false);
                         setStatus("active");
                         setPriority("all");
                         setTagId(null);
@@ -669,6 +763,10 @@ export function TasksPage() {
                         onSelect={() => handleSelect(task.id)}
                         onToggleComplete={() => toggleMutation.mutate(task)}
                         onRename={rename}
+                        onSetDefer={applyDefer}
+                        onMarkWaiting={applyMarkWaiting}
+                        showDeferLabel={showDeferred}
+                        showWaitingLabel={showWaiting}
                       />
                     ))}
                   </SortableContext>
@@ -693,6 +791,10 @@ export function TasksPage() {
                     onSelect={() => handleSelect(task.id)}
                     onToggleComplete={() => toggleMutation.mutate(task)}
                     onRename={rename}
+                    onSetDefer={applyDefer}
+                    onMarkWaiting={applyMarkWaiting}
+                    showDeferLabel={smart === "deferred"}
+                    showWaitingLabel={smart === "waitingFollowUp"}
                   />
                 ))
               )}
@@ -712,6 +814,11 @@ export function TasksPage() {
           task={selected}
           onDeleted={() => setSelectedId(null)}
           focusTitleId={createdId}
+          onStartFocus={
+            selected?.status === "todo"
+              ? () => void startFocus(selected.id)
+              : undefined
+          }
         />
       }
     />

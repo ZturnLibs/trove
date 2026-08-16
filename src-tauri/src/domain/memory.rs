@@ -12,6 +12,7 @@ pub struct Memory {
     pub archived: bool,
     pub quick_insert: bool,
     pub trigger_word: Option<String>,
+    pub mention_use_count: i64,
     pub tag_ids: Vec<EntityId>,
     pub tag_names: Vec<String>,
     pub created_at: String,
@@ -53,6 +54,68 @@ pub struct MemoryQuery {
     pub search: Option<String>,
     pub limit: Option<i64>,
     pub offset: Option<i64>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct MemorySummary {
+    pub id: EntityId,
+    pub title: String,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub enum WikilinkPendingReason {
+    Missing,
+    Ambiguous,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct WikilinkPending {
+    pub title: String,
+    pub reason: WikilinkPendingReason,
+    pub candidates: Vec<MemorySummary>,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub enum WikilinkResolutionAction {
+    Link,
+    Create,
+    Skip,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct WikilinkResolution {
+    pub title: String,
+    pub action: WikilinkResolutionAction,
+    pub target_id: Option<EntityId>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct WikilinkSyncResult {
+    pub memory: Memory,
+    pub linked_ids: Vec<EntityId>,
+    pub pending: Vec<WikilinkPending>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct MemoryBacklink {
+    pub memory_id: EntityId,
+    pub title: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct RelatedMemoryHit {
+    pub memory_id: EntityId,
+    pub title: String,
+    pub score: f64,
+    pub reasons: Vec<String>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]

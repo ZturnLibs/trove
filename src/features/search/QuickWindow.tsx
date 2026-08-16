@@ -11,7 +11,11 @@ import {
   type TaskPriority,
   type RecurrenceRule,
 } from "@/ipc/client";
-import { recurrenceLabel } from "@/lib/recurrence";
+import {
+  buildFireAtFromParsed,
+  formatParsedHint,
+  mergeTagNames,
+} from "@/lib/nl-capture";
 import { useUiStore, type QuickMode } from "@/stores/ui";
 import { cn } from "@/lib/cn";
 
@@ -37,6 +41,8 @@ export function QuickWindow() {
   const [title, setTitle] = useState("");
   const [body, setBody] = useState("");
   const [dueDate, setDueDate] = useState("");
+  const [dueTime, setDueTime] = useState("");
+  const [tagText, setTagText] = useState("");
   const [fireAt, setFireAt] = useState("");
   const [priority, setPriority] = useState<TaskPriority>("none");
   const [recurrence, setRecurrence] = useState<RecurrenceRule | null>(null);
@@ -49,6 +55,26 @@ export function QuickWindow() {
   const [ambiguous, setAmbiguous] = useState<string[]>([]);
   const [parsedHint, setParsedHint] = useState<string | null>(null);
   const inputRef = useRef<HTMLInputElement>(null);
+  const dueDateRef = useRef<HTMLInputElement>(null);
+  const dueTimeRef = useRef<HTMLInputElement>(null);
+  const tagsRef = useRef<HTMLInputElement>(null);
+  const priorityRef = useRef<HTMLSelectElement>(null);
+
+  const focusCaptureField = (index: number) => {
+    const refs = [inputRef, dueDateRef, dueTimeRef, tagsRef, priorityRef];
+    refs[index]?.current?.focus();
+  };
+
+  const handleCaptureFieldShortcut = (
+    event: React.KeyboardEvent,
+  ) => {
+    if (!(event.metaKey || event.ctrlKey)) return;
+    const num = Number.parseInt(event.key, 10);
+    if (num >= 1 && num <= 5) {
+      event.preventDefault();
+      focusCaptureField(num - 1);
+    }
+  };
 
   useEffect(() => {
     let unlisten: (() => void) | undefined;
@@ -63,6 +89,8 @@ export function QuickWindow() {
         setTitle("");
         setBody("");
         setDueDate("");
+        setDueTime("");
+        setTagText("");
         setFireAt("");
         setPriority("none");
         setRecurrence(null);
@@ -79,13 +107,27 @@ export function QuickWindow() {
   }, [setQuickMode]);
 
   useEffect(() => {
+    let unlisten: (() => void) | undefined;
+    void listen<string>("quick://set-search-query", (event) => {
+      setSearchText(event.payload ?? "");
+      requestAnimationFrame(() => inputRef.current?.focus());
+    }).then((fn) => {
+      unlisten = fn;
+    });
+    return () => unlisten?.();
+  }, []);
+
+  useEffect(() => {
     inputRef.current?.focus();
     setError(null);
     setRecurrence(null);
   }, [mode, captureType]);
 
   useEffect(() => {
-    if (mode !== "capture" || captureType !== "task") {
+    if (
+      mode !== "capture" ||
+      (captureType !== "task" && captureType !== "reminder")
+    ) {
       setAmbiguous([]);
       setParsedHint(null);
       return;
@@ -100,29 +142,20 @@ export function QuickWindow() {
     const timer = window.setTimeout(() => {
       void ipc.nlParseCapture(value).then((parsed) => {
         if (cancelled) return;
-        if (parsed.title !== value) {
-          // Keep raw input in the field; apply structured fields to controls.
-        }
         if (parsed.dueDate) setDueDate(parsed.dueDate);
         if (parsed.dueTime) {
-          // dueTime is HH:MM for tasks
+          if (captureType === "task") setDueTime(parsed.dueTime);
         }
         setPriority(parsed.priority);
         if (parsed.recurrence) setRecurrence(parsed.recurrence);
+        if (parsed.tagNames?.length) {
+          setTagText(parsed.tagNames.join(", "));
+        }
+        if (captureType === "reminder" && (parsed.dueDate || parsed.dueTime)) {
+          setFireAt(buildFireAtFromParsed(parsed.dueDate, parsed.dueTime));
+        }
         setAmbiguous(parsed.ambiguousFields);
-        const bits = [
-          parsed.dueDate ? `日期 ${parsed.dueDate}` : null,
-          parsed.dueTime ? `时间 ${parsed.dueTime}` : null,
-          parsed.priority !== "none" ? `优先级 ${parsed.priority}` : null,
-          parsed.recurrence
-            ? `重复 ${recurrenceLabel(parsed.recurrence)}`
-            : null,
-        ].filter(Boolean);
-        setParsedHint(
-          bits.length
-            ? `识别：${bits.join(" · ")}${parsed.ambiguousFields.length ? "（请确认高亮字段）" : ""}`
-            : null,
-        );
+        setParsedHint(formatParsedHint(parsed));
       });
     }, 250);
     return () => {
@@ -267,6 +300,59 @@ export function QuickWindow() {
     return [...matchedCommands, ...hits];
   }, [flatResults, searchText, templatesQuery.data, setQuickMode]);
 
+  const commandPaletteItems = useMemo(
+    () => paletteItems.filter((item) => item.kind === "command"),
+    [paletteItems],
+  );
+  const hitPaletteItems = useMemo(
+    () => paletteItems.filter((item) => item.kind === "hit"),
+    [paletteItems],
+  );
+
+  const renderPaletteRow = (item: PaletteItem, index: number) => (
+    <li
+      key={
+        item.kind === "command"
+          ? item.id
+          : `${item.hit.entityType}-${item.hit.entityId}`
+      }
+    >
+      <button
+        type="button"
+        className={cn(
+          "flex w-full flex-col gap-0.5 border-b border-border px-3 py-2 text-left hover:bg-row-hover",
+          index === selectedIndex && "bg-row-active",
+        )}
+        onClick={() => void runPaletteItem(item)}
+        onMouseEnter={() => setSelectedIndex(index)}
+      >
+        <div className="flex items-center gap-2 text-[13px]">
+          <span
+            className={cn(
+              "rounded px-1.5 text-[10px]",
+              item.kind === "command"
+                ? "bg-accent/15 text-accent"
+                : "bg-row-hover text-muted",
+            )}
+          >
+            {item.kind === "command" ? "命令" : typeLabel[item.hit.entityType]}
+          </span>
+          <span className="truncate font-medium">
+            {item.kind === "command" ? item.label : item.hit.title}
+          </span>
+        </div>
+        {item.kind === "hit" && item.hit.snippet ? (
+          <div className="truncate text-[11px] text-muted">
+            {item.hit.snippet.includes("[来自图片识别]")
+              ? "来自图片识别 · "
+              : ""}
+            {item.hit.snippet.replace(/^\[来自图片识别\]\s*/u, "")}
+          </div>
+        ) : null}
+      </button>
+    </li>
+  );
+
   useEffect(() => {
     setSelectedIndex(0);
   }, [searchText, paletteItems.length]);
@@ -342,16 +428,23 @@ export function QuickWindow() {
         const parsed = await ipc.nlParseCapture(value);
         const finalTitle = parsed.title.trim() || value;
         const finalDue = dueDate || parsed.dueDate || null;
+        const finalDueTime = dueTime || parsed.dueTime || null;
         const finalPriority =
-          priority !== "none" ? priority : parsed.priority !== "none" ? parsed.priority : undefined;
+          priority !== "none"
+            ? priority
+            : parsed.priority !== "none"
+              ? parsed.priority
+              : undefined;
         const finalRecurrence = recurrence ?? parsed.recurrence ?? null;
+        const finalTags = mergeTagNames(parsed.tagNames, tagText);
         if (finalRecurrence) {
           await ipc.taskCreateRecurring(
             {
               title: finalTitle,
               dueDate: finalDue,
-              dueTime: parsed.dueTime,
+              dueTime: finalDueTime,
               priority: finalPriority,
+              tagNames: finalTags.length ? finalTags : undefined,
             },
             finalRecurrence,
           );
@@ -359,18 +452,24 @@ export function QuickWindow() {
           await ipc.taskCreate({
             title: finalTitle,
             dueDate: finalDue,
-            dueTime: parsed.dueTime,
+            dueTime: finalDueTime,
             priority: finalPriority,
+            tagNames: finalTags.length ? finalTags : undefined,
           });
         }
       } else if (captureType === "reminder") {
-        if (!fireAt) throw new Error("请选择提醒时间");
-        const normalized = fireAt.length === 16 ? `${fireAt}:00` : fireAt;
+        const parsed = await ipc.nlParseCapture(value);
+        const finalTitle = parsed.title.trim() || value;
+        const finalFireAt =
+          fireAt || buildFireAtFromParsed(parsed.dueDate, parsed.dueTime);
+        if (!finalFireAt) throw new Error("请选择提醒时间");
+        const normalized =
+          finalFireAt.length === 16 ? `${finalFireAt}:00` : finalFireAt;
         await ipc.reminderCreate({
-          title: value,
+          title: finalTitle,
           fireAt: normalized.replace(" ", "T"),
           timezone: Intl.DateTimeFormat().resolvedOptions().timeZone,
-          recurrence,
+          recurrence: recurrence ?? parsed.recurrence ?? null,
         });
       } else if (captureType === "memory") {
         await ipc.memoryCreate({
@@ -383,6 +482,8 @@ export function QuickWindow() {
       setTitle("");
       setBody("");
       setDueDate("");
+      setDueTime("");
+      setTagText("");
       setFireAt("");
       setPriority("none");
       setRecurrence(null);
@@ -453,12 +554,17 @@ export function QuickWindow() {
                 captureType === "task"
                   ? "如：明天下午三点回复客户…"
                   : captureType === "reminder"
-                    ? "快速记录提醒…"
+                    ? "如：明天下午三点 Standup…"
                     : captureType === "memory"
                       ? "快速记录记忆标题…"
                       : "随手记…"
               }
               onKeyDown={(event) => {
+                handleCaptureFieldShortcut(event);
+                if (event.key === "Tab" && !event.shiftKey && captureType === "task") {
+                  event.preventDefault();
+                  focusCaptureField(1);
+                }
                 if (event.key === "Escape") {
                   if (title || body) {
                     setTitle("");
@@ -503,11 +609,13 @@ export function QuickWindow() {
             {captureType === "task" ? (
               <div className="grid grid-cols-2 gap-2">
                 <label className="space-y-1 text-[11px] text-muted">
-                  截止日期
+                  截止日期 <span className="text-muted/70">⌘2</span>
                   <Input
+                    ref={dueDateRef}
                     type="date"
                     value={dueDate}
                     onChange={(e) => setDueDate(e.target.value)}
+                    onKeyDown={handleCaptureFieldShortcut}
                     className={
                       ambiguous.includes("dueDate")
                         ? "ring-2 ring-amber-400/60"
@@ -516,11 +624,38 @@ export function QuickWindow() {
                   />
                 </label>
                 <label className="space-y-1 text-[11px] text-muted">
-                  优先级
+                  时间 <span className="text-muted/70">⌘3</span>
+                  <Input
+                    ref={dueTimeRef}
+                    type="time"
+                    value={dueTime}
+                    onChange={(e) => setDueTime(e.target.value)}
+                    onKeyDown={handleCaptureFieldShortcut}
+                    className={
+                      ambiguous.includes("dueTime")
+                        ? "ring-2 ring-amber-400/60"
+                        : undefined
+                    }
+                  />
+                </label>
+                <label className="col-span-2 space-y-1 text-[11px] text-muted">
+                  标签 <span className="text-muted/70">⌘4 · #工作</span>
+                  <Input
+                    ref={tagsRef}
+                    value={tagText}
+                    onChange={(e) => setTagText(e.target.value)}
+                    onKeyDown={handleCaptureFieldShortcut}
+                    placeholder="逗号分隔，或输入 #标签"
+                  />
+                </label>
+                <label className="col-span-2 space-y-1 text-[11px] text-muted">
+                  优先级 <span className="text-muted/70">⌘5 · p1</span>
                   <select
+                    ref={priorityRef}
                     className="h-8 w-full rounded-[var(--radius-control)] border border-border bg-surface-raised px-2 text-[13px] text-foreground"
                     value={priority}
                     onChange={(e) => setPriority(e.target.value as TaskPriority)}
+                    onKeyDown={handleCaptureFieldShortcut}
                   >
                     <option value="none">无</option>
                     <option value="low">低</option>
@@ -530,10 +665,10 @@ export function QuickWindow() {
                 </label>
               </div>
             ) : null}
-            {captureType === "task" && parsedHint ? (
+            {(captureType === "task" || captureType === "reminder") && parsedHint ? (
               <p className="text-[11px] text-muted">{parsedHint}</p>
             ) : null}
-            {captureType === "task" ? (
+            {captureType === "task" || captureType === "reminder" ? (
               <RecurrencePicker
                 value={recurrence}
                 onChange={setRecurrence}
@@ -548,13 +683,13 @@ export function QuickWindow() {
                     type="datetime-local"
                     value={fireAt}
                     onChange={(e) => setFireAt(e.target.value)}
+                    className={
+                      ambiguous.includes("dueDate") || ambiguous.includes("dueTime")
+                        ? "ring-2 ring-amber-400/60"
+                        : undefined
+                    }
                   />
                 </label>
-                <RecurrencePicker
-                  value={recurrence}
-                  onChange={setRecurrence}
-                  compact
-                />
               </div>
             ) : null}
             {captureType === "memory" ? (
@@ -568,7 +703,12 @@ export function QuickWindow() {
             ) : null}
             {error ? <p className="text-[12px] text-danger">{error}</p> : null}
             <div className="mt-auto flex items-center justify-between text-[11px] text-muted">
-              <span>⌘/Ctrl + Enter 创建 · Esc 取消</span>
+              <span>
+                {captureType === "task"
+                  ? "⌘1–5 字段 · ⌘Enter 创建"
+                  : "⌘/Ctrl + Enter 创建"}
+                {" · Esc 取消"}
+              </span>
               <Button
                 size="sm"
                 disabled={
@@ -631,44 +771,32 @@ export function QuickWindow() {
                 <div className="p-4 text-center text-[12px] text-muted">无结果</div>
               ) : (
                 <ul>
-                  {paletteItems.map((item, index) => (
-                    <li
-                      key={
-                        item.kind === "command"
-                          ? item.id
-                          : `${item.hit.entityType}-${item.hit.entityId}`
-                      }
-                    >
-                      <button
-                        type="button"
+                  {commandPaletteItems.length > 0 ? (
+                    <>
+                      <li className="sticky top-0 z-[1] bg-surface px-3 py-1.5 text-[10px] font-medium uppercase tracking-wide text-muted">
+                        命令
+                      </li>
+                      {commandPaletteItems.map((item) =>
+                        renderPaletteRow(item, paletteItems.indexOf(item)),
+                      )}
+                    </>
+                  ) : null}
+                  {hitPaletteItems.length > 0 ? (
+                    <>
+                      <li
                         className={cn(
-                          "flex w-full flex-col gap-0.5 border-b border-border px-3 py-2 text-left hover:bg-row-hover",
-                          index === selectedIndex && "bg-row-active",
+                          "sticky top-0 z-[1] bg-surface px-3 py-1.5 text-[10px] font-medium uppercase tracking-wide text-muted",
+                          commandPaletteItems.length > 0 &&
+                            "border-t border-border",
                         )}
-                        onClick={() => void runPaletteItem(item)}
-                        onMouseEnter={() => setSelectedIndex(index)}
                       >
-                        <div className="flex items-center gap-2 text-[13px]">
-                          <span className="rounded bg-row-hover px-1.5 text-[10px] text-muted">
-                            {item.kind === "command"
-                              ? "命令"
-                              : typeLabel[item.hit.entityType]}
-                          </span>
-                          <span className="truncate font-medium">
-                            {item.kind === "command" ? item.label : item.hit.title}
-                          </span>
-                        </div>
-                        {item.kind === "hit" && item.hit.snippet ? (
-                          <div className="truncate text-[11px] text-muted">
-                            {item.hit.snippet.includes("[来自图片识别]")
-                              ? "来自图片识别 · "
-                              : ""}
-                            {item.hit.snippet.replace(/^\[来自图片识别\]\s*/u, "")}
-                          </div>
-                        ) : null}
-                      </button>
-                    </li>
-                  ))}
+                        内容
+                      </li>
+                      {hitPaletteItems.map((item) =>
+                        renderPaletteRow(item, paletteItems.indexOf(item)),
+                      )}
+                    </>
+                  ) : null}
                 </ul>
               )}
             </div>

@@ -1,4 +1,4 @@
-import { useEffect } from "react";
+import { useEffect, useState } from "react";
 import { BrowserRouter, Navigate, Route, Routes, useNavigate } from "react-router-dom";
 import { listen } from "@tauri-apps/api/event";
 import { getCurrentWindow } from "@tauri-apps/api/window";
@@ -9,8 +9,15 @@ import { TasksPage } from "@/features/tasks/TasksPage";
 import { MemoryPage } from "@/features/memory/MemoryPage";
 import { ClipboardPage } from "@/features/clipboard/ClipboardPage";
 import { SettingsPage } from "@/features/settings/SettingsPage";
+import { WeeklyReviewPage } from "@/features/weekly-review/WeeklyReviewPage";
+import { HealthDashboardPage } from "@/features/health/HealthDashboardPage";
 import { useMenuAcceleratorFallback } from "@/features/settings/useMenuAcceleratorFallback";
 import { QuickWindow } from "@/features/search/QuickWindow";
+import { TrayTodayPanel } from "@/features/tray-today/TrayTodayPanel";
+import {
+  UrlSchemeCreateDialog,
+  type UrlSchemePendingCreate,
+} from "@/features/url-scheme/UrlSchemeCreateDialog";
 
 function MainNavigateListener() {
   const navigate = useNavigate();
@@ -28,10 +35,31 @@ function MainNavigateListener() {
   return null;
 }
 
+function UrlSchemeListener() {
+  const [pending, setPending] = useState<UrlSchemePendingCreate | null>(null);
+
+  useEffect(() => {
+    let unlisten: (() => void) | undefined;
+    void listen<UrlSchemePendingCreate>("url-scheme://pending-create", (event) => {
+      if (event.payload?.action === "createPreview") {
+        setPending(event.payload);
+      }
+    }).then((fn) => {
+      unlisten = fn;
+    });
+    return () => unlisten?.();
+  }, []);
+
+  return (
+    <UrlSchemeCreateDialog pending={pending} onClose={() => setPending(null)} />
+  );
+}
+
 function MainRoutes() {
   return (
     <BrowserRouter>
       <MainNavigateListener />
+      <UrlSchemeListener />
       <MainMenuAcceleratorFallback />
       <Routes>
         <Route element={<MainShell />}>
@@ -42,6 +70,8 @@ function MainRoutes() {
           <Route path="/tasks/:listId" element={<TasksPage />} />
           <Route path="/memory" element={<MemoryPage />} />
           <Route path="/clipboard" element={<ClipboardPage />} />
+          <Route path="/weekly-review" element={<WeeklyReviewPage />} />
+          <Route path="/health" element={<HealthDashboardPage />} />
           <Route path="/settings/*" element={<SettingsPage />} />
         </Route>
       </Routes>
@@ -63,6 +93,9 @@ export function AppRouter() {
   }
   if (label === "quick") {
     return <QuickWindow />;
+  }
+  if (label === "tray-today") {
+    return <TrayTodayPanel />;
   }
   return <MainRoutes />;
 }

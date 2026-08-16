@@ -14,6 +14,7 @@ export type ShortcutSettings = {
   search: string;
   clipboard: string;
   focusMain: string;
+  screenshotRegion: string;
 };
 
 export type AppSettings = {
@@ -24,10 +25,13 @@ export type AppSettings = {
   clipboardRetentionDays: number;
   clipboardMaxItems: number;
   clipboardExcludedApps: string[];
+  clipboardSmartActionsEnabled: boolean;
+  todaySmartSortEnabled: boolean;
   autoBackupOnLaunch: boolean;
   autoCheckUpdates: boolean;
   backupRetentionCount: number;
   onboardingCompleted: boolean;
+  lastFocusCarryDismissedDate?: string | null;
 };
 
 export type DbHealth = {
@@ -124,6 +128,8 @@ export type Tag = {
   revision: number;
 };
 
+export type TaskWorkflowState = "active" | "waiting";
+
 export type Task = {
   id: string;
   title: string;
@@ -140,6 +146,10 @@ export type Task = {
   seriesId: string | null;
   tagIds: string[];
   tagNames: string[];
+  workflowState: TaskWorkflowState;
+  availableAt: string | null;
+  waitingFor: string | null;
+  followUpDate: string | null;
   createdAt: string;
   updatedAt: string;
   revision: number;
@@ -178,6 +188,9 @@ export type TaskQuery = {
   dueNull?: boolean;
   completedSince?: string;
   search?: string;
+  workflowState?: TaskWorkflowState;
+  deferredOnly?: boolean;
+  waitingFollowUpDue?: boolean;
   limit?: number;
   offset?: number;
 };
@@ -252,8 +265,174 @@ export type TodayTasks = {
   overdue: Task[];
   dueToday: Task[];
   completedToday: Task[];
+  focus: Task[];
+  waitingFollowUp: Task[];
+  focusCarrySuggestions: Task[];
   remindersToday: TodayReminderItem[];
   today: string;
+};
+
+export type TodaySortSuggestion = {
+  taskId: string;
+  rank: number;
+  reason: string;
+};
+
+export type TodaySortSuggestions = {
+  enabled: boolean;
+  suggestions: TodaySortSuggestion[];
+};
+
+export type FocusOutcome = "inProgress" | "completed" | "keptTodo" | "abandoned";
+
+export type FocusSession = {
+  id: string;
+  taskId: string;
+  startedAt: string;
+  endedAt: string | null;
+  plannedMinutes: number | null;
+  outcome: FocusOutcome;
+  progressNote: string | null;
+  createdAt: string;
+  updatedAt: string;
+};
+
+export type DailyWrapRun = {
+  id: string;
+  wrapDate: string;
+  startedAt: string;
+  completedAt: string | null;
+  stepsCompleted: number;
+  summary: Record<string, unknown> | null;
+  createdAt: string;
+};
+
+export type DailyWrapSnapshot = {
+  wrapDate: string;
+  unfinishedFocus: Task[];
+  tomorrowDue: Task[];
+  inboxUnprocessed: Task[];
+  completedTodayCount: number;
+  remindersTodayCount: number;
+};
+
+export type DailyWrapCompleteInput = {
+  stepsCompleted: number;
+  summary?: Record<string, unknown> | null;
+};
+
+export type ReviewSession = {
+  id: string;
+  reviewType: "weekly";
+  startedAt: string;
+  completedAt: string | null;
+  summary: Record<string, unknown> | null;
+  createdAt: string;
+};
+
+export type WeeklyReviewSnapshot = {
+  inboxUnprocessed: Task[];
+  inboxCount: number;
+  overdue: Task[];
+  overdueCount: number;
+  waitingFollowUp: Task[];
+  waitingFollowUpCount: number;
+  staleActive: Task[];
+  staleActiveCount: number;
+  completedLast7Days: Task[];
+  completedLast7DaysCount: number;
+  upcomingRecurringReminders: Reminder[];
+  upcomingRecurringCount: number;
+  largeClipboardItems: ClipboardItem[];
+  largeClipboardCount: number;
+};
+
+export type ReviewCompleteInput = {
+  summary?: Record<string, unknown> | null;
+};
+
+export type HealthBackupSummary = {
+  directory: string;
+  count: number;
+  latestCreatedAt: string | null;
+  lastError: string | null;
+};
+
+export type StorageBreakdown = {
+  databaseBytes: number;
+  walBytes: number;
+  assetsBytes: number;
+  thumbBytes: number;
+  assetsRoot: string;
+  note: string;
+};
+
+export type StorageGcPreview = {
+  candidateCount: number;
+  candidateBytes: number;
+  retentionDays: number;
+  note: string;
+};
+
+export type AssetsGcSummary = {
+  removed: number;
+  freedBytes: number;
+};
+
+export type FileReference = {
+  id: string;
+  displayName: string;
+  pathHint: string;
+  mimeType: string | null;
+  byteSize: number | null;
+  accessible: boolean;
+  createdAt: string;
+  updatedAt: string;
+  revision: number;
+};
+
+export type LinkedFileReference = {
+  linkId: string;
+  file: FileReference;
+};
+
+export type ReminderOutcomeStats = {
+  onTime: number;
+  snoozed: number;
+  missed: number;
+  pendingOverdue: number;
+};
+
+export type DailyCompletionCount = {
+  date: string;
+  count: number;
+};
+
+export type TaskHealthStats = {
+  inboxCount: number;
+  inboxOldestDays: number | null;
+  staleActiveCount: number;
+  completionTrend: DailyCompletionCount[];
+};
+
+export type ClipboardHealthStats = {
+  totalCount: number;
+  favoriteCount: number;
+  maxItems: number;
+  retentionDays: number;
+  remainingSlots: number;
+};
+
+export type HealthDashboardSnapshot = {
+  backup: HealthBackupSummary;
+  backupTotalBytes: number;
+  storage: StorageBreakdown;
+  storageGc: StorageGcPreview;
+  reminders7d: ReminderOutcomeStats;
+  reminders30d: ReminderOutcomeStats;
+  tasks: TaskHealthStats;
+  clipboard: ClipboardHealthStats;
+  generatedAt: string;
 };
 
 export type CreateReminderInput = {
@@ -291,6 +470,7 @@ export type Memory = {
   archived: boolean;
   quickInsert: boolean;
   triggerWord: string | null;
+  mentionUseCount: number;
   tagIds: string[];
   tagNames: string[];
   createdAt: string;
@@ -328,13 +508,54 @@ export type MemoryQuery = {
   offset?: number;
 };
 
+export type MemorySummary = {
+  id: string;
+  title: string;
+};
+
+export type WikilinkPendingReason = "missing" | "ambiguous";
+
+export type WikilinkPending = {
+  title: string;
+  reason: WikilinkPendingReason;
+  candidates: MemorySummary[];
+};
+
+export type WikilinkResolutionAction = "link" | "create" | "skip";
+
+export type WikilinkResolution = {
+  title: string;
+  action: WikilinkResolutionAction;
+  targetId?: string | null;
+};
+
+export type WikilinkSyncResult = {
+  memory: Memory;
+  linkedIds: string[];
+  pending: WikilinkPending[];
+};
+
+export type MemoryBacklink = {
+  memoryId: string;
+  title: string;
+};
+
+export type RelatedMemoryHit = {
+  memoryId: string;
+  title: string;
+  score: number;
+  reasons: string[];
+};
+
 export type SmartListKind =
   | "tomorrow"
   | "next7Days"
   | "overdue"
   | "highPriority"
   | "noDue"
-  | "recentCompleted";
+  | "recentCompleted"
+  | "deferred"
+  | "waitingFollowUp";
 
 export type ParsedCapture = {
   title: string;
@@ -343,6 +564,7 @@ export type ParsedCapture = {
   priority: TaskPriority;
   recurrence: RecurrenceRule | null;
   ambiguousFields: string[];
+  tagNames: string[];
   raw: string;
 };
 
@@ -398,9 +620,19 @@ export type SearchResults = {
 
 export type ClipboardKind = "text" | "image";
 
+export type ClipboardKindHint =
+  | "plain"
+  | "url"
+  | "email"
+  | "phone"
+  | "date"
+  | "code"
+  | "error";
+
 export type ClipboardItem = {
   id: string;
   kind: ClipboardKind;
+  kindHint: ClipboardKindHint;
   content: string;
   contentHash: string;
   assetId: string | null;
@@ -423,9 +655,32 @@ export type ClipboardQuery = {
   limit?: number;
   offset?: number;
   kind?: ClipboardKind;
+  kindHint?: ClipboardKindHint;
   sourceApp?: string;
   dateFrom?: string;
   dateTo?: string;
+};
+
+export type ClipboardTaskDraftInput = {
+  title?: string | null;
+  notes?: string | null;
+  dueDate?: string | null;
+  dueTime?: string | null;
+  priority?: TaskPriority | null;
+};
+
+export type SimilarTaskHit = {
+  taskId: string;
+  title: string;
+  score: number;
+};
+
+export type ClipboardSmartContext = {
+  kindHint: ClipboardKindHint;
+  taskDraft: ParsedCapture | null;
+  similarTasks: SimilarTaskHit[];
+  linkedTaskId: string | null;
+  linkedMemoryId: string | null;
 };
 
 export type ConvertMemoryToTaskResult = {
@@ -499,6 +754,10 @@ export const ipc = {
   taskQuery: (query: TaskQuery = {}) =>
     invoke<PagedResult<Task>>("task_query", { query }),
   taskToday: () => invoke<TodayTasks>("task_today"),
+  todaySortSuggestions: () =>
+    invoke<TodaySortSuggestions>("today_sort_suggestions"),
+  todaySetSmartSortEnabled: (enabled: boolean) =>
+    invoke<AppSettings>("today_set_smart_sort_enabled", { enabled }),
   taskComplete: (id: string) => invoke<Task>("task_complete", { id }),
   taskUncomplete: (id: string) => invoke<Task>("task_uncomplete", { id }),
   taskArchive: (id: string) => invoke<Task>("task_archive", { id }),
@@ -513,6 +772,66 @@ export const ipc = {
     invoke<PagedResult<Task>>("task_smart_list", { kind, limit, offset }),
   taskPostpone: (id: string, days = 1) =>
     invoke<Task>("task_postpone", { id, days }),
+  taskSetDefer: (id: string, availableAt: string | null) =>
+    invoke<Task>("task_set_defer", { id, availableAt }),
+  taskSetWaiting: (
+    id: string,
+    waitingFor: string | null,
+    followUpDate: string | null,
+  ) => invoke<Task>("task_set_waiting", { id, waitingFor, followUpDate }),
+  taskClearWaiting: (id: string) => invoke<Task>("task_clear_waiting", { id }),
+  dailyFocusAdd: (taskId: string, focusDate?: string | null) =>
+    invoke<Task>("daily_focus_add", { taskId, focusDate }),
+  dailyFocusRemove: (taskId: string, focusDate?: string | null) =>
+    invoke<Task>("daily_focus_remove", { taskId, focusDate }),
+  dailyFocusReorder: (taskIds: string[], focusDate?: string | null) =>
+    invoke<void>("daily_focus_reorder", { taskIds, focusDate }),
+  dailyFocusCarry: (fromDate: string, toDate: string) =>
+    invoke<Task[]>("daily_focus_carry", { fromDate, toDate }),
+  focusStart: (taskId: string, plannedMinutes?: number | null) =>
+    invoke<FocusSession>("focus_start", { taskId, plannedMinutes }),
+  focusEnd: (
+    sessionId: string,
+    outcome: Exclude<FocusOutcome, "inProgress">,
+    progressNote?: string | null,
+  ) => invoke<FocusSession>("focus_end", { sessionId, outcome, progressNote }),
+  focusActive: () => invoke<FocusSession | null>("focus_active"),
+  focusList: (taskId?: string, limit?: number) =>
+    invoke<FocusSession[]>("focus_list", { taskId, limit }),
+  dailyWrapSnapshot: (wrapDate?: string | null) =>
+    invoke<DailyWrapSnapshot>("daily_wrap_snapshot", { wrapDate }),
+  dailyWrapStart: (wrapDate?: string | null) =>
+    invoke<DailyWrapRun>("daily_wrap_start", { wrapDate }),
+  dailyWrapComplete: (runId: string, input: DailyWrapCompleteInput) =>
+    invoke<DailyWrapRun>("daily_wrap_complete", { runId, input }),
+  dailyWrapCompletedForDate: (wrapDate?: string | null) =>
+    invoke<DailyWrapRun | null>("daily_wrap_completed_for_date", { wrapDate }),
+  weeklyReviewSnapshot: () =>
+    invoke<WeeklyReviewSnapshot>("weekly_review_snapshot"),
+  weeklyReviewStart: () => invoke<ReviewSession>("weekly_review_start"),
+  weeklyReviewComplete: (sessionId: string, input: ReviewCompleteInput) =>
+    invoke<ReviewSession>("weekly_review_complete", { sessionId, input }),
+  weeklyReviewLastCompleted: () =>
+    invoke<ReviewSession | null>("weekly_review_last_completed"),
+  healthDashboardSnapshot: () =>
+    invoke<HealthDashboardSnapshot>("health_dashboard_snapshot"),
+  storageRunAssetsGc: () => invoke<AssetsGcSummary>("storage_run_assets_gc"),
+  captureRegionScreenshot: () =>
+    invoke<ClipboardItem | null>("capture_region_screenshot"),
+  fileRefPickAndAttach: (sourceType: "task" | "memory", sourceId: string) =>
+    invoke<LinkedFileReference | null>("file_ref_pick_and_attach", {
+      sourceType,
+      sourceId,
+    }),
+  fileRefListForEntity: (sourceType: "task" | "memory", sourceId: string) =>
+    invoke<LinkedFileReference[]>("file_ref_list_for_entity", {
+      sourceType,
+      sourceId,
+    }),
+  fileRefOpen: (id: string) => invoke<void>("file_ref_open", { id }),
+  fileRefReveal: (id: string) => invoke<void>("file_ref_reveal", { id }),
+  fileRefRelink: (id: string) =>
+    invoke<FileReference | null>("file_ref_relink", { id }),
   nlParseCapture: (text: string) =>
     invoke<ParsedCapture>("nl_parse_capture", { text }),
   templateList: () => invoke<ItemTemplate[]>("template_list"),
@@ -554,6 +873,16 @@ export const ipc = {
   memoryDelete: (id: string) => invoke<void>("memory_delete", { id }),
   memoryConvertToTask: (id: string) =>
     invoke<ConvertMemoryToTaskResult>("memory_convert_to_task", { id }),
+  memoryWikilinkPending: (id: string) =>
+    invoke<WikilinkPending[]>("memory_wikilink_pending", { id }),
+  memoryResolveWikilinks: (id: string, resolutions: WikilinkResolution[]) =>
+    invoke<WikilinkSyncResult>("memory_resolve_wikilinks", { id, resolutions }),
+  memoryBacklinks: (id: string) =>
+    invoke<MemoryBacklink[]>("memory_backlinks", { id }),
+  memoryRelated: (id: string) =>
+    invoke<RelatedMemoryHit[]>("memory_related", { id }),
+  memoryLinkMention: (sourceId: string, targetId: string) =>
+    invoke<void>("memory_link_mention", { sourceId, targetId }),
   entityLinkCreate: (input: LinkInput) =>
     invoke<EntityLink>("entity_link_create", { input }),
   entityLinkRemove: (id: string) =>
@@ -578,12 +907,18 @@ export const ipc = {
   clipboardDelete: (id: string) => invoke<void>("clipboard_delete", { id }),
   clipboardClearNonFavorites: () =>
     invoke<number>("clipboard_clear_non_favorites"),
-  clipboardConvertToTask: (id: string) =>
-    invoke<string>("clipboard_convert_to_task", { id }),
+  clipboardConvertToTask: (id: string, draft?: ClipboardTaskDraftInput | null) =>
+    invoke<string>("clipboard_convert_to_task", { id, draft: draft ?? null }),
   clipboardConvertToMemory: (id: string) =>
     invoke<string>("clipboard_convert_to_memory", { id }),
+  clipboardSmartContext: (id: string) =>
+    invoke<ClipboardSmartContext>("clipboard_smart_context", { id }),
+  clipboardLinkToTask: (clipboardId: string, taskId: string) =>
+    invoke<void>("clipboard_link_to_task", { clipboardId, taskId }),
   clipboardSetCaptureEnabled: (enabled: boolean) =>
     invoke<AppSettings>("clipboard_set_capture_enabled", { enabled }),
+  clipboardSetSmartActionsEnabled: (enabled: boolean) =>
+    invoke<AppSettings>("clipboard_set_smart_actions_enabled", { enabled }),
   backupCreate: () => invoke<BackupInfo>("backup_create"),
   backupList: () => invoke<BackupInfo[]>("backup_list"),
   backupStatus: () => invoke<BackupStatus>("backup_status"),
@@ -595,5 +930,6 @@ export const ipc = {
   windowShowQuick: (mode?: "capture" | "search" | "clip") =>
     invoke<void>("window_show_quick", { mode }),
   windowHideQuick: () => invoke<void>("window_hide_quick"),
+  urlSchemeHandle: (url: string) => invoke<void>("url_scheme_handle", { url }),
   appQuit: () => invoke<void>("app_quit"),
 };

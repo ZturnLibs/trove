@@ -19,6 +19,7 @@ import { BrandLogo } from "@/components/BrandLogo";
 import { AboutDialog } from "@/components/AboutDialog";
 import { RecentActionToast } from "@/components/RecentActionToast";
 import { UpdateProgressBanner, UpdateToast } from "@/components/UpdateToast";
+import { FocusSessionHost } from "@/features/focus/FocusSessionHost";
 import { useAppUpdater } from "@/stores/app-updater";
 
 const navItems = [
@@ -181,6 +182,7 @@ export function MainShell() {
         <Outlet />
       </main>
       <OnboardingOverlay />
+      <FocusSessionHost />
       <AboutDialog open={aboutOpen} onClose={() => setAboutOpen(false)} />
       <UpdateToast />
       <RecentActionToast />

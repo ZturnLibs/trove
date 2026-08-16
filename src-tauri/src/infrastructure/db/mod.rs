@@ -19,6 +19,13 @@ const MIGRATIONS: &[(i64, &str)] = &[
     (7, include_str!("../../../migrations/0007_assets_ocr.sql")),
     (8, include_str!("../../../migrations/0008_entity_links.sql")),
     (9, include_str!("../../../migrations/0009_saved_views.sql")),
+    (10, include_str!("../../../migrations/0010_gtd_workflow.sql")),
+    (11, include_str!("../../../migrations/0011_focus_sessions.sql")),
+    (12, include_str!("../../../migrations/0012_weekly_review.sql")),
+    (13, include_str!("../../../migrations/0013_clipboard_kind_hint.sql")),
+    (14, include_str!("../../../migrations/0014_memory_mention.sql")),
+    (15, include_str!("../../../migrations/0015_task_defer_events.sql")),
+    (16, include_str!("../../../migrations/0016_file_references.sql")),
 ];
 
 #[derive(Debug, Error)]
@@ -189,7 +196,7 @@ mod tests {
         let db_path = dir.path().join("workbench.db");
         let db = Database::open(&db_path).unwrap();
         let health = db.health_check().unwrap();
-        assert_eq!(health.schema_version, 9);
+        assert_eq!(health.schema_version, 16);
         assert_eq!(health.journal_mode.to_lowercase(), "wal");
         assert!(health.fts5_available);
     }
@@ -201,7 +208,7 @@ mod tests {
         let db = Database::open(&db_path).unwrap();
         db.migrate(None).unwrap();
         db.migrate(None).unwrap();
-        assert_eq!(db.health_check().unwrap().schema_version, 9);
+        assert_eq!(db.health_check().unwrap().schema_version, 16);
     }
 
     #[test]
@@ -232,7 +239,7 @@ mod tests {
 
         let db = Database { path: db_path.clone() };
         db.migrate(Some(&backup_dir)).unwrap();
-        assert_eq!(db.health_check().unwrap().schema_version, 9);
+        assert_eq!(db.health_check().unwrap().schema_version, 16);
 
         let backups: Vec<_> = std::fs::read_dir(&backup_dir)
             .unwrap()

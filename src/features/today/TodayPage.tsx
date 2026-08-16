@@ -1,4 +1,4 @@
-import { useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   DndContext,
   DragOverlay,
@@ -14,8 +14,11 @@ import {
   verticalListSortingStrategy,
 } from "@dnd-kit/sortable";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import { listen } from "@tauri-apps/api/event";
+import { useNavigate } from "react-router-dom";
 import { Clock } from "lucide-react";
 import { RecurrencePicker } from "@/design-system/patterns/RecurrencePicker";
+import { FocusDropZone } from "@/design-system/patterns/FocusDropZone";
 import { TaskDetailPanel } from "@/design-system/patterns/TaskDetailPanel";
 import { SortableTaskRow, TaskRow } from "@/design-system/patterns/TaskRow";
 import { EmptyState } from "@/components/PageScaffold";
@@ -41,7 +44,26 @@ import {
 import { useDomainInvalidation } from "@/features/tasks/useDomainInvalidation";
 import { useTaskRename } from "@/features/tasks/useTaskRename";
 import { useRecentActions } from "@/stores/recent-actions";
+import { useFocusSession } from "@/stores/focus-session";
+import { DailyWrapWizard } from "@/features/daily-wrap/DailyWrapWizard";
+import { DailyWrapSummaryDialog } from "@/features/daily-wrap/DailyWrapSummaryDialog";
 import { cn } from "@/lib/cn";
+import { FOCUS_MANY_COACH_KEY } from "@/lib/focus";
+import { addDays, localTodayString } from "@/lib/waiting";
+
+type TodayContainerId = "focus" | "due-today";
+
+function findTodayContainer(
+  id: string,
+  focus: Task[],
+  dueToday: Task[],
+): TodayContainerId | null {
+  if (id === "focus" || focus.some((t) => t.id === id)) return "focus";
+  if (id === "due-today" || dueToday.some((t) => t.id === id)) {
+    return "due-today";
+  }
+  return null;
+}
 
 function ReminderRow({
   item,
@@ -308,6 +330,101 @@ function AllReminderRow({
   );
 }
 
+function WaitingFollowUpRow({
+  task,
+  today,
+  selected,
+  onSelect,
+  onClearWaiting,
+  onContinueWaiting,
+  onComplete,
+}: {
+  task: Task;
+  today: string;
+  selected?: boolean;
+  onSelect: () => void;
+  onClearWaiting: () => void;
+  onContinueWaiting: () => void;
+  onComplete: () => void;
+}) {
+  const followLabel =
+    task.followUpDate === today
+      ? "跟进日今天"
+      : task.followUpDate
+        ? `跟进日 ${task.followUpDate}`
+        : null;
+
+  return (
+    <div
+      role="button"
+      tabIndex={0}
+      onClick={onSelect}
+      onKeyDown={(e) => {
+        if (e.key === "Enter" || e.key === " ") {
+          e.preventDefault();
+          onSelect();
+        }
+      }}
+      className={cn(
+        "border-b border-border px-3 py-2 text-[13px] hover:bg-row-hover",
+        selected && "bg-row-active",
+      )}
+    >
+      <div className="flex items-center gap-2">
+        <button
+          type="button"
+          aria-label="完成"
+          className="flex h-4 w-4 shrink-0 items-center justify-center rounded-sm border border-border"
+          onClick={(e) => {
+            e.stopPropagation();
+            onComplete();
+          }}
+        />
+        <div className="min-w-0 flex-1 truncate text-muted">
+          <span>⏸ </span>
+          {task.title}
+        </div>
+      </div>
+      <div className="mt-1 pl-6 text-[11px] text-muted">
+        {task.waitingFor ? `等待：${task.waitingFor}` : "等待中"}
+        {followLabel ? ` · ${followLabel}` : ""}
+      </div>
+      <div className="mt-2 flex flex-wrap gap-1 pl-6">
+        <Button
+          size="sm"
+          variant="ghost"
+          onClick={(e) => {
+            e.stopPropagation();
+            onClearWaiting();
+          }}
+        >
+          结束等待
+        </Button>
+        <Button
+          size="sm"
+          variant="ghost"
+          onClick={(e) => {
+            e.stopPropagation();
+            onContinueWaiting();
+          }}
+        >
+          继续等待
+        </Button>
+        <Button
+          size="sm"
+          variant="secondary"
+          onClick={(e) => {
+            e.stopPropagation();
+            onComplete();
+          }}
+        >
+          完成
+        </Button>
+      </div>
+    </div>
+  );
+}
+
 export function TodayPage() {
   useDomainInvalidation();
   const rename = useTaskRename();
@@ -323,6 +440,43 @@ export function TodayPage() {
   const [showAllReminders, setShowAllReminders] = useState(false);
   const [editingReminder, setEditingReminder] = useState(false);
   const [editingAllId, setEditingAllId] = useState<string | null>(null);
+  const [focusManyDismissed, setFocusManyDismissed] = useState(false);
+  const [wrapOpen, setWrapOpen] = useState(false);
+  const [wrapSummaryOpen, setWrapSummaryOpen] = useState(false);
+  const navigate = useNavigate();
+
+  useEffect(() => {
+    try {
+      setFocusManyDismissed(localStorage.getItem(FOCUS_MANY_COACH_KEY) === "1");
+    } catch {
+      setFocusManyDismissed(false);
+    }
+  }, []);
+
+  useEffect(() => {
+    let unlistenTask: (() => void) | undefined;
+    let unlistenReminder: (() => void) | undefined;
+    void listen<string>("main://select-task", (event) => {
+      if (event.payload) {
+        setSelectedId(event.payload);
+        setSelectedReminderId(null);
+      }
+    }).then((fn) => {
+      unlistenTask = fn;
+    });
+    void listen<string>("main://select-reminder", (event) => {
+      if (event.payload) {
+        setSelectedReminderId(event.payload);
+        setSelectedId(null);
+      }
+    }).then((fn) => {
+      unlistenReminder = fn;
+    });
+    return () => {
+      unlistenTask?.();
+      unlistenReminder?.();
+    };
+  }, []);
 
   const sensors = useSensors(
     useSensor(PointerSensor, {
@@ -330,9 +484,141 @@ export function TodayPage() {
     }),
   );
 
+  const startFocus = useFocusSession((s) => s.start);
+  const focusStarting = useFocusSession((s) => s.starting);
+
   const todayQuery = useQuery({
     queryKey: ["tasks", "today"],
     queryFn: () => ipc.taskToday(),
+  });
+
+  const settingsQuery = useQuery({
+    queryKey: ["settings"],
+    queryFn: () => ipc.settingsGet(),
+  });
+
+  const sortSuggestionsQuery = useQuery({
+    queryKey: ["tasks", "today", "sort-suggestions"],
+    queryFn: () => ipc.todaySortSuggestions(),
+    enabled: settingsQuery.data?.todaySmartSortEnabled !== false,
+  });
+
+  const dueTodayDisplay = useMemo(() => {
+    const tasks = todayQuery.data?.dueToday ?? [];
+    const suggestions = sortSuggestionsQuery.data;
+    if (!suggestions?.enabled || suggestions.suggestions.length === 0) {
+      return tasks;
+    }
+    const rank = new Map(
+      suggestions.suggestions.map((s) => [s.taskId, s.rank]),
+    );
+    return [...tasks].sort(
+      (a, b) => (rank.get(a.id) ?? 999) - (rank.get(b.id) ?? 999),
+    );
+  }, [todayQuery.data?.dueToday, sortSuggestionsQuery.data]);
+
+  const sortReasonById = useMemo(() => {
+    const map = new Map<string, string>();
+    if (!sortSuggestionsQuery.data?.enabled) return map;
+    for (const s of sortSuggestionsQuery.data.suggestions) {
+      map.set(s.taskId, s.reason);
+    }
+    return map;
+  }, [sortSuggestionsQuery.data]);
+
+  const sortOrderDiffers = useMemo(() => {
+    const suggestions = sortSuggestionsQuery.data?.suggestions ?? [];
+    const dueToday = todayQuery.data?.dueToday ?? [];
+    if (suggestions.length < 2 || dueToday.length < 2) return false;
+    return suggestions.some((s, i) => s.taskId !== dueToday[i]?.id);
+  }, [sortSuggestionsQuery.data, todayQuery.data?.dueToday]);
+
+  const completedWrapQuery = useQuery({
+    queryKey: ["daily-wrap", "completed", todayQuery.data?.today],
+    queryFn: () => ipc.dailyWrapCompletedForDate(todayQuery.data?.today),
+    enabled: !!todayQuery.data?.today,
+  });
+
+  const focusAddMutation = useMutation({
+    mutationFn: (taskId: string) => ipc.dailyFocusAdd(taskId),
+    onSuccess: (_data, taskId) => {
+      void queryClient.invalidateQueries({ queryKey: ["tasks"] });
+      useRecentActions.getState().push({
+        label: "加入今日重点",
+        undo: async () => {
+          await ipc.dailyFocusRemove(taskId);
+          void queryClient.invalidateQueries({ queryKey: ["tasks"] });
+        },
+      });
+    },
+  });
+
+  const focusRemoveMutation = useMutation({
+    mutationFn: (taskId: string) => ipc.dailyFocusRemove(taskId),
+    onSuccess: (_data, taskId) => {
+      void queryClient.invalidateQueries({ queryKey: ["tasks"] });
+      useRecentActions.getState().push({
+        label: "移出今日重点",
+        undo: async () => {
+          await ipc.dailyFocusAdd(taskId);
+          void queryClient.invalidateQueries({ queryKey: ["tasks"] });
+        },
+      });
+    },
+  });
+
+  const focusReorderMutation = useMutation({
+    mutationFn: (orderedIds: string[]) => ipc.dailyFocusReorder(orderedIds),
+    onSuccess: () => {
+      void queryClient.invalidateQueries({ queryKey: ["tasks", "today"] });
+    },
+  });
+
+  const carryMutation = useMutation({
+    mutationFn: async () => {
+      const today = todayQuery.data?.today ?? localTodayString();
+      const yesterday = addDays(today, -1);
+      return ipc.dailyFocusCarry(yesterday, today);
+    },
+    onSuccess: () => {
+      void queryClient.invalidateQueries({ queryKey: ["tasks"] });
+    },
+  });
+
+  const dismissCarryMutation = useMutation({
+    mutationFn: async () => {
+      const settings = await ipc.settingsGet();
+      const today = todayQuery.data?.today ?? localTodayString();
+      return ipc.settingsSave({
+        ...settings,
+        lastFocusCarryDismissedDate: today,
+      });
+    },
+    onSuccess: () => {
+      void queryClient.invalidateQueries({ queryKey: ["settings"] });
+    },
+  });
+
+  const reorderMutation = useMutation({
+    mutationFn: (orderedIds: string[]) => ipc.taskReorder(orderedIds),
+    onSuccess: () => {
+      void queryClient.invalidateQueries({ queryKey: ["tasks", "today"] });
+      void queryClient.invalidateQueries({ queryKey: ["tasks"] });
+      void queryClient.invalidateQueries({
+        queryKey: ["tasks", "today", "sort-suggestions"],
+      });
+    },
+  });
+
+  const adoptSortMutation = useMutation({
+    mutationFn: () => ipc.taskReorder(dueTodayDisplay.map((t) => t.id)),
+    onSuccess: () => {
+      void queryClient.invalidateQueries({ queryKey: ["tasks", "today"] });
+      void queryClient.invalidateQueries({ queryKey: ["tasks"] });
+      void queryClient.invalidateQueries({
+        queryKey: ["tasks", "today", "sort-suggestions"],
+      });
+    },
   });
 
   const allRemindersQuery = useQuery({
@@ -341,13 +627,13 @@ export function TodayPage() {
     enabled: showAllReminders,
   });
 
-  const reorderMutation = useMutation({
-    mutationFn: (orderedIds: string[]) => ipc.taskReorder(orderedIds),
-    onSuccess: () => {
-      void queryClient.invalidateQueries({ queryKey: ["tasks", "today"] });
-      void queryClient.invalidateQueries({ queryKey: ["tasks"] });
+  const toggleFocus = useCallback(
+    (taskId: string, inFocus: boolean) => {
+      if (inFocus) focusRemoveMutation.mutate(taskId);
+      else focusAddMutation.mutate(taskId);
     },
-  });
+    [focusAddMutation, focusRemoveMutation],
+  );
 
   const handleTodaySelect = (id: string) => {
     if (Date.now() < suppressClickUntilRef.current) return;
@@ -363,10 +649,58 @@ export function TodayPage() {
     const { active, over } = event;
     setActiveDragId(null);
     suppressClickUntilRef.current = Date.now() + 300;
-    const dueToday = todayQuery.data?.dueToday ?? [];
-    if (!over || active.id === over.id) return;
-    const oldIndex = dueToday.findIndex((t) => t.id === active.id);
-    const newIndex = dueToday.findIndex((t) => t.id === over.id);
+    if (!over) return;
+
+    const focus = todayQuery.data?.focus ?? [];
+    const dueToday = dueTodayDisplay;
+    const activeId = String(active.id);
+    const overId = String(over.id);
+    if (activeId === overId) return;
+
+    const activeContainer = findTodayContainer(activeId, focus, dueToday);
+    let overContainer = findTodayContainer(overId, focus, dueToday);
+    if (!overContainer && (overId === "focus" || overId === "due-today")) {
+      overContainer = overId as TodayContainerId;
+    }
+    if (!activeContainer || !overContainer) return;
+
+    if (activeContainer !== overContainer) {
+      if (overContainer === "focus") {
+        focusAddMutation.mutate(activeId);
+      } else {
+        focusRemoveMutation.mutate(activeId);
+      }
+      return;
+    }
+
+    if (activeContainer === "focus") {
+      const oldIndex = focus.findIndex((t) => t.id === activeId);
+      const newIndex = focus.findIndex((t) => t.id === overId);
+      if (oldIndex < 0 || newIndex < 0) return;
+      const orderedIds = arrayMove(
+        focus.map((t) => t.id),
+        oldIndex,
+        newIndex,
+      );
+      if (orderedIds.join("|") === focus.map((t) => t.id).join("|")) return;
+      queryClient.setQueryData<TodayTasks>(["tasks", "today"], (old) => {
+        if (!old) return old;
+        const order = new Map(orderedIds.map((id, i) => [id, i]));
+        return {
+          ...old,
+          focus: [...old.focus].sort(
+            (a, b) =>
+              (order.get(a.id) ?? Number.MAX_SAFE_INTEGER) -
+              (order.get(b.id) ?? Number.MAX_SAFE_INTEGER),
+          ),
+        };
+      });
+      focusReorderMutation.mutate(orderedIds);
+      return;
+    }
+
+    const oldIndex = dueToday.findIndex((t) => t.id === activeId);
+    const newIndex = dueToday.findIndex((t) => t.id === overId);
     if (oldIndex < 0 || newIndex < 0) return;
     const orderedIds = arrayMove(
       dueToday.map((t) => t.id),
@@ -394,11 +728,78 @@ export function TodayPage() {
     suppressClickUntilRef.current = Date.now() + 300;
   };
 
-  const activeDragTask = useMemo(
-    () =>
-      todayQuery.data?.dueToday.find((t) => t.id === activeDragId) ?? null,
-    [todayQuery.data, activeDragId],
+  const activeDragTask = useMemo(() => {
+    const data = todayQuery.data;
+    if (!data || !activeDragId) return null;
+    return (
+      data.focus.find((t) => t.id === activeDragId) ??
+      data.dueToday.find((t) => t.id === activeDragId) ??
+      null
+    );
+  }, [todayQuery.data, activeDragId]);
+
+  const focusIds = useMemo(
+    () => new Set((todayQuery.data?.focus ?? []).map((t) => t.id)),
+    [todayQuery.data?.focus],
   );
+
+  useEffect(() => {
+    const onKeyDown = (event: KeyboardEvent) => {
+      if (!selectedId || showAllReminders) return;
+      const target = event.target;
+      if (
+        target instanceof HTMLInputElement ||
+        target instanceof HTMLTextAreaElement ||
+        target instanceof HTMLSelectElement
+      ) {
+        return;
+      }
+
+      const data = todayQuery.data;
+      const selectedTask = data
+        ? [
+            ...data.focus,
+            ...data.waitingFollowUp,
+            ...data.overdue,
+            ...data.dueToday,
+            ...data.completedToday,
+          ].find((t) => t.id === selectedId)
+        : null;
+
+      if (event.key === "Enter" && selectedTask?.status === "todo") {
+        if (event.metaKey || event.ctrlKey) {
+          event.preventDefault();
+          void startFocus(selectedId);
+          return;
+        }
+        if (focusIds.has(selectedId)) {
+          event.preventDefault();
+          void startFocus(selectedId);
+          return;
+        }
+      }
+
+      if (event.key !== "f" && event.key !== "F") return;
+      event.preventDefault();
+      const inFocus = focusIds.has(selectedId);
+      if (event.shiftKey) {
+        if (inFocus) toggleFocus(selectedId, true);
+      } else if (inFocus) {
+        toggleFocus(selectedId, true);
+      } else {
+        toggleFocus(selectedId, false);
+      }
+    };
+    window.addEventListener("keydown", onKeyDown);
+    return () => window.removeEventListener("keydown", onKeyDown);
+  }, [
+    selectedId,
+    showAllReminders,
+    focusIds,
+    toggleFocus,
+    todayQuery.data,
+    startFocus,
+  ]);
 
   const createMutation = useMutation({
     mutationFn: () =>
@@ -532,13 +933,61 @@ export function TodayPage() {
     },
   });
 
+  const clearWaitingMutation = useMutation({
+    mutationFn: (task: Task) => ipc.taskClearWaiting(task.id),
+    onSuccess: (_data, task) => {
+      void queryClient.invalidateQueries({ queryKey: ["tasks"] });
+      const prev = {
+        waitingFor: task.waitingFor,
+        followUpDate: task.followUpDate,
+      };
+      useRecentActions.getState().push({
+        label: "结束等待",
+        undo: async () => {
+          await ipc.taskSetWaiting(
+            task.id,
+            prev.waitingFor,
+            prev.followUpDate,
+          );
+          void queryClient.invalidateQueries({ queryKey: ["tasks"] });
+        },
+      });
+    },
+  });
+
+  const continueWaitingMutation = useMutation({
+    mutationFn: (task: Task) => {
+      const next = addDays(localTodayString(), 7);
+      return ipc.taskSetWaiting(task.id, task.waitingFor, next);
+    },
+    onSuccess: (_data, task) => {
+      void queryClient.invalidateQueries({ queryKey: ["tasks"] });
+      const prevDate = task.followUpDate;
+      useRecentActions.getState().push({
+        label: "继续等待（跟进日 +7 天）",
+        undo: async () => {
+          await ipc.taskSetWaiting(
+            task.id,
+            task.waitingFor,
+            prevDate,
+          );
+          void queryClient.invalidateQueries({ queryKey: ["tasks"] });
+        },
+      });
+    },
+  });
+
   const selected = useMemo(() => {
     const data = todayQuery.data;
     if (!data || !selectedId) return null;
     return (
-      [...data.overdue, ...data.dueToday, ...data.completedToday].find(
-        (t) => t.id === selectedId,
-      ) ?? null
+      [
+        ...data.focus,
+        ...data.waitingFollowUp,
+        ...data.overdue,
+        ...data.dueToday,
+        ...data.completedToday,
+      ].find((t) => t.id === selectedId) ?? null
     );
   }, [todayQuery.data, selectedId]);
 
@@ -568,8 +1017,14 @@ export function TodayPage() {
   };
 
   const data = todayQuery.data;
+  const showCarryBanner =
+    !showAllReminders &&
+    (data?.focusCarrySuggestions.length ?? 0) > 0 &&
+    settingsQuery.data?.lastFocusCarryDismissedDate !== data?.today;
   const empty =
     data &&
+    data.focus.length === 0 &&
+    data.waitingFollowUp.length === 0 &&
     data.overdue.length === 0 &&
     data.dueToday.length === 0 &&
     data.completedToday.length === 0 &&
@@ -583,6 +1038,40 @@ export function TodayPage() {
       description={data ? data.today : "加载中…"}
       actions={
         <>
+          {completedWrapQuery.data ? (
+            <Button
+              size="sm"
+              variant="secondary"
+              onClick={() => setWrapSummaryOpen(true)}
+            >
+              今日已收尾 · 查看摘要
+            </Button>
+          ) : (
+            <Button
+              size="sm"
+              variant="secondary"
+              disabled={!data?.today}
+              onClick={() => setWrapOpen(true)}
+            >
+              每日收尾
+            </Button>
+          )}
+          <Button
+            size="sm"
+            variant="secondary"
+            onClick={() => navigate("/weekly-review")}
+          >
+            每周回顾
+          </Button>
+          {selected?.status === "todo" && focusIds.has(selected.id) ? (
+            <Button
+              size="sm"
+              disabled={focusStarting}
+              onClick={() => void startFocus(selected.id)}
+            >
+              专注
+            </Button>
+          ) : null}
           <Button
             size="sm"
             variant={showAllReminders ? "default" : "secondary"}
@@ -667,98 +1156,222 @@ export function TodayPage() {
           />
         ) : (
           <div>
-            <TaskGroup title="逾期" count={data?.overdue.length ?? 0} danger>
-              {data?.overdue.map((task) => (
-                <TaskRow
-                  key={task.id}
-                  task={task}
-                  overdue
-                  selected={selectedId === task.id}
-                  onSelect={() => {
-                    setSelectedId(task.id);
-                    setSelectedReminderId(null);
-                  }}
-                  onToggleComplete={() => toggleMutation.mutate(task)}
-                  onRename={rename}
-                />
-              ))}
-            </TaskGroup>
-            <TaskGroup title="今日提醒" count={data?.remindersToday.length ?? 0}>
-              {data?.remindersToday.map((item) => (
-                <ReminderRow
-                  key={item.occurrence.id}
-                  item={item}
-                  selected={selectedReminderId === item.reminder.id}
-                  onSelect={() => {
-                    setSelectedReminderId(item.reminder.id);
-                    setSelectedId(null);
-                  }}
-                  onComplete={() => reminderComplete.mutate(item.occurrence.id)}
-                  onSnooze={(preset) =>
-                    reminderSnooze.mutate({
-                      occurrenceId: item.occurrence.id,
-                      preset,
-                    })
-                  }
-                />
-              ))}
-            </TaskGroup>
-            <TaskGroup title="今日任务" count={data?.dueToday.length ?? 0}>
-              <DndContext
-                sensors={sensors}
-                collisionDetection={closestCenter}
-                onDragStart={handleDragStart}
-                onDragEnd={handleDragEnd}
-                onDragCancel={handleDragCancel}
+            <DndContext
+              sensors={sensors}
+              collisionDetection={closestCenter}
+              onDragStart={handleDragStart}
+              onDragEnd={handleDragEnd}
+              onDragCancel={handleDragCancel}
+            >
+              {showCarryBanner ? (
+                <div className="mx-3 mt-2 flex flex-wrap items-center gap-2 rounded-[var(--radius-control)] border border-border bg-surface-raised px-3 py-2 text-[12px]">
+                  <span className="text-muted">
+                    {data?.focusCarrySuggestions.length ?? 0}{" "}
+                    项昨日重点未完成，是否加入今日？
+                  </span>
+                  <Button
+                    size="sm"
+                    onClick={() => carryMutation.mutate()}
+                    disabled={carryMutation.isPending}
+                  >
+                    加入
+                  </Button>
+                  <Button
+                    size="sm"
+                    variant="ghost"
+                    onClick={() => dismissCarryMutation.mutate()}
+                    disabled={dismissCarryMutation.isPending}
+                  >
+                    忽略
+                  </Button>
+                </div>
+              ) : null}
+              <TaskGroup
+                title="今日重点"
+                count={data?.focus.length ?? 0}
+                alwaysShow
               >
-                <SortableContext
-                  items={data?.dueToday.map((t) => t.id) ?? []}
-                  strategy={verticalListSortingStrategy}
+                {(data?.focus.length ?? 0) > 5 && !focusManyDismissed ? (
+                  <div className="mx-3 mb-1 rounded-[var(--radius-control)] border border-border bg-surface-raised px-2 py-1.5 text-[11px] text-muted">
+                    已选 {data?.focus.length ?? 0}{" "}
+                    项，聚焦过多可能降低完成率。
+                    <button
+                      type="button"
+                      className="ml-2 text-accent hover:underline"
+                      onClick={() => {
+                        try {
+                          localStorage.setItem(FOCUS_MANY_COACH_KEY, "1");
+                        } catch {
+                          /* ignore */
+                        }
+                        setFocusManyDismissed(true);
+                      }}
+                    >
+                      知道了
+                    </button>
+                  </div>
+                ) : null}
+                <FocusDropZone id="focus">
+                  <SortableContext
+                    items={data?.focus.map((t) => t.id) ?? []}
+                    strategy={verticalListSortingStrategy}
+                  >
+                    {(data?.focus.length ?? 0) === 0 ? (
+                      <div className="px-3 py-2 text-[11px] text-muted">
+                        从下方拖入或按 F 加入今日重点
+                      </div>
+                    ) : (
+                      data?.focus.map((task) => (
+                        <SortableTaskRow
+                          key={task.id}
+                          task={task}
+                          inFocus
+                          selected={selectedId === task.id}
+                          onSelect={() => handleTodaySelect(task.id)}
+                          onToggleComplete={() => toggleMutation.mutate(task)}
+                          onRename={rename}
+                        />
+                      ))
+                    )}
+                  </SortableContext>
+                </FocusDropZone>
+              </TaskGroup>
+              {(data?.waitingFollowUp.length ?? 0) > 0 ? (
+                <TaskGroup
+                  title="等待跟进"
+                  count={data?.waitingFollowUp.length ?? 0}
                 >
-                  {data?.dueToday.map((task) => (
-                    <SortableTaskRow
+                  {data?.waitingFollowUp.map((task) => (
+                    <WaitingFollowUpRow
                       key={task.id}
                       task={task}
+                      today={data?.today ?? localTodayString()}
                       selected={selectedId === task.id}
                       onSelect={() => handleTodaySelect(task.id)}
-                      onToggleComplete={() => toggleMutation.mutate(task)}
-                      onRename={rename}
+                      onClearWaiting={() => clearWaitingMutation.mutate(task)}
+                      onContinueWaiting={() =>
+                        continueWaitingMutation.mutate(task)
+                      }
+                      onComplete={() => toggleMutation.mutate(task)}
                     />
                   ))}
-                </SortableContext>
-                <DragOverlay>
-                  {activeDragTask ? (
-                    <div className="rounded-md bg-surface shadow-lg ring-1 ring-border">
-                      <TaskRow
-                        task={activeDragTask}
-                        onSelect={() => {}}
-                        onToggleComplete={() => {}}
+                </TaskGroup>
+              ) : null}
+              <TaskGroup title="逾期" count={data?.overdue.length ?? 0} danger>
+                {data?.overdue.map((task) => (
+                  <TaskRow
+                    key={task.id}
+                    task={task}
+                    overdue
+                    inFocus={focusIds.has(task.id)}
+                    selected={selectedId === task.id}
+                    onSelect={() => {
+                      setSelectedId(task.id);
+                      setSelectedReminderId(null);
+                    }}
+                    onToggleComplete={() => toggleMutation.mutate(task)}
+                    onRename={rename}
+                  />
+                ))}
+              </TaskGroup>
+              <TaskGroup
+                title="今日提醒"
+                count={data?.remindersToday.length ?? 0}
+              >
+                {data?.remindersToday.map((item) => (
+                  <ReminderRow
+                    key={item.occurrence.id}
+                    item={item}
+                    selected={selectedReminderId === item.reminder.id}
+                    onSelect={() => {
+                      setSelectedReminderId(item.reminder.id);
+                      setSelectedId(null);
+                    }}
+                    onComplete={() =>
+                      reminderComplete.mutate(item.occurrence.id)
+                    }
+                    onSnooze={(preset) =>
+                      reminderSnooze.mutate({
+                        occurrenceId: item.occurrence.id,
+                        preset,
+                      })
+                    }
+                  />
+                ))}
+              </TaskGroup>
+              <TaskGroup title="今日任务" count={data?.dueToday.length ?? 0}>
+                {sortSuggestionsQuery.data?.enabled && sortOrderDiffers ? (
+                  <div className="flex flex-wrap items-center justify-between gap-2 border-b border-border bg-surface px-3 py-2 text-[12px]">
+                    <span className="text-muted">
+                      已按截止、优先级、延期与提醒生成顺序建议（预览中）
+                    </span>
+                    <Button
+                      size="sm"
+                      variant="secondary"
+                      disabled={adoptSortMutation.isPending}
+                      onClick={() => adoptSortMutation.mutate()}
+                    >
+                      采纳建议顺序
+                    </Button>
+                  </div>
+                ) : null}
+                <FocusDropZone id="due-today">
+                  <SortableContext
+                    items={dueTodayDisplay.map((t) => t.id)}
+                    strategy={verticalListSortingStrategy}
+                  >
+                    {dueTodayDisplay.map((task) => (
+                      <SortableTaskRow
+                        key={task.id}
+                        task={task}
+                        inFocus={focusIds.has(task.id)}
+                        selected={selectedId === task.id}
+                        sortHint={
+                          sortSuggestionsQuery.data?.enabled
+                            ? sortReasonById.get(task.id)
+                            : undefined
+                        }
+                        onSelect={() => handleTodaySelect(task.id)}
+                        onToggleComplete={() => toggleMutation.mutate(task)}
+                        onRename={rename}
                       />
-                    </div>
-                  ) : null}
-                </DragOverlay>
-              </DndContext>
-            </TaskGroup>
-            <TaskGroup
-              title="今日已完成"
-              count={data?.completedToday.length ?? 0}
-              collapsed={completedCollapsed}
-              onToggle={() => setCompletedCollapsed((v) => !v)}
-            >
-              {data?.completedToday.map((task) => (
-                <TaskRow
-                  key={task.id}
-                  task={task}
-                  selected={selectedId === task.id}
-                  onSelect={() => {
-                    setSelectedId(task.id);
-                    setSelectedReminderId(null);
-                  }}
-                  onToggleComplete={() => toggleMutation.mutate(task)}
-                  onRename={rename}
-                />
-              ))}
-            </TaskGroup>
+                    ))}
+                  </SortableContext>
+                </FocusDropZone>
+              </TaskGroup>
+              <TaskGroup
+                title="今日已完成"
+                count={data?.completedToday.length ?? 0}
+                collapsed={completedCollapsed}
+                onToggle={() => setCompletedCollapsed((v) => !v)}
+              >
+                {data?.completedToday.map((task) => (
+                  <TaskRow
+                    key={task.id}
+                    task={task}
+                    selected={selectedId === task.id}
+                    onSelect={() => {
+                      setSelectedId(task.id);
+                      setSelectedReminderId(null);
+                    }}
+                    onToggleComplete={() => toggleMutation.mutate(task)}
+                    onRename={rename}
+                  />
+                ))}
+              </TaskGroup>
+              <DragOverlay>
+                {activeDragTask ? (
+                  <div className="rounded-md bg-surface shadow-lg ring-1 ring-border">
+                    <TaskRow
+                      task={activeDragTask}
+                      inFocus={focusIds.has(activeDragTask.id)}
+                      onSelect={() => {}}
+                      onToggleComplete={() => {}}
+                    />
+                  </div>
+                ) : null}
+              </DragOverlay>
+            </DndContext>
           </div>
         )
       }
@@ -883,6 +1496,20 @@ export function TodayPage() {
             task={selected}
             onDeleted={() => setSelectedId(null)}
             focusTitleId={createdId}
+            dailyFocus={
+              selected
+                ? {
+                    inFocus: focusIds.has(selected.id),
+                    onToggle: () =>
+                      toggleFocus(selected.id, focusIds.has(selected.id)),
+                  }
+                : undefined
+            }
+            onStartFocus={
+              selected?.status === "todo"
+                ? () => void startFocus(selected.id)
+                : undefined
+            }
           />
         )
       }
@@ -919,6 +1546,27 @@ export function TodayPage() {
         </div>
       }
     />
+      {data?.today ? (
+        <DailyWrapWizard
+          open={wrapOpen}
+          wrapDate={data.today}
+          onClose={() => setWrapOpen(false)}
+          onNavigate={(path) => navigate(path)}
+          onCompleted={() => {
+            setWrapOpen(false);
+            void completedWrapQuery.refetch();
+          }}
+        />
+      ) : null}
+      <DailyWrapSummaryDialog
+        open={wrapSummaryOpen}
+        run={completedWrapQuery.data}
+        onClose={() => setWrapSummaryOpen(false)}
+        onStartAgain={() => {
+          setWrapSummaryOpen(false);
+          setWrapOpen(true);
+        }}
+      />
     </>
   );
 }

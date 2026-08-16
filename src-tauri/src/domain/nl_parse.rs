@@ -13,6 +13,7 @@ pub struct ParsedCapture {
     pub recurrence: Option<RecurrenceRule>,
     /// Fields inferred with lower confidence; UI should highlight for confirmation.
     pub ambiguous_fields: Vec<String>,
+    pub tag_names: Vec<String>,
     pub raw: String,
 }
 
@@ -37,7 +38,7 @@ pub fn parse_capture(input: &str, timezone: &str) -> ParsedCapture {
         ("p2", TaskPriority::Medium),
         ("p3", TaskPriority::Low),
     ] {
-        if let Some(next) = strip_token(&remaining, pat) {
+        if let Some(next) = strip_token_ci(&remaining, pat) {
             remaining = next;
             priority = pri;
             break;
@@ -102,6 +103,7 @@ pub fn parse_capture(input: &str, timezone: &str) -> ParsedCapture {
         due_date = Some(Local::now().date_naive().format("%Y-%m-%d").to_string());
     }
 
+    let (remaining, tag_names) = take_tags(&remaining);
     let title = cleanup_title(&remaining);
     ParsedCapture {
         title: if title.is_empty() { raw.clone() } else { title },
@@ -110,6 +112,7 @@ pub fn parse_capture(input: &str, timezone: &str) -> ParsedCapture {
         priority,
         recurrence,
         ambiguous_fields,
+        tag_names,
         raw,
     }
 }
@@ -143,6 +146,48 @@ fn strip_token(input: &str, token: &str) -> Option<String> {
         out.push_str(&input[idx + token.len()..]);
         out
     })
+}
+
+fn strip_token_ci(input: &str, token: &str) -> Option<String> {
+    let lower = input.to_lowercase();
+    let needle = token.to_lowercase();
+    lower.find(&needle).map(|idx| {
+        let mut out = String::new();
+        out.push_str(&input[..idx]);
+        out.push_str(&input[idx + token.len()..]);
+        out
+    })
+}
+
+fn is_tag_char(c: char) -> bool {
+    c.is_ascii_alphanumeric()
+        || c == '_'
+        || c == '-'
+        || ('\u{4e00}'..='\u{9fff}').contains(&c)
+}
+
+fn take_tags(input: &str) -> (String, Vec<String>) {
+    let mut tags = Vec::new();
+    let mut remaining = input.to_string();
+    loop {
+        let Some(hash_idx) = remaining.find('#') else {
+            break;
+        };
+        let after = &remaining[hash_idx + 1..];
+        let tag: String = after.chars().take_while(|c| is_tag_char(*c)).collect();
+        if tag.is_empty() {
+            remaining = format!("{}{}", &remaining[..hash_idx], &remaining[hash_idx + 1..]);
+            continue;
+        }
+        tags.push(tag.clone());
+        let consumed = tag.chars().map(|c| c.len_utf8()).sum::<usize>();
+        remaining = format!(
+            "{}{}",
+            &remaining[..hash_idx],
+            &remaining[hash_idx + 1 + consumed..]
+        );
+    }
+    (remaining, tags)
 }
 
 fn take_date(input: &str) -> Option<(String, String, bool)> {
@@ -440,5 +485,28 @@ mod tests {
         let p = parse_capture("明天 15:30 开会", FIXED_TZ);
         assert_eq!(p.due_time.as_deref(), Some("15:30"));
         assert!(p.title.contains("开会"));
+    }
+
+    #[test]
+    fn parses_tag_priority_and_relative_date() {
+        let p = parse_capture("明天下午 #工作 p1 回复客户", FIXED_TZ);
+        assert_eq!(p.priority, TaskPriority::High);
+        assert!(p.tag_names.iter().any(|t| t == "工作"));
+        assert!(p.due_date.is_some());
+        assert!(p.title.contains("回复客户"));
+    }
+
+    #[test]
+    fn weekly_and_monthly_recurrence() {
+        let w = parse_capture("每周五站会", FIXED_TZ);
+        assert_eq!(
+            w.recurrence.as_ref().map(|r| r.frequency),
+            Some(RecurrenceFrequency::Weekly)
+        );
+        let m = parse_capture("每月1号交租", FIXED_TZ);
+        assert_eq!(
+            m.recurrence.as_ref().map(|r| r.frequency),
+            Some(RecurrenceFrequency::Monthly)
+        );
     }
 }

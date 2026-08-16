@@ -84,6 +84,21 @@ impl EntityLinkService {
         Ok(count)
     }
 
+    pub fn purge_incoming_for_target(
+        &self,
+        target_type: &str,
+        target_id: EntityId,
+    ) -> Result<usize, DomainError> {
+        let conn = self.connect()?;
+        let count = conn
+            .execute(
+                "DELETE FROM entity_links WHERE target_type = ?1 AND target_id = ?2",
+                params![target_type, target_id.to_string()],
+            )
+            .map_err(internal)?;
+        Ok(count)
+    }
+
     pub fn list_outgoing(
         &self,
         source_type: &str,

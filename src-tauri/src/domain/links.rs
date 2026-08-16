@@ -10,6 +10,7 @@ pub enum LinkEntityType {
     Memory,
     Clipboard,
     Asset,
+    FileRef,
 }
 
 impl LinkEntityType {
@@ -20,6 +21,7 @@ impl LinkEntityType {
             Self::Memory => "memory",
             Self::Clipboard => "clipboard",
             Self::Asset => "asset",
+            Self::FileRef => "file_ref",
         }
     }
 
@@ -30,6 +32,7 @@ impl LinkEntityType {
             "memory" => Ok(Self::Memory),
             "clipboard" => Ok(Self::Clipboard),
             "asset" => Ok(Self::Asset),
+            "file_ref" => Ok(Self::FileRef),
             _ => Err(DomainError::Validation(format!(
                 "invalid link entity type: {value}"
             ))),
@@ -39,10 +42,14 @@ impl LinkEntityType {
 
 pub const LINK_KIND_ATTACHMENT: &str = "attachment";
 pub const LINK_KIND_CONVERTED_TO: &str = "converted_to";
+pub const LINK_KIND_RELATED: &str = "related";
+pub const LINK_KIND_MENTION: &str = "mention";
 
 pub fn validate_link_kind(value: &str) -> Result<(), DomainError> {
     match value {
-        LINK_KIND_ATTACHMENT | LINK_KIND_CONVERTED_TO => Ok(()),
+        LINK_KIND_ATTACHMENT | LINK_KIND_CONVERTED_TO | LINK_KIND_RELATED | LINK_KIND_MENTION => {
+            Ok(())
+        }
         _ => Err(DomainError::Validation(format!(
             "invalid link kind: {value}"
         ))),
