@@ -2,10 +2,14 @@ use crate::application::links::EntityLinkService;
 use crate::application::search::SearchService;
 use crate::application::tasks::TaskService;
 use crate::domain::{
-    new_id, stamp, ConvertMemoryToTaskResult, CreateMemoryInput, CreateTaskInput, DomainError,
-    EntityId, Memory, MemoryQuery, PagedResult, SearchEntityType, SystemClock, UpdateMemoryInput,
+    new_id, parse_wikilink_titles, stamp, ConvertMemoryToTaskResult, CreateMemoryInput,
+    CreateTaskInput, DomainError, EntityId, Memory, MemoryBacklink, MemoryQuery, MemorySummary,
+    PagedResult, RelatedMemoryHit, SearchEntityType, SystemClock, UpdateMemoryInput,
+    WikilinkPending, WikilinkPendingReason, WikilinkResolution, WikilinkResolutionAction,
+    WikilinkSyncResult, LINK_KIND_MENTION,
 };
 use crate::domain::{page_limit, page_offset};
+use std::collections::{HashMap, HashSet};
 use crate::infrastructure::db::Database;
 use rusqlite::{params, Connection, OptionalExtension};
 
@@ -75,6 +79,7 @@ impl MemoryService {
         self.search
             .upsert_conn(&tx, SearchEntityType::Memory, id, &title, &searchable)?;
         tx.commit().map_err(internal)?;
+        let _ = self.sync_wikilinks(id, None)?;
         self.get(id)
     }
 
@@ -128,7 +133,346 @@ impl MemoryService {
         if input.archived {
             self.search.remove(SearchEntityType::Memory, input.id)?;
         }
+        let _ = self.sync_wikilinks(input.id, None)?;
         self.get(input.id)
+    }
+
+    pub fn sync_wikilinks(
+        &self,
+        memory_id: EntityId,
+        resolutions: Option<Vec<WikilinkResolution>>,
+    ) -> Result<WikilinkSyncResult, DomainError> {
+        let memory = self.get(memory_id)?;
+        let titles = parse_wikilink_titles(&memory.body);
+        let resolution_map = resolutions
+            .unwrap_or_default()
+            .into_iter()
+            .map(|r| (r.title.to_ascii_lowercase(), r))
+            .collect::<HashMap<_, _>>();
+
+        let old_targets: HashSet<EntityId> = self
+            .links
+            .list_outgoing("memory", memory_id)?
+            .into_iter()
+            .filter(|l| l.link_kind == LINK_KIND_MENTION && l.target_type == "memory")
+            .map(|l| l.target_id)
+            .collect();
+
+        let conn = self.connect()?;
+        let mut new_targets = HashSet::new();
+        let mut linked_ids = Vec::new();
+        let mut pending = Vec::new();
+
+        for title in titles {
+            if let Some(resolution) = resolution_map.get(&title.to_ascii_lowercase()) {
+                match resolution.action {
+                    WikilinkResolutionAction::Skip => continue,
+                    WikilinkResolutionAction::Create => {
+                        let created = self.create(CreateMemoryInput {
+                            title: title.clone(),
+                            body: Some(String::new()),
+                            pinned: None,
+                            quick_insert: None,
+                            trigger_word: None,
+                            tag_names: None,
+                        })?;
+                        if created.id != memory_id {
+                            new_targets.insert(created.id);
+                            linked_ids.push(created.id);
+                        }
+                        continue;
+                    }
+                    WikilinkResolutionAction::Link => {
+                        if let Some(id) = resolution.target_id {
+                            if id != memory_id {
+                                new_targets.insert(id);
+                                linked_ids.push(id);
+                            }
+                        }
+                        continue;
+                    }
+                }
+            }
+
+            let candidates = self.find_by_title(&conn, &title, Some(memory_id))?;
+            match candidates.len() {
+                0 => pending.push(WikilinkPending {
+                    title: title.clone(),
+                    reason: WikilinkPendingReason::Missing,
+                    candidates: Vec::new(),
+                }),
+                1 => {
+                    new_targets.insert(candidates[0].id);
+                    linked_ids.push(candidates[0].id);
+                }
+                _ => pending.push(WikilinkPending {
+                    title: title.clone(),
+                    reason: WikilinkPendingReason::Ambiguous,
+                    candidates,
+                }),
+            }
+        }
+
+        for removed in old_targets.difference(&new_targets) {
+            self.bump_mention_use_count(&conn, *removed, -1)?;
+        }
+        for added in new_targets.difference(&old_targets) {
+            self.bump_mention_use_count(&conn, *added, 1)?;
+        }
+
+        conn.execute(
+            "DELETE FROM entity_links
+             WHERE source_type = 'memory' AND source_id = ?1 AND link_kind = ?2",
+            params![memory_id.to_string(), LINK_KIND_MENTION],
+        )
+        .map_err(internal)?;
+
+        for target_id in &new_targets {
+            self.links.link(
+                "memory",
+                memory_id,
+                "memory",
+                *target_id,
+                LINK_KIND_MENTION,
+            )?;
+        }
+
+        Ok(WikilinkSyncResult {
+            memory: self.get(memory_id)?,
+            linked_ids,
+            pending,
+        })
+    }
+
+    pub fn wikilink_pending(&self, memory_id: EntityId) -> Result<Vec<WikilinkPending>, DomainError> {
+        let memory = self.get(memory_id)?;
+        let titles = parse_wikilink_titles(&memory.body);
+        let conn = self.connect()?;
+        let mut pending = Vec::new();
+        for title in titles {
+            let candidates = self.find_by_title(&conn, &title, Some(memory_id))?;
+            match candidates.len() {
+                0 => pending.push(WikilinkPending {
+                    title: title.clone(),
+                    reason: WikilinkPendingReason::Missing,
+                    candidates: Vec::new(),
+                }),
+                1 => {}
+                _ => pending.push(WikilinkPending {
+                    title,
+                    reason: WikilinkPendingReason::Ambiguous,
+                    candidates,
+                }),
+            }
+        }
+        Ok(pending)
+    }
+
+    pub fn resolve_wikilinks(
+        &self,
+        memory_id: EntityId,
+        resolutions: Vec<WikilinkResolution>,
+    ) -> Result<WikilinkSyncResult, DomainError> {
+        self.sync_wikilinks(memory_id, Some(resolutions))
+    }
+
+    pub fn backlinks(&self, memory_id: EntityId) -> Result<Vec<MemoryBacklink>, DomainError> {
+        let _ = self.get(memory_id)?;
+        let links = self.links.list_incoming("memory", memory_id)?;
+        let conn = self.connect()?;
+        let mut out = Vec::new();
+        for link in links {
+            if link.link_kind != LINK_KIND_MENTION || link.source_type != "memory" {
+                continue;
+            }
+            let title: Option<String> = conn
+                .query_row(
+                    "SELECT title FROM memories WHERE id = ?1 AND deleted_at IS NULL",
+                    [link.source_id.to_string()],
+                    |row| row.get(0),
+                )
+                .optional()
+                .map_err(internal)?;
+            if let Some(title) = title {
+                out.push(MemoryBacklink {
+                    memory_id: link.source_id,
+                    title,
+                });
+            }
+        }
+        out.sort_by(|a, b| a.title.cmp(&b.title));
+        Ok(out)
+    }
+
+    pub fn related_memories(&self, memory_id: EntityId) -> Result<Vec<RelatedMemoryHit>, DomainError> {
+        let memory = self.get(memory_id)?;
+        let conn = self.connect()?;
+        let existing_mentions: HashSet<EntityId> = self
+            .links
+            .list_outgoing("memory", memory_id)?
+            .into_iter()
+            .filter(|l| l.link_kind == LINK_KIND_MENTION && l.target_type == "memory")
+            .map(|l| l.target_id)
+            .collect();
+
+        let mut stmt = conn
+            .prepare(
+                "SELECT m.id, m.title, m.body, GROUP_CONCAT(tg.name) AS tags
+                 FROM memories m
+                 LEFT JOIN memory_tags mt ON mt.memory_id = m.id
+                 LEFT JOIN tags tg ON tg.id = mt.tag_id AND tg.deleted_at IS NULL
+                 WHERE m.deleted_at IS NULL AND m.archived = 0 AND m.id != ?1
+                 GROUP BY m.id
+                 ORDER BY m.updated_at DESC
+                 LIMIT 120",
+            )
+            .map_err(internal)?;
+        let rows = stmt
+            .query_map([memory_id.to_string()], |row| {
+                Ok((
+                    row.get::<_, String>(0)?,
+                    row.get::<_, String>(1)?,
+                    row.get::<_, String>(2)?,
+                    row.get::<_, Option<String>>(3)?,
+                ))
+            })
+            .map_err(internal)?;
+
+        let source_tags: HashSet<String> = memory.tag_names.iter().cloned().collect();
+        let source_tokens = tokenize(&format!("{} {}", memory.title, memory.body));
+        let mut hits = Vec::new();
+
+        for row in rows {
+            let (id, title, body, tags_csv) = row.map_err(internal)?;
+            let target_id: EntityId = id.parse().map_err(internal)?;
+            if existing_mentions.contains(&target_id) {
+                continue;
+            }
+            let mut score = 0.0f64;
+            let mut reasons = Vec::new();
+            let target_tags: HashSet<String> = tags_csv
+                .unwrap_or_default()
+                .split(',')
+                .filter(|s| !s.is_empty())
+                .map(str::to_string)
+                .collect();
+            let shared: Vec<String> = source_tags.intersection(&target_tags).cloned().collect();
+            if !shared.is_empty() {
+                score += 0.35 * shared.len() as f64;
+                reasons.push(format!("共同标签：{}", shared.join("、")));
+            }
+            let linked = self
+                .links
+                .list_for_entity("memory", memory_id)?
+                .iter()
+                .any(|l| {
+                    (l.source_id == target_id || l.target_id == target_id)
+                        && l.source_type == "memory"
+                        && l.target_type == "memory"
+                });
+            if linked {
+                score += 0.25;
+                reasons.push("已有其他关联".into());
+            }
+            let kw = jaccard_similarity(&source_tokens, &tokenize(&format!("{title} {body}")));
+            if kw >= 0.2 {
+                score += kw * 0.5;
+                reasons.push("正文关键词重合".into());
+            }
+            if score >= 0.25 {
+                hits.push(RelatedMemoryHit {
+                    memory_id: target_id,
+                    title,
+                    score,
+                    reasons,
+                });
+            }
+        }
+        hits.sort_by(|a, b| {
+            b.score
+                .partial_cmp(&a.score)
+                .unwrap_or(std::cmp::Ordering::Equal)
+        });
+        hits.truncate(5);
+        Ok(hits)
+    }
+
+    pub fn link_mention(&self, source_id: EntityId, target_id: EntityId) -> Result<(), DomainError> {
+        if source_id == target_id {
+            return Err(DomainError::Validation("不能关联自身".into()));
+        }
+        let _ = self.get(source_id)?;
+        let _ = self.get(target_id)?;
+        let existing: HashSet<EntityId> = self
+            .links
+            .list_outgoing("memory", source_id)?
+            .into_iter()
+            .filter(|l| l.link_kind == LINK_KIND_MENTION)
+            .map(|l| l.target_id)
+            .collect();
+        if !existing.contains(&target_id) {
+            let conn = self.connect()?;
+            self.bump_mention_use_count(&conn, target_id, 1)?;
+            self.links.link(
+                "memory",
+                source_id,
+                "memory",
+                target_id,
+                LINK_KIND_MENTION,
+            )?;
+        }
+        Ok(())
+    }
+
+    fn find_by_title(
+        &self,
+        conn: &Connection,
+        title: &str,
+        exclude: Option<EntityId>,
+    ) -> Result<Vec<MemorySummary>, DomainError> {
+        let mut sql = String::from(
+            "SELECT id, title FROM memories
+             WHERE deleted_at IS NULL AND archived = 0 AND title = ?1 COLLATE NOCASE",
+        );
+        let mut params: Vec<Box<dyn rusqlite::types::ToSql>> = vec![Box::new(title.to_string())];
+        if let Some(id) = exclude {
+            sql.push_str(" AND id != ?2");
+            params.push(Box::new(id.to_string()));
+        }
+        sql.push_str(" ORDER BY updated_at DESC LIMIT 5");
+        let params_ref: Vec<&dyn rusqlite::types::ToSql> =
+            params.iter().map(|p| p.as_ref()).collect();
+        let mut stmt = conn.prepare(&sql).map_err(internal)?;
+        let rows = stmt
+            .query_map(params_ref.as_slice(), |row| {
+                Ok(MemorySummary {
+                    id: row.get::<_, String>(0)?.parse().map_err(|e| {
+                        rusqlite::Error::FromSqlConversionFailure(
+                            0,
+                            rusqlite::types::Type::Text,
+                            Box::new(e),
+                        )
+                    })?,
+                    title: row.get(1)?,
+                })
+            })
+            .map_err(internal)?;
+        collect(rows)
+    }
+
+    fn bump_mention_use_count(
+        &self,
+        conn: &Connection,
+        memory_id: EntityId,
+        delta: i64,
+    ) -> Result<(), DomainError> {
+        conn.execute(
+            "UPDATE memories SET mention_use_count = MAX(0, mention_use_count + ?1)
+             WHERE id = ?2 AND deleted_at IS NULL",
+            params![delta, memory_id.to_string()],
+        )
+        .map_err(internal)?;
+        Ok(())
     }
 
     pub fn get(&self, id: EntityId) -> Result<Memory, DomainError> {
@@ -136,7 +480,7 @@ impl MemoryService {
         let mut memory = conn
             .query_row(
                 "SELECT id, title, body, pinned, archived, quick_insert, trigger_word,
-                        created_at, updated_at, revision
+                        mention_use_count, created_at, updated_at, revision
                  FROM memories WHERE id = ?1 AND deleted_at IS NULL",
                 [id.to_string()],
                 map_memory_row,
@@ -186,10 +530,15 @@ impl MemoryService {
             .query_row(&count_sql, params_ref.as_slice(), |row| row.get(0))
             .map_err(internal)?;
 
+        let order = if query.quick_insert_only.unwrap_or(false) {
+            "pinned DESC, mention_use_count DESC, updated_at DESC"
+        } else {
+            "pinned DESC, updated_at DESC"
+        };
         let sql = format!(
             "SELECT id, title, body, pinned, archived, quick_insert, trigger_word,
-                    created_at, updated_at, revision{from_clause}{filters}
-             ORDER BY pinned DESC, updated_at DESC LIMIT ? OFFSET ?"
+                    mention_use_count, created_at, updated_at, revision{from_clause}{filters}
+             ORDER BY {order} LIMIT ? OFFSET ?"
         );
         values.push(Box::new(limit));
         values.push(Box::new(offset));
@@ -208,8 +557,13 @@ impl MemoryService {
 
     pub fn delete(&self, id: EntityId) -> Result<(), DomainError> {
         let _ = self.get(id)?;
-        let now = stamp(&self.clock);
         let conn = self.connect()?;
+        for link in self.links.list_outgoing("memory", id)? {
+            if link.link_kind == LINK_KIND_MENTION && link.target_type == "memory" {
+                self.bump_mention_use_count(&conn, link.target_id, -1)?;
+            }
+        }
+        let now = stamp(&self.clock);
         conn.execute(
             "UPDATE memories SET deleted_at = ?1, updated_at = ?1, revision = revision + 1 WHERE id = ?2",
             params![now, id.to_string()],
@@ -217,6 +571,7 @@ impl MemoryService {
         .map_err(internal)?;
         self.search.remove(SearchEntityType::Memory, id)?;
         let _ = self.links.purge_for_source("memory", id);
+        let _ = self.links.purge_incoming_for_target("memory", id);
         Ok(())
     }
 
@@ -343,12 +698,30 @@ fn map_memory_row(row: &rusqlite::Row<'_>) -> Result<Memory, rusqlite::Error> {
         archived: row.get::<_, i64>(4)? == 1,
         quick_insert: row.get::<_, i64>(5)? == 1,
         trigger_word: row.get(6)?,
+        mention_use_count: row.get(7)?,
         tag_ids: Vec::new(),
         tag_names: Vec::new(),
-        created_at: row.get(7)?,
-        updated_at: row.get(8)?,
-        revision: row.get(9)?,
+        created_at: row.get(8)?,
+        updated_at: row.get(9)?,
+        revision: row.get(10)?,
     })
+}
+
+fn tokenize(text: &str) -> HashSet<String> {
+    text.to_lowercase()
+        .split(|c: char| !c.is_alphanumeric() && c != '_')
+        .filter(|w| w.len() >= 3)
+        .map(str::to_string)
+        .collect()
+}
+
+fn jaccard_similarity(a: &HashSet<String>, b: &HashSet<String>) -> f64 {
+    if a.is_empty() || b.is_empty() {
+        return 0.0;
+    }
+    let inter = a.intersection(b).count();
+    let union = a.union(b).count();
+    inter as f64 / union as f64
 }
 
 fn collect<T, E>(rows: impl IntoIterator<Item = Result<T, E>>) -> Result<Vec<T>, DomainError>
@@ -608,5 +981,44 @@ mod tests {
             .unwrap();
         assert_eq!(page3.items.len(), 1);
         assert!(!page3.has_more);
+    }
+
+    #[test]
+    fn wikilink_creates_mention_and_backlink() {
+        let dir = tempdir().unwrap();
+        let db = Database::open(dir.path().join("m.db")).unwrap();
+        let svc = MemoryService::new(db);
+        let target = svc
+            .create(CreateMemoryInput {
+                title: "Alpha".into(),
+                body: Some("target body".into()),
+                pinned: None,
+                quick_insert: Some(true),
+                trigger_word: Some("alpha".into()),
+                tag_names: None,
+            })
+            .unwrap();
+        let source = svc
+            .create(CreateMemoryInput {
+                title: "Source".into(),
+                body: Some("see [[Alpha]] here".into()),
+                pinned: None,
+                quick_insert: None,
+                trigger_word: None,
+                tag_names: None,
+            })
+            .unwrap();
+
+        let links = svc.links.list_outgoing("memory", source.id).unwrap();
+        assert_eq!(links.len(), 1);
+        assert_eq!(links[0].link_kind, LINK_KIND_MENTION);
+        assert_eq!(links[0].target_id, target.id);
+
+        let updated = svc.get(target.id).unwrap();
+        assert_eq!(updated.mention_use_count, 1);
+
+        let backlinks = svc.backlinks(target.id).unwrap();
+        assert_eq!(backlinks.len(), 1);
+        assert_eq!(backlinks[0].memory_id, source.id);
     }
 }

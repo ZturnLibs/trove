@@ -9,6 +9,7 @@ const LABELS: Record<string, string> = {
   search: "统一搜索",
   clipboard: "剪切板浮层",
   focusMain: "聚焦主窗口",
+  screenshotRegion: "区域截图",
 };
 
 export function ShortcutRow({

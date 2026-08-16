@@ -170,6 +170,23 @@ impl ReminderService {
         collect(rows)
     }
 
+    /// Enabled recurring reminders with next fire within `within_days`.
+    pub fn upcoming_recurring(&self, within_days: i64) -> Result<Vec<Reminder>, DomainError> {
+        let within_days = within_days.clamp(1, 90);
+        let end = chrono::Local::now() + chrono::Duration::days(within_days);
+        Ok(self
+            .list_all()?
+            .into_iter()
+            .filter(|r| {
+                r.enabled
+                    && r.recurrence.is_some()
+                    && chrono::DateTime::parse_from_rfc3339(&r.next_fire_at)
+                        .map(|dt| dt.with_timezone(&chrono::Local) <= end)
+                        .unwrap_or(false)
+            })
+            .collect())
+    }
+
     pub fn delete(&self, id: EntityId) -> Result<(), DomainError> {
         let _ = self.get(id)?;
         let now = stamp(&self.clock);
@@ -255,6 +272,53 @@ impl ReminderService {
             })
             .map_err(internal)?;
         collect(rows)
+    }
+
+    pub fn task_reminder_times_today(
+        &self,
+        task_ids: &[EntityId],
+        today: &str,
+    ) -> Result<std::collections::HashMap<EntityId, String>, DomainError> {
+        if task_ids.is_empty() {
+            return Ok(std::collections::HashMap::new());
+        }
+        let conn = self.connect()?;
+        let placeholders = vec!["?"; task_ids.len()].join(", ");
+        let sql = format!(
+            "SELECT r.task_id, MIN(o.scheduled_at)
+             FROM reminders r
+             JOIN reminder_occurrences o ON o.reminder_id = r.id
+             WHERE r.deleted_at IS NULL
+               AND r.task_id IN ({placeholders})
+               AND o.status IN ('pending', 'scheduled', 'snoozed')
+               AND substr(o.scheduled_at, 1, 10) = ?
+             GROUP BY r.task_id"
+        );
+        let mut stmt = conn.prepare(&sql).map_err(internal)?;
+        let mut params: Vec<Box<dyn rusqlite::types::ToSql>> = Vec::new();
+        for id in task_ids {
+            params.push(Box::new(id.to_string()));
+        }
+        params.push(Box::new(today.to_string()));
+        let params_ref: Vec<&dyn rusqlite::types::ToSql> = params
+            .iter()
+            .map(|p| p.as_ref() as &dyn rusqlite::types::ToSql)
+            .collect();
+        let rows = stmt
+            .query_map(params_ref.as_slice(), |row| {
+                let task_id: Option<String> = row.get(0)?;
+                let at: String = row.get(1)?;
+                Ok((task_id, at))
+            })
+            .map_err(internal)?;
+        let mut map = std::collections::HashMap::new();
+        for row in rows {
+            let (task_id, at) = row.map_err(internal)?;
+            if let Some(id_str) = task_id {
+                map.insert(parse_id(id_str).map_err(internal)?, at);
+            }
+        }
+        Ok(map)
     }
 
     pub fn due_occurrences(

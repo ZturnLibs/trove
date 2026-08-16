@@ -18,6 +18,10 @@ pub struct AppSettings {
     #[serde(default = "crate::domain::default_excluded_apps")]
     pub clipboard_excluded_apps: Vec<String>,
     #[serde(default = "default_true")]
+    pub clipboard_smart_actions_enabled: bool,
+    #[serde(default = "default_true")]
+    pub today_smart_sort_enabled: bool,
+    #[serde(default = "default_true")]
     pub auto_backup_on_launch: bool,
     #[serde(default = "default_true")]
     pub auto_check_updates: bool,
@@ -25,6 +29,8 @@ pub struct AppSettings {
     pub backup_retention_count: u32,
     #[serde(default)]
     pub onboarding_completed: bool,
+    #[serde(default)]
+    pub last_focus_carry_dismissed_date: Option<String>,
 }
 
 fn default_true() -> bool {
@@ -33,6 +39,17 @@ fn default_true() -> bool {
 
 fn default_backup_keep() -> u32 {
     10
+}
+
+fn default_screenshot_region() -> String {
+    #[cfg(target_os = "macos")]
+    {
+        "Command+Shift+6".into()
+    }
+    #[cfg(not(target_os = "macos"))]
+    {
+        "Ctrl+Shift+6".into()
+    }
 }
 
 fn default_max_items() -> u32 {
@@ -58,6 +75,8 @@ pub struct ShortcutSettings {
     pub search: String,
     pub clipboard: String,
     pub focus_main: String,
+    #[serde(default = "default_screenshot_region")]
+    pub screenshot_region: String,
 }
 
 impl Default for AppSettings {
@@ -70,10 +89,13 @@ impl Default for AppSettings {
             clipboard_retention_days: 30,
             clipboard_max_items: 500,
             clipboard_excluded_apps: crate::domain::default_excluded_apps(),
+            clipboard_smart_actions_enabled: true,
+            today_smart_sort_enabled: true,
             auto_backup_on_launch: true,
             auto_check_updates: true,
             backup_retention_count: 10,
             onboarding_completed: false,
+            last_focus_carry_dismissed_date: None,
         }
     }
 }
@@ -87,6 +109,7 @@ impl Default for ShortcutSettings {
                 search: "Command+Shift+F".into(),
                 clipboard: "Command+Shift+V".into(),
                 focus_main: "Command+Shift+A".into(),
+                screenshot_region: default_screenshot_region(),
             }
         }
         #[cfg(not(target_os = "macos"))]
@@ -96,6 +119,7 @@ impl Default for ShortcutSettings {
                 search: "Ctrl+Shift+F".into(),
                 clipboard: "Ctrl+Shift+V".into(),
                 focus_main: "Ctrl+Shift+A".into(),
+                screenshot_region: default_screenshot_region(),
             }
         }
     }

@@ -4,6 +4,7 @@ import { Pin } from "lucide-react";
 import { MarkdownView } from "@/components/MarkdownView";
 import { EmptyState } from "@/components/PageScaffold";
 import { AttachmentsSection } from "@/design-system/patterns/AttachmentsSection";
+import { FileRefsSection } from "@/design-system/patterns/FileRefsSection";
 import { Button } from "@/design-system/primitives/Button";
 import { ConfirmButton } from "@/design-system/patterns/ConfirmButton";
 import { Input } from "@/design-system/primitives/Input";
@@ -12,23 +13,135 @@ import {
   SplitTaskLayout,
 } from "@/features/tasks/TaskLayout";
 import { useDomainInvalidation } from "@/features/tasks/useDomainInvalidation";
-import { ipc, type Memory, type UpdateMemoryInput } from "@/ipc/client";
+import { ipc, type Memory, type UpdateMemoryInput, type WikilinkPending, type WikilinkResolution } from "@/ipc/client";
 import { cn } from "@/lib/cn";
 import {
   PagedListFooter,
   usePagedQuery,
 } from "@/features/shared/usePagedQuery";
 
+function WikilinkResolveDialog({
+  pending,
+  onDone,
+  onCancel,
+}: {
+  pending: WikilinkPending[];
+  onDone: (resolutions: WikilinkResolution[]) => void;
+  onCancel: () => void;
+}) {
+  const [choices, setChoices] = useState<Record<string, WikilinkResolution>>(() => {
+    const init: Record<string, WikilinkResolution> = {};
+    for (const item of pending) {
+      init[item.title] = {
+        title: item.title,
+        action: item.reason === "missing" ? "create" : "skip",
+        targetId: item.candidates[0]?.id ?? null,
+      };
+    }
+    return init;
+  });
+
+  if (pending.length === 0) return null;
+
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4">
+      <div className="max-h-[80vh] w-full max-w-md overflow-auto rounded-[var(--radius-panel)] border border-border bg-surface p-4 shadow-lg">
+        <h3 className="text-[13px] font-semibold">解析双链 [[标题]]</h3>
+        <p className="mt-1 text-[12px] text-muted">
+          部分链接无法自动匹配，请选择创建、关联或跳过。
+        </p>
+        <ul className="mt-3 space-y-3">
+          {pending.map((item) => {
+            const choice = choices[item.title];
+            return (
+              <li
+                key={item.title}
+                className="rounded-[var(--radius-control)] border border-border bg-surface-raised p-2 text-[12px]"
+              >
+                <div className="font-medium">[[{item.title}]]</div>
+                <div className="mt-2 flex flex-wrap gap-2">
+                  {item.reason === "missing" ? (
+                    <label className="flex items-center gap-1">
+                      <input
+                        type="radio"
+                        checked={choice.action === "create"}
+                        onChange={() =>
+                          setChoices((c) => ({
+                            ...c,
+                            [item.title]: { title: item.title, action: "create" },
+                          }))
+                        }
+                      />
+                      新建记忆
+                    </label>
+                  ) : null}
+                  {item.candidates.map((c) => (
+                    <label key={c.id} className="flex items-center gap-1">
+                      <input
+                        type="radio"
+                        checked={
+                          choice.action === "link" && choice.targetId === c.id
+                        }
+                        onChange={() =>
+                          setChoices((cmap) => ({
+                            ...cmap,
+                            [item.title]: {
+                              title: item.title,
+                              action: "link",
+                              targetId: c.id,
+                            },
+                          }))
+                        }
+                      />
+                      关联「{c.title}」
+                    </label>
+                  ))}
+                  <label className="flex items-center gap-1">
+                    <input
+                      type="radio"
+                      checked={choice.action === "skip"}
+                      onChange={() =>
+                        setChoices((c) => ({
+                          ...c,
+                          [item.title]: { title: item.title, action: "skip" },
+                        }))
+                      }
+                    />
+                    跳过
+                  </label>
+                </div>
+              </li>
+            );
+          })}
+        </ul>
+        <div className="mt-4 flex justify-end gap-2">
+          <Button size="sm" variant="secondary" onClick={onCancel}>
+            稍后
+          </Button>
+          <Button
+            size="sm"
+            onClick={() => onDone(Object.values(choices))}
+          >
+            确认
+          </Button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
 function MemoryDetail({
   memory,
   onDeleted,
   onArchived,
+  onNavigateToMemory,
   focusTitleId,
 }: {
   memory: Memory | null;
   onDeleted?: () => void;
   /** 归档/恢复成功后回调（默认视图归档后该项从列表消失，需清空选中避免幽灵项）。 */
   onArchived?: () => void;
+  onNavigateToMemory?: (id: string) => void;
   /** When set to the memory's id (e.g. right after "新建"), focus + select its title. */
   focusTitleId?: string | null;
 }) {
@@ -36,6 +149,7 @@ function MemoryDetail({
   const [draft, setDraft] = useState<UpdateMemoryInput | null>(null);
   const [tagText, setTagText] = useState("");
   const [preview, setPreview] = useState(false);
+  const [wikilinkPending, setWikilinkPending] = useState<WikilinkPending[]>([]);
   const titleRef = useRef<HTMLInputElement>(null);
 
   useEffect(() => {
@@ -68,7 +182,49 @@ function MemoryDetail({
 
   const saveMutation = useMutation({
     mutationFn: (input: UpdateMemoryInput) => ipc.memoryUpdate(input),
-    onSuccess: () => void queryClient.invalidateQueries({ queryKey: ["memories"] }),
+    onSuccess: async () => {
+      void queryClient.invalidateQueries({ queryKey: ["memories"] });
+      if (memory) {
+        const pending = await ipc.memoryWikilinkPending(memory.id);
+        if (pending.length > 0) {
+          setWikilinkPending(pending);
+        }
+        void queryClient.invalidateQueries({ queryKey: ["memory-backlinks", memory.id] });
+        void queryClient.invalidateQueries({ queryKey: ["memory-related", memory.id] });
+      }
+    },
+  });
+
+  const resolveWikilinksMutation = useMutation({
+    mutationFn: (resolutions: WikilinkResolution[]) =>
+      ipc.memoryResolveWikilinks(memory!.id, resolutions),
+    onSuccess: () => {
+      setWikilinkPending([]);
+      void queryClient.invalidateQueries({ queryKey: ["memories"] });
+      void queryClient.invalidateQueries({ queryKey: ["memory-backlinks", memory!.id] });
+      void queryClient.invalidateQueries({ queryKey: ["memory-related", memory!.id] });
+    },
+  });
+
+  const backlinksQuery = useQuery({
+    queryKey: ["memory-backlinks", memory?.id],
+    queryFn: () => ipc.memoryBacklinks(memory!.id),
+    enabled: !!memory,
+  });
+
+  const relatedQuery = useQuery({
+    queryKey: ["memory-related", memory?.id],
+    queryFn: () => ipc.memoryRelated(memory!.id),
+    enabled: !!memory,
+  });
+
+  const linkMentionMutation = useMutation({
+    mutationFn: (targetId: string) => ipc.memoryLinkMention(memory!.id, targetId),
+    onSuccess: () => {
+      void queryClient.invalidateQueries({ queryKey: ["memory-related", memory!.id] });
+      void queryClient.invalidateQueries({ queryKey: ["memory-backlinks"] });
+      void queryClient.invalidateQueries({ queryKey: ["links"] });
+    },
   });
 
   const deleteMutation = useMutation({
@@ -190,12 +346,72 @@ function MemoryDetail({
             onBlur={save}
             rows={14}
             className="w-full resize-none rounded-[var(--radius-control)] border border-border bg-surface-raised p-2 font-mono text-[13px] text-foreground outline-none focus:ring-2 focus:ring-accent/35"
-            placeholder="支持基础 Markdown 文本…"
+            placeholder="支持基础 Markdown 与 [[双链]] 语法…"
           />
         )}
 
+        {backlinksQuery.data && backlinksQuery.data.length > 0 ? (
+          <section className="rounded-[var(--radius-panel)] border border-border bg-surface-raised p-3">
+            <h3 className="text-[12px] font-medium">反向链接</h3>
+            <ul className="mt-2 space-y-1">
+              {backlinksQuery.data.map((bl) => (
+                <li key={bl.memoryId}>
+                  <button
+                    type="button"
+                    className="text-[12px] text-accent hover:underline"
+                    onClick={() => onNavigateToMemory?.(bl.memoryId)}
+                  >
+                    {bl.title}
+                  </button>
+                </li>
+              ))}
+            </ul>
+          </section>
+        ) : null}
+
+        {relatedQuery.data && relatedQuery.data.length > 0 ? (
+          <section className="rounded-[var(--radius-panel)] border border-border bg-surface-raised p-3">
+            <h3 className="text-[12px] font-medium">相关记忆</h3>
+            <ul className="mt-2 space-y-2">
+              {relatedQuery.data.map((hit) => (
+                <li
+                  key={hit.memoryId}
+                  className="flex items-start justify-between gap-2 text-[12px]"
+                >
+                  <div className="min-w-0">
+                    <button
+                      type="button"
+                      className="font-medium text-accent hover:underline"
+                      onClick={() => onNavigateToMemory?.(hit.memoryId)}
+                    >
+                      {hit.title}
+                    </button>
+                    <p className="text-[11px] text-muted">{hit.reasons.join(" · ")}</p>
+                  </div>
+                  <Button
+                    size="sm"
+                    variant="ghost"
+                    disabled={linkMentionMutation.isPending}
+                    onClick={() => linkMentionMutation.mutate(hit.memoryId)}
+                  >
+                    建链
+                  </Button>
+                </li>
+              ))}
+            </ul>
+          </section>
+        ) : null}
+
         <AttachmentsSection entityType="memory" entityId={memory.id} />
+        <FileRefsSection entityType="memory" entityId={memory.id} />
       </div>
+      {wikilinkPending.length > 0 ? (
+        <WikilinkResolveDialog
+          pending={wikilinkPending}
+          onCancel={() => setWikilinkPending([])}
+          onDone={(resolutions) => resolveWikilinksMutation.mutate(resolutions)}
+        />
+      ) : null}
       <div className="flex items-center justify-between gap-2 border-t border-border p-3">
         <div className="flex gap-1">
           <Button
@@ -570,6 +786,7 @@ export function MemoryPage() {
             memory={selected}
             onDeleted={() => setSelectedId(null)}
             onArchived={() => setSelectedId(null)}
+            onNavigateToMemory={(id) => setSelectedId(id)}
             focusTitleId={createdId}
           />
         )

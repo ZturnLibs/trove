@@ -1,0 +1,4 @@
+{"_example": "Fill with {\"file\": \"<path>\", \"reason\": \"<why>\"}. Put spec/research files only — no code paths. Run `python3 .trellis/scripts/get_context.py --mode packages` to list available specs. Delete this line once real entries are added."}
+{"file": ".trellis/tasks/08-16-gtd-workflow-states/design.md", "reason": "技术设计与 UX 规格"}
+{"file": ".trellis/tasks/08-16-v1-3-gap-roadmap/quality-bar.md", "reason": "体验极致归档门禁"}
+{"file": "docs/ui-layout-interaction.md", "reason": "UI 布局与键盘模型"}

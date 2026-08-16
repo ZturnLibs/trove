@@ -191,7 +191,7 @@ fn setup_tray(app: &tauri::AppHandle) -> tauri::Result<()> {
             } = event
             {
                 let app = tray.app_handle();
-                toggle_quick_from_tray(&app, &rect);
+                toggle_tray_today_from_tray(&app, &rect);
             }
         })
         .build(app)?;
@@ -262,34 +262,42 @@ fn clamp_main_window(app: &tauri::AppHandle) {
     }
 }
 
-// --- 快速记录托盘锚定弹层（quick-capture tray popover） ---
+// --- 托盘锚定弹层（quick / tray-today popover） ---
 
-/// Gap between the tray icon and the popover, in physical pixels.
-const QUICK_POPOVER_GAP: f64 = 6.0;
-/// Ignore focus-loss within this many ms after show, so the show→focus
-/// transition doesn't instantly dismiss the popover.
-const QUICK_SHOW_GRACE_MS: i64 = 150;
-/// Blur-hide is deferred this long so a tray click arriving right after the
-/// blur (which it causes) can cancel it — keeping click-to-toggle reliable
-/// regardless of whether the blur or the click event is delivered first.
-const QUICK_BLUR_HIDE_DELAY_MS: u64 = 120;
+const POPOVER_GAP: f64 = 6.0;
+const POPOVER_SHOW_GRACE_MS: i64 = 150;
+const POPOVER_BLUR_HIDE_DELAY_MS: u64 = 120;
 
 static QUICK_LAST_SHOWN_MS: AtomicI64 = AtomicI64::new(0);
-/// Monotonic counter for cancelable deferred blur-hides. A tray click bumps it
-/// to invalidate any hide scheduled by the focus-loss the click itself caused.
 static QUICK_BLUR_TOKEN: AtomicU64 = AtomicU64::new(0);
-/// Last seen tray-icon rect (cached from tray events) so the global-shortcut
-/// path — which has no click event — can still anchor to the tray.
+static TRAY_TODAY_LAST_SHOWN_MS: AtomicI64 = AtomicI64::new(0);
+static TRAY_TODAY_BLUR_TOKEN: AtomicU64 = AtomicU64::new(0);
 static LAST_TRAY_RECT: Mutex<Option<Rect>> = Mutex::new(None);
 
 fn now_ms() -> i64 {
     chrono::Local::now().timestamp_millis()
 }
 
-/// Position the quick window anchored to a tray-icon rect (physical coordinates).
-/// macOS: drops below the menu-bar icon; Windows: rises above the system-tray icon.
-fn position_quick_at_tray(app: &tauri::AppHandle, rect: &Rect) -> tauri::Result<()> {
-    let Some(window) = app.get_webview_window("quick") else {
+fn hide_popover(app: &tauri::AppHandle, label: &str) {
+    if let Some(window) = app.get_webview_window(label) {
+        let _ = window.hide();
+    }
+}
+
+fn hide_sibling_popovers(app: &tauri::AppHandle, except: &str) {
+    for label in ["quick", "tray-today"] {
+        if label != except {
+            hide_popover(app, label);
+        }
+    }
+}
+
+fn position_popover_at_tray(
+    app: &tauri::AppHandle,
+    label: &str,
+    rect: &Rect,
+) -> tauri::Result<()> {
+    let Some(window) = app.get_webview_window(label) else {
         return Ok(());
     };
     let scale = window.scale_factor().unwrap_or(1.0);
@@ -309,30 +317,30 @@ fn position_quick_at_tray(app: &tauri::AppHandle, rect: &Rect) -> tauri::Result<
             let (ax, ay) = (area.position.x as f64, area.position.y as f64);
             let (aw, ah) = (area.size.width as f64, area.size.height as f64);
             let x = (icon_cx - pw / 2.0).clamp(ax, (ax + aw - pw).max(ax));
-            // macOS: tray sits in the top menu bar -> popover below the icon.
-            // Windows: tray sits in the bottom-right -> popover above the icon.
             let mut y = if cfg!(target_os = "macos") {
-                icon_bottom + QUICK_POPOVER_GAP
+                icon_bottom + POPOVER_GAP
             } else {
-                icon_pos.y - ph - QUICK_POPOVER_GAP
+                icon_pos.y - ph - POPOVER_GAP
             };
-            // If the "above" placement overflows the work-area top, fall back to below.
             if y < ay {
-                y = icon_bottom + QUICK_POPOVER_GAP;
+                y = icon_bottom + POPOVER_GAP;
             }
             let y = y.clamp(ay, (ay + ah - ph).max(ay));
             (x, y)
         }
-        None => (icon_cx - pw / 2.0, icon_bottom + QUICK_POPOVER_GAP),
+        None => (icon_cx - pw / 2.0, icon_bottom + POPOVER_GAP),
     };
     window.set_position(PhysicalPosition::new(x.round() as i32, y.round() as i32))?;
     Ok(())
 }
 
-/// Fallback rect (upper-third of the current monitor) when no tray rect is known yet.
-fn default_center_rect(app: &tauri::AppHandle) -> Rect {
-    let (w, h) = (560.0_f64, 420.0_f64);
-    if let Some(window) = app.get_webview_window("quick") {
+fn default_center_rect(app: &tauri::AppHandle, label: &str) -> Rect {
+    let (w, h) = if label == "tray-today" {
+        (380.0_f64, 520.0_f64)
+    } else {
+        (560.0_f64, 420.0_f64)
+    };
+    if let Some(window) = app.get_webview_window(label) {
         if let Ok(Some(monitor)) = window.current_monitor() {
             let area = monitor.work_area();
             let cx = area.position.x as f64 + area.size.width as f64 / 2.0;
@@ -346,23 +354,25 @@ fn default_center_rect(app: &tauri::AppHandle) -> Rect {
     Rect::default()
 }
 
-/// Anchor the quick window to the tray (or a centered fallback) and stamp the
-/// show timestamp. Caller is still responsible for emit/show/focus.
-pub fn show_quick_anchored(app: &tauri::AppHandle) -> tauri::Result<()> {
-    let rect = LAST_TRAY_RECT
+fn tray_rect_or_default(app: &tauri::AppHandle, label: &str) -> Rect {
+    LAST_TRAY_RECT
         .lock()
         .ok()
         .and_then(|guard| *guard)
-        .unwrap_or_else(|| default_center_rect(app));
-    position_quick_at_tray(app, &rect)?;
+        .unwrap_or_else(|| default_center_rect(app, label))
+}
+
+pub fn show_quick_anchored(app: &tauri::AppHandle) -> tauri::Result<()> {
+    hide_sibling_popovers(app, "quick");
+    let rect = tray_rect_or_default(app, "quick");
+    position_popover_at_tray(app, "quick", &rect)?;
     QUICK_LAST_SHOWN_MS.store(now_ms(), Ordering::SeqCst);
     Ok(())
 }
 
-/// Tray left-click: toggle the popover. Cancels any pending blur-hide first,
-/// so the focus-loss caused by the click itself can't race with this handler.
 fn toggle_quick_from_tray(app: &tauri::AppHandle, rect: &Rect) {
     QUICK_BLUR_TOKEN.fetch_add(1, Ordering::SeqCst);
+    hide_sibling_popovers(app, "quick");
     let Some(window) = app.get_webview_window("quick") else {
         return;
     };
@@ -370,38 +380,59 @@ fn toggle_quick_from_tray(app: &tauri::AppHandle, rect: &Rect) {
         let _ = window.hide();
         return;
     }
-    let _ = position_quick_at_tray(app, rect);
+    let _ = position_popover_at_tray(app, "quick", rect);
     let _ = window.emit("quick://set-mode", "capture");
     let _ = window.show();
     let _ = window.set_focus();
     QUICK_LAST_SHOWN_MS.store(now_ms(), Ordering::SeqCst);
 }
 
-/// Auto-dismiss the popover when it loses focus (outside click / app switch),
-/// unless it just opened. The hide is deferred and cancelable so a tray click
-/// that follows the blur isn't fought over.
-fn setup_quick_blur_hide(app: &tauri::AppHandle) {
-    let Some(window) = app.get_webview_window("quick") else {
+fn toggle_tray_today_from_tray(app: &tauri::AppHandle, rect: &Rect) {
+    TRAY_TODAY_BLUR_TOKEN.fetch_add(1, Ordering::SeqCst);
+    hide_sibling_popovers(app, "tray-today");
+    let Some(window) = app.get_webview_window("tray-today") else {
+        return;
+    };
+    if window.is_visible().unwrap_or(false) {
+        let _ = window.hide();
+        return;
+    }
+    let _ = position_popover_at_tray(app, "tray-today", rect);
+    let _ = window.emit("tray-today://refresh", ());
+    let _ = window.show();
+    let _ = window.set_focus();
+    TRAY_TODAY_LAST_SHOWN_MS.store(now_ms(), Ordering::SeqCst);
+}
+
+fn setup_popover_blur_hide(
+    app: &tauri::AppHandle,
+    label: &str,
+    last_shown: &'static AtomicI64,
+    blur_token: &'static AtomicU64,
+) {
+    let Some(window) = app.get_webview_window(label) else {
         return;
     };
     let app = app.clone();
+    let label = label.to_string();
     window.on_window_event(move |event| {
         if !matches!(event, WindowEvent::Focused(false)) {
             return;
         }
-        if now_ms() - QUICK_LAST_SHOWN_MS.load(Ordering::SeqCst) < QUICK_SHOW_GRACE_MS {
+        if now_ms() - last_shown.load(Ordering::SeqCst) < POPOVER_SHOW_GRACE_MS {
             return;
         }
-        let token = QUICK_BLUR_TOKEN.fetch_add(1, Ordering::SeqCst) + 1;
+        let token = blur_token.fetch_add(1, Ordering::SeqCst) + 1;
         let app = app.clone();
+        let label = label.clone();
         std::thread::spawn(move || {
-            std::thread::sleep(std::time::Duration::from_millis(QUICK_BLUR_HIDE_DELAY_MS));
-            if QUICK_BLUR_TOKEN.load(Ordering::SeqCst) != token {
-                return; // a tray click (or newer blur) invalidated this hide
+            std::thread::sleep(std::time::Duration::from_millis(
+                POPOVER_BLUR_HIDE_DELAY_MS,
+            ));
+            if blur_token.load(Ordering::SeqCst) != token {
+                return;
             }
-            if let Some(quick) = app.get_webview_window("quick") {
-                let _ = quick.hide();
-            }
+            hide_popover(&app, &label);
         });
     });
 }
@@ -419,16 +450,26 @@ pub fn run() {
                 // The quick popover is transient and positioned on every show;
                 // exclude it so a stale saved geometry (e.g. from when it had a
                 // title bar) doesn't override the configured 560×420.
-                .with_denylist(&["quick"])
+                .with_denylist(&["quick", "tray-today"])
                 .build(),
         )
         .plugin(tauri_plugin_autostart::init(
             MacosLauncher::LaunchAgent,
             None,
         ))
-        .plugin(tauri_plugin_single_instance::init(|app, _args, _cwd| {
-            let _ = commands::window_show_main(app.clone());
+        .plugin(tauri_plugin_single_instance::init(|app, argv, _cwd| {
+            let mut saw_trove = false;
+            for arg in argv {
+                if arg.starts_with("trove://") {
+                    application::url_scheme::handle_trove_url(app, &arg);
+                    saw_trove = true;
+                }
+            }
+            if !saw_trove {
+                let _ = commands::window_show_main(app.clone());
+            }
         }))
+        .plugin(tauri_plugin_deep_link::init())
         .plugin(tauri_plugin_global_shortcut::Builder::new().build())
         .plugin(tauri_plugin_updater::Builder::new().build())
         .plugin(tauri_plugin_process::init())
@@ -494,9 +535,40 @@ pub fn run() {
             }
             hide_on_close(app.handle(), "main");
             hide_on_close(app.handle(), "quick");
-            setup_quick_blur_hide(app.handle());
+            hide_on_close(app.handle(), "tray-today");
+            setup_popover_blur_hide(app.handle(), "quick", &QUICK_LAST_SHOWN_MS, &QUICK_BLUR_TOKEN);
+            setup_popover_blur_hide(
+                app.handle(),
+                "tray-today",
+                &TRAY_TODAY_LAST_SHOWN_MS,
+                &TRAY_TODAY_BLUR_TOKEN,
+            );
             application::scheduler::start(app.handle().clone(), reminders);
             application::clipboard_poller::start(app.handle().clone(), clipboard);
+
+            #[cfg(desktop)]
+            {
+                use tauri_plugin_deep_link::DeepLinkExt;
+
+                if let Ok(Some(urls)) = app.deep_link().get_current() {
+                    let handle = app.handle().clone();
+                    for url in urls {
+                        application::url_scheme::handle_trove_url(&handle, url.as_ref());
+                    }
+                }
+
+                let handle = app.handle().clone();
+                app.deep_link().on_open_url(move |event| {
+                    for url in event.urls() {
+                        application::url_scheme::handle_trove_url(&handle, url.as_ref());
+                    }
+                });
+
+                #[cfg(any(target_os = "linux", target_os = "windows"))]
+                {
+                    let _ = app.deep_link().register_all();
+                }
+            }
 
             Ok(())
         })
@@ -521,6 +593,8 @@ pub fn run() {
             commands::task_get,
             commands::task_query,
             commands::task_today,
+            commands::today_sort_suggestions,
+            commands::today_set_smart_sort_enabled,
             commands::task_complete,
             commands::task_uncomplete,
             commands::task_archive,
@@ -532,6 +606,26 @@ pub fn run() {
             commands::task_counts,
             commands::task_smart_list,
             commands::task_postpone,
+            commands::task_set_defer,
+            commands::task_set_waiting,
+            commands::task_clear_waiting,
+            commands::daily_focus_add,
+            commands::daily_focus_remove,
+            commands::daily_focus_reorder,
+            commands::daily_focus_carry,
+            commands::focus_start,
+            commands::focus_end,
+            commands::focus_active,
+            commands::focus_list,
+            commands::daily_wrap_snapshot,
+            commands::daily_wrap_start,
+            commands::daily_wrap_complete,
+            commands::daily_wrap_completed_for_date,
+            commands::weekly_review_snapshot,
+            commands::weekly_review_start,
+            commands::weekly_review_complete,
+            commands::weekly_review_last_completed,
+            commands::health_dashboard_snapshot,
             commands::nl_parse_capture,
             commands::template_list,
             commands::template_create,
@@ -547,6 +641,11 @@ pub fn run() {
             commands::memory_query,
             commands::memory_delete,
             commands::memory_convert_to_task,
+            commands::memory_wikilink_pending,
+            commands::memory_resolve_wikilinks,
+            commands::memory_backlinks,
+            commands::memory_related,
+            commands::memory_link_mention,
             commands::search_query,
             commands::entity_link_create,
             commands::entity_link_remove,
@@ -562,7 +661,17 @@ pub fn run() {
             commands::clipboard_clear_non_favorites,
             commands::clipboard_convert_to_task,
             commands::clipboard_convert_to_memory,
+            commands::clipboard_smart_context,
+            commands::clipboard_link_to_task,
             commands::clipboard_set_capture_enabled,
+            commands::clipboard_set_smart_actions_enabled,
+            commands::storage_run_assets_gc,
+            commands::capture_region_screenshot,
+            commands::file_ref_pick_and_attach,
+            commands::file_ref_list_for_entity,
+            commands::file_ref_open,
+            commands::file_ref_reveal,
+            commands::file_ref_relink,
             commands::backup_create,
             commands::backup_list,
             commands::backup_status,
@@ -579,6 +688,7 @@ pub fn run() {
             commands::window_show_main,
             commands::window_show_quick,
             commands::window_hide_quick,
+            commands::url_scheme_handle,
             commands::app_quit,
         ])
         .run(tauri::generate_context!())

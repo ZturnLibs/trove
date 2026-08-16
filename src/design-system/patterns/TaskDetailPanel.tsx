@@ -1,6 +1,9 @@
 import { useEffect, useRef, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { AttachmentsSection } from "@/design-system/patterns/AttachmentsSection";
+import { FileRefsSection } from "@/design-system/patterns/FileRefsSection";
+import { DeferPicker } from "@/design-system/patterns/DeferPicker";
+import { WaitingSection } from "@/design-system/patterns/WaitingSection";
 import { RecurrencePicker } from "@/design-system/patterns/RecurrencePicker";
 import { Button } from "@/design-system/primitives/Button";
 import { ConfirmButton } from "@/design-system/patterns/ConfirmButton";
@@ -20,11 +23,19 @@ export function TaskDetailPanel({
   task,
   onDeleted,
   focusTitleId,
+  dailyFocus,
+  onStartFocus,
 }: {
   task: Task | null;
   onDeleted?: () => void;
   /** When set to the task's id (e.g. right after "新建"), focus + select its title. */
   focusTitleId?: string | null;
+  dailyFocus?: {
+    inFocus: boolean;
+    onToggle: () => void;
+  };
+  /** Start immersive focus session for this todo task. */
+  onStartFocus?: () => void;
 }) {
   const queryClient = useQueryClient();
   const listsQuery = useQuery({
@@ -165,9 +176,26 @@ export function TaskDetailPanel({
 
   return (
     <div className="flex h-full min-h-0 flex-col">
-      <div className="flex items-center justify-between border-b border-border px-3 py-2 text-[11px] text-muted">
+      <div className="flex items-center justify-between gap-2 border-b border-border px-3 py-2 text-[11px] text-muted">
         <span>任务 · {task.updatedAt.slice(0, 16).replace("T", " ")}</span>
-        <span>{task.listName}</span>
+        <div className="flex items-center gap-2">
+          {task.status === "todo" && onStartFocus ? (
+            <Button type="button" size="sm" variant="secondary" onClick={onStartFocus}>
+              开始专注
+            </Button>
+          ) : null}
+          {dailyFocus && task.status === "todo" ? (
+            <Button
+              type="button"
+              size="sm"
+              variant={dailyFocus.inFocus ? "secondary" : "ghost"}
+              onClick={dailyFocus.onToggle}
+            >
+              {dailyFocus.inFocus ? "移出重点" : "加入重点"}
+            </Button>
+          ) : null}
+          <span>{task.listName}</span>
+        </div>
       </div>
 
       <div className="min-h-0 flex-1 space-y-3 overflow-auto p-3">
@@ -258,6 +286,84 @@ export function TaskDetailPanel({
           </label>
         </div>
 
+        {task.status === "todo" && task.workflowState !== "waiting" ? (
+          <div className="space-y-1 border-t border-border pt-3">
+            <h3 className="text-[11px] font-medium text-muted">推迟显示</h3>
+            <DeferPicker
+              availableAt={task.availableAt}
+              dueDate={draft.dueDate}
+              onChange={async (availableAt) => {
+                const prev = task.availableAt;
+                await ipc.taskSetDefer(task.id, availableAt);
+                void queryClient.invalidateQueries({ queryKey: ["tasks"] });
+                useRecentActions.getState().push({
+                  label: availableAt
+                    ? `推迟显示至 ${availableAt}`
+                    : "取消推迟显示",
+                  undo: async () => {
+                    await ipc.taskSetDefer(task.id, prev);
+                    void queryClient.invalidateQueries({ queryKey: ["tasks"] });
+                  },
+                });
+              }}
+            />
+          </div>
+        ) : null}
+
+        {task.status === "todo" ? (
+          <WaitingSection
+            waitingFor={task.waitingFor}
+            followUpDate={task.followUpDate}
+            dueDate={draft.dueDate}
+            isWaiting={task.workflowState === "waiting"}
+            onSetWaiting={async (waitingFor, followUpDate) => {
+              const prev = {
+                workflowState: task.workflowState,
+                waitingFor: task.waitingFor,
+                followUpDate: task.followUpDate,
+              };
+              await ipc.taskSetWaiting(task.id, waitingFor, followUpDate);
+              void queryClient.invalidateQueries({ queryKey: ["tasks"] });
+              useRecentActions.getState().push({
+                label: waitingFor
+                  ? `标记等待：${waitingFor}`
+                  : "更新等待",
+                undo: async () => {
+                  if (prev.workflowState === "waiting") {
+                    await ipc.taskSetWaiting(
+                      task.id,
+                      prev.waitingFor,
+                      prev.followUpDate,
+                    );
+                  } else {
+                    await ipc.taskClearWaiting(task.id);
+                  }
+                  void queryClient.invalidateQueries({ queryKey: ["tasks"] });
+                },
+              });
+            }}
+            onClearWaiting={async () => {
+              const prev = {
+                waitingFor: task.waitingFor,
+                followUpDate: task.followUpDate,
+              };
+              await ipc.taskClearWaiting(task.id);
+              void queryClient.invalidateQueries({ queryKey: ["tasks"] });
+              useRecentActions.getState().push({
+                label: "结束等待",
+                undo: async () => {
+                  await ipc.taskSetWaiting(
+                    task.id,
+                    prev.waitingFor,
+                    prev.followUpDate,
+                  );
+                  void queryClient.invalidateQueries({ queryKey: ["tasks"] });
+                },
+              });
+            }}
+          />
+        ) : null}
+
         <label className="block space-y-1 text-[11px] text-muted">
           标签（逗号分隔）
           <Input
@@ -282,6 +388,7 @@ export function TaskDetailPanel({
         <TaskRemindersSection taskId={task.id} />
 
         <AttachmentsSection entityType="task" entityId={task.id} />
+        <FileRefsSection entityType="task" entityId={task.id} />
 
         {error ? <p className="text-[12px] text-danger">{error}</p> : null}
       </div>

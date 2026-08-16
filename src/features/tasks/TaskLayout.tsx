@@ -56,6 +56,7 @@ export function TaskGroup({
   danger,
   collapsed,
   onToggle,
+  alwaysShow,
   children,
 }: {
   title: string;
@@ -63,9 +64,10 @@ export function TaskGroup({
   danger?: boolean;
   collapsed?: boolean;
   onToggle?: () => void;
+  alwaysShow?: boolean;
   children: ReactNode;
 }) {
-  if (count === 0 && !onToggle) return null;
+  if (count === 0 && !onToggle && !alwaysShow) return null;
   return (
     <div>
       <button

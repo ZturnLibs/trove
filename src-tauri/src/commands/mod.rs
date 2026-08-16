@@ -12,7 +12,7 @@ use crate::domain::{
     ConvertMemoryToTaskResult, CreateMemoryInput, CreateReminderInput, CreateTaskInput, EntityId,
     EntityLink, LinkInput, Memory, MemoryQuery, PagedResult, ParsedCapture, RecurrenceRule, Reminder,
     ReminderOccurrence, SearchEntityType, SearchQuery, SearchResults, SmartListKind, SnoozePreset,
-    Tag, Task, TaskList, TaskQuery, TodayTasks, UpdateMemoryInput, UpdateReminderInput,
+    Tag, Task, TaskList, TaskQuery, TodaySortSuggestions, TodayTasks, UpdateMemoryInput, UpdateReminderInput,
     UpdateTaskInput, DeleteListResult, ListDeleteDisposition,
 };
 use crate::infrastructure::db::DbHealth;
@@ -257,6 +257,49 @@ pub fn task_today(state: State<'_, AppState>) -> Result<TodayTasks, AppError> {
     let mut today = state.tasks.today_tasks()?;
     today.reminders_today = state.reminders.today_items()?;
     Ok(today)
+}
+
+#[tauri::command]
+pub fn today_sort_suggestions(
+    state: State<'_, AppState>,
+) -> Result<TodaySortSuggestions, AppError> {
+    let settings = state.settings.get()?;
+    let today = crate::domain::local_today(&crate::domain::SystemClock);
+    let due_ids: Vec<EntityId> = state
+        .tasks
+        .today_tasks()?
+        .due_today
+        .into_iter()
+        .map(|t| t.id)
+        .collect();
+    let reminder_times = state
+        .reminders
+        .task_reminder_times_today(&due_ids, &today)?;
+    state
+        .tasks
+        .today_sort_suggestions(settings.today_smart_sort_enabled, reminder_times)
+        .map_err(Into::into)
+}
+
+#[tauri::command]
+pub fn today_set_smart_sort_enabled(
+    app: AppHandle,
+    state: State<'_, AppState>,
+    enabled: bool,
+) -> Result<AppSettings, AppError> {
+    let mut settings = state.settings.get()?;
+    settings.today_smart_sort_enabled = enabled;
+    state.settings.save(&settings)?;
+    let _ = app.emit(
+        "domain://changed",
+        DomainChangeEvent {
+            entity_type: "settings".into(),
+            entity_id: "today_smart_sort".into(),
+            change: if enabled { "enabled" } else { "disabled" }.into(),
+            revision: 0,
+        },
+    );
+    Ok(settings)
 }
 
 #[tauri::command]
@@ -508,6 +551,242 @@ pub fn task_smart_list(
 }
 
 #[tauri::command]
+pub fn task_set_defer(
+    app: AppHandle,
+    state: State<'_, AppState>,
+    id: EntityId,
+    available_at: Option<String>,
+) -> Result<Task, AppError> {
+    let task = state.tasks.set_task_defer(id, available_at)?;
+    index_task(&state, &task);
+    emit_task_change(&app, &task, "updated");
+    Ok(task)
+}
+
+#[tauri::command]
+pub fn task_set_waiting(
+    app: AppHandle,
+    state: State<'_, AppState>,
+    id: EntityId,
+    waiting_for: Option<String>,
+    follow_up_date: Option<String>,
+) -> Result<Task, AppError> {
+    let task = state
+        .tasks
+        .set_task_waiting(id, waiting_for, follow_up_date)?;
+    index_task(&state, &task);
+    emit_task_change(&app, &task, "updated");
+    Ok(task)
+}
+
+#[tauri::command]
+pub fn task_clear_waiting(
+    app: AppHandle,
+    state: State<'_, AppState>,
+    id: EntityId,
+) -> Result<Task, AppError> {
+    let task = state.tasks.clear_task_waiting(id)?;
+    index_task(&state, &task);
+    emit_task_change(&app, &task, "updated");
+    Ok(task)
+}
+
+#[tauri::command]
+pub fn daily_focus_add(
+    app: AppHandle,
+    state: State<'_, AppState>,
+    task_id: EntityId,
+    focus_date: Option<String>,
+) -> Result<Task, AppError> {
+    let task = state.tasks.daily_focus_add(task_id, focus_date)?;
+    index_task(&state, &task);
+    emit_task_change(&app, &task, "updated");
+    Ok(task)
+}
+
+#[tauri::command]
+pub fn daily_focus_remove(
+    app: AppHandle,
+    state: State<'_, AppState>,
+    task_id: EntityId,
+    focus_date: Option<String>,
+) -> Result<Task, AppError> {
+    let task = state.tasks.daily_focus_remove(task_id, focus_date)?;
+    index_task(&state, &task);
+    emit_task_change(&app, &task, "updated");
+    Ok(task)
+}
+
+#[tauri::command]
+pub fn daily_focus_reorder(
+    state: State<'_, AppState>,
+    task_ids: Vec<EntityId>,
+    focus_date: Option<String>,
+) -> Result<(), AppError> {
+    state
+        .tasks
+        .daily_focus_reorder(task_ids, focus_date)
+        .map_err(Into::into)
+}
+
+#[tauri::command]
+pub fn daily_focus_carry(
+    app: AppHandle,
+    state: State<'_, AppState>,
+    from_date: String,
+    to_date: String,
+) -> Result<Vec<Task>, AppError> {
+    let tasks = state.tasks.daily_focus_carry(from_date, to_date)?;
+    for task in &tasks {
+        index_task(&state, task);
+        emit_task_change(&app, task, "updated");
+    }
+    Ok(tasks)
+}
+
+#[tauri::command]
+pub fn focus_start(
+    state: State<'_, AppState>,
+    task_id: EntityId,
+    planned_minutes: Option<i64>,
+) -> Result<crate::domain::FocusSession, AppError> {
+    state
+        .focus
+        .start(&state.tasks, task_id, planned_minutes)
+        .map_err(Into::into)
+}
+
+#[tauri::command]
+pub fn focus_end(
+    app: AppHandle,
+    state: State<'_, AppState>,
+    session_id: EntityId,
+    outcome: crate::domain::FocusOutcome,
+    progress_note: Option<String>,
+) -> Result<crate::domain::FocusSession, AppError> {
+    let session = state
+        .focus
+        .end(&state.tasks, session_id, outcome, progress_note)?;
+    if outcome == crate::domain::FocusOutcome::Completed {
+        if let Ok(task) = state.tasks.get_task(session.task_id) {
+            index_task(&state, &task);
+            emit_task_change(&app, &task, "updated");
+        }
+    }
+    Ok(session)
+}
+
+#[tauri::command]
+pub fn focus_active(
+    state: State<'_, AppState>,
+) -> Result<Option<crate::domain::FocusSession>, AppError> {
+    state.focus.active().map_err(Into::into)
+}
+
+#[tauri::command]
+pub fn focus_list(
+    state: State<'_, AppState>,
+    task_id: Option<EntityId>,
+    limit: Option<i64>,
+) -> Result<Vec<crate::domain::FocusSession>, AppError> {
+    state.focus.list(task_id, limit).map_err(Into::into)
+}
+
+#[tauri::command]
+pub fn daily_wrap_snapshot(
+    state: State<'_, AppState>,
+    wrap_date: Option<String>,
+) -> Result<crate::domain::DailyWrapSnapshot, AppError> {
+    state
+        .daily_wrap
+        .snapshot(&state.tasks, wrap_date)
+        .map_err(Into::into)
+}
+
+#[tauri::command]
+pub fn daily_wrap_start(
+    state: State<'_, AppState>,
+    wrap_date: Option<String>,
+) -> Result<crate::domain::DailyWrapRun, AppError> {
+    state.daily_wrap.start(wrap_date).map_err(Into::into)
+}
+
+#[tauri::command]
+pub fn daily_wrap_complete(
+    state: State<'_, AppState>,
+    run_id: EntityId,
+    input: crate::domain::DailyWrapCompleteInput,
+) -> Result<crate::domain::DailyWrapRun, AppError> {
+    state
+        .daily_wrap
+        .complete(run_id, input)
+        .map_err(Into::into)
+}
+
+#[tauri::command]
+pub fn daily_wrap_completed_for_date(
+    state: State<'_, AppState>,
+    wrap_date: Option<String>,
+) -> Result<Option<crate::domain::DailyWrapRun>, AppError> {
+    state
+        .daily_wrap
+        .completed_for_date(wrap_date)
+        .map_err(Into::into)
+}
+
+#[tauri::command]
+pub fn weekly_review_snapshot(
+    state: State<'_, AppState>,
+) -> Result<crate::domain::WeeklyReviewSnapshot, AppError> {
+    state
+        .weekly_review
+        .snapshot(&state.tasks, &state.reminders, &state.clipboard)
+        .map_err(Into::into)
+}
+
+#[tauri::command]
+pub fn weekly_review_start(
+    state: State<'_, AppState>,
+) -> Result<crate::domain::ReviewSession, AppError> {
+    state
+        .weekly_review
+        .start(crate::domain::ReviewType::Weekly)
+        .map_err(Into::into)
+}
+
+#[tauri::command]
+pub fn weekly_review_complete(
+    state: State<'_, AppState>,
+    session_id: EntityId,
+    input: crate::domain::ReviewCompleteInput,
+) -> Result<crate::domain::ReviewSession, AppError> {
+    state
+        .weekly_review
+        .complete(session_id, input)
+        .map_err(Into::into)
+}
+
+#[tauri::command]
+pub fn weekly_review_last_completed(
+    state: State<'_, AppState>,
+) -> Result<Option<crate::domain::ReviewSession>, AppError> {
+    state
+        .weekly_review
+        .last_completed(crate::domain::ReviewType::Weekly)
+        .map_err(Into::into)
+}
+
+#[tauri::command]
+pub fn health_dashboard_snapshot(
+    state: State<'_, AppState>,
+) -> Result<crate::domain::HealthDashboardSnapshot, AppError> {
+    state
+        .health_dashboard
+        .snapshot(&state.backups, &state.tasks, &state.settings)
+        .map_err(Into::into)
+}
+
+#[tauri::command]
 pub fn task_postpone(
     app: AppHandle,
     state: State<'_, AppState>,
@@ -719,6 +998,54 @@ pub fn memory_convert_to_task(
         },
     );
     Ok(result)
+}
+
+#[tauri::command]
+pub fn memory_wikilink_pending(
+    state: State<'_, AppState>,
+    id: EntityId,
+) -> Result<Vec<crate::domain::WikilinkPending>, AppError> {
+    state.memories.wikilink_pending(id).map_err(Into::into)
+}
+
+#[tauri::command]
+pub fn memory_resolve_wikilinks(
+    state: State<'_, AppState>,
+    id: EntityId,
+    resolutions: Vec<crate::domain::WikilinkResolution>,
+) -> Result<crate::domain::WikilinkSyncResult, AppError> {
+    state
+        .memories
+        .resolve_wikilinks(id, resolutions)
+        .map_err(Into::into)
+}
+
+#[tauri::command]
+pub fn memory_backlinks(
+    state: State<'_, AppState>,
+    id: EntityId,
+) -> Result<Vec<crate::domain::MemoryBacklink>, AppError> {
+    state.memories.backlinks(id).map_err(Into::into)
+}
+
+#[tauri::command]
+pub fn memory_related(
+    state: State<'_, AppState>,
+    id: EntityId,
+) -> Result<Vec<crate::domain::RelatedMemoryHit>, AppError> {
+    state.memories.related_memories(id).map_err(Into::into)
+}
+
+#[tauri::command]
+pub fn memory_link_mention(
+    state: State<'_, AppState>,
+    source_id: EntityId,
+    target_id: EntityId,
+) -> Result<(), AppError> {
+    state
+        .memories
+        .link_mention(source_id, target_id)
+        .map_err(Into::into)
 }
 
 #[derive(Debug, Serialize)]
@@ -933,8 +1260,9 @@ pub fn clipboard_convert_to_task(
     app: AppHandle,
     state: State<'_, AppState>,
     id: EntityId,
+    draft: Option<crate::domain::ClipboardTaskDraftInput>,
 ) -> Result<EntityId, AppError> {
-    let task_id = state.clipboard.convert_to_task(id)?;
+    let task_id = state.clipboard.convert_to_task(id, draft)?;
     let _ = app.emit(
         "domain://changed",
         DomainChangeEvent {
@@ -967,6 +1295,30 @@ pub fn clipboard_convert_to_memory(
 }
 
 #[tauri::command]
+pub fn clipboard_smart_context(
+    state: State<'_, AppState>,
+    id: EntityId,
+) -> Result<crate::domain::ClipboardSmartContext, AppError> {
+    state.clipboard.smart_context(id).map_err(Into::into)
+}
+
+#[tauri::command]
+pub fn clipboard_link_to_task(
+    app: AppHandle,
+    state: State<'_, AppState>,
+    clipboard_id: EntityId,
+    task_id: EntityId,
+) -> Result<(), AppError> {
+    state
+        .clipboard
+        .link_to_task(clipboard_id, task_id)
+        .map_err(AppError::from)?;
+    let item = state.clipboard.get(clipboard_id)?;
+    emit_clipboard_change(&app, &item, "updated");
+    Ok(())
+}
+
+#[tauri::command]
 pub fn clipboard_set_capture_enabled(
     app: AppHandle,
     state: State<'_, AppState>,
@@ -985,6 +1337,104 @@ pub fn clipboard_set_capture_enabled(
         },
     );
     Ok(settings)
+}
+
+#[tauri::command]
+pub fn clipboard_set_smart_actions_enabled(
+    app: AppHandle,
+    state: State<'_, AppState>,
+    enabled: bool,
+) -> Result<AppSettings, AppError> {
+    let mut settings = state.settings.get()?;
+    settings.clipboard_smart_actions_enabled = enabled;
+    state.settings.save(&settings)?;
+    let _ = app.emit(
+        "domain://changed",
+        DomainChangeEvent {
+            entity_type: "settings".into(),
+            entity_id: "clipboard_smart_actions".into(),
+            change: if enabled { "enabled" } else { "disabled" }.into(),
+            revision: 0,
+        },
+    );
+    Ok(settings)
+}
+
+#[tauri::command]
+pub fn storage_run_assets_gc(
+    app: AppHandle,
+    state: State<'_, AppState>,
+) -> Result<crate::application::assets::GcSummary, AppError> {
+    let summary = state.clipboard.run_assets_gc()?;
+    let _ = app.emit(
+        "domain://changed",
+        DomainChangeEvent {
+            entity_type: "storage".into(),
+            entity_id: "assets_gc".into(),
+            change: "updated".into(),
+            revision: 0,
+        },
+    );
+    Ok(summary)
+}
+
+#[tauri::command]
+pub fn capture_region_screenshot(
+    app: AppHandle,
+    state: State<'_, AppState>,
+) -> Result<Option<ClipboardItem>, AppError> {
+    let item = state.clipboard.capture_region_screenshot()?;
+    if let Some(ref row) = item {
+        emit_clipboard_change(&app, row, "created");
+    }
+    Ok(item)
+}
+
+#[tauri::command]
+pub fn file_ref_pick_and_attach(
+    state: State<'_, AppState>,
+    source_type: String,
+    source_id: EntityId,
+) -> Result<Option<crate::domain::LinkedFileReference>, AppError> {
+    let created = state.file_refs.pick_and_create()?;
+    let Some(file) = created else {
+        return Ok(None);
+    };
+    state
+        .file_refs
+        .attach(&source_type, source_id, file.id)
+        .map(Some)
+        .map_err(Into::into)
+}
+
+#[tauri::command]
+pub fn file_ref_list_for_entity(
+    state: State<'_, AppState>,
+    source_type: String,
+    source_id: EntityId,
+) -> Result<Vec<crate::domain::LinkedFileReference>, AppError> {
+    state
+        .file_refs
+        .list_for_entity(&source_type, source_id)
+        .map_err(Into::into)
+}
+
+#[tauri::command]
+pub fn file_ref_open(state: State<'_, AppState>, id: EntityId) -> Result<(), AppError> {
+    state.file_refs.open(id).map_err(Into::into)
+}
+
+#[tauri::command]
+pub fn file_ref_reveal(state: State<'_, AppState>, id: EntityId) -> Result<(), AppError> {
+    state.file_refs.reveal(id).map_err(Into::into)
+}
+
+#[tauri::command]
+pub fn file_ref_relink(
+    state: State<'_, AppState>,
+    id: EntityId,
+) -> Result<Option<crate::domain::FileReference>, AppError> {
+    state.file_refs.relink(id).map_err(Into::into)
 }
 
 #[tauri::command]
@@ -1109,6 +1559,12 @@ pub fn window_hide_quick(app: tauri::AppHandle) -> Result<(), AppError> {
             .hide()
             .map_err(|e| AppError::new("window_error", e.to_string()))?;
     }
+    Ok(())
+}
+
+#[tauri::command]
+pub fn url_scheme_handle(app: tauri::AppHandle, url: String) -> Result<(), AppError> {
+    crate::application::url_scheme::handle_trove_url(&app, &url);
     Ok(())
 }
 

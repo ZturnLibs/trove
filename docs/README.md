@@ -6,6 +6,9 @@
 - [UI 布局与交互](./ui-layout-interaction.md)：主窗口 / 快捷窗口 / 托盘的信息架构、页面骨架、键盘模型与交互约定。
 - [应用菜单](./app-menu-design.md)：菜单栏、托盘菜单、上下文菜单的信息架构、启用规则与快捷键归属。
 - [快捷键一览](./keyboard-shortcuts.md)：全局 / 应用内 / 快捷窗口键位定稿、设置页交互与实现对照。
+- [URL Scheme（trove://）](./url-scheme.md)：深度链接动作清单与安全约束，供 Raycast/快捷指令集成。
+- [浏览器扩展（规划）](./browser-extension/README.md)：`v1.4+` 网页捕获扩展 follow-up。
+- [版本发布说明](./releases/v1.3.0.md)：`v1.3.0` 功能清单与升级说明。
 - [空状态与权限文案](./empty-states-and-permissions.md)：空状态、权限横幅、确认框、引导与错误提示文案。
 - [隐私与数据说明](./privacy-and-data.md)：数据存放位置、权限用途、剪切板隐私与备份恢复说明。
 - [自动更新](./auto-update.md)：签名密钥、GitHub Secret、发版验证与客户端更新行为。
@@ -24,4 +27,5 @@
 | `v1.1`：快捷操作与桌面效率 | 已完成（命令面板 / 自然语言创建 / 智能列表 / 模板 / 片段） |
 | `v1.2` 首切片：图片剪切板与本地 OCR | 已完成（assets 去重 / 缩略图 / macOS Vision OCR / 搜索增强） |
 | `v1.2` 第二切片：来源与关联体系 | 已完成（EntityLink 服务 / 附件区 / 引用安全清理） |
-| 下一阶段：`v1.2.1` 收尾 + `v1.3` 及创新功能 | 规划中，详见[下一阶段路线图](./next-iteration-roadmap.md) |
+| `v1.3`：工作节奏与捕获闭环 | 已完成（GTD 状态 / 专注收尾 / 每周回顾 / 健康面板 / 双链 / 智能排序 / 托盘今日 / `trove://` / 捕获余留） |
+| 下一阶段：`v1.4` 生态与自动化 | 规划中，详见[下一阶段路线图](./next-iteration-roadmap.md) |

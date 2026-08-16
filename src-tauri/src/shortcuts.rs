@@ -2,7 +2,7 @@ use crate::app_state::AppState;
 use crate::commands;
 use crate::infrastructure::settings::ShortcutSettings;
 use serde::Serialize;
-use tauri::{AppHandle, Manager};
+use tauri::{AppHandle, Emitter, Manager};
 use tauri_plugin_global_shortcut::{Code, GlobalShortcutExt, Modifiers, Shortcut, ShortcutState};
 
 #[derive(Debug, Clone, Serialize, Default)]
@@ -18,6 +18,8 @@ fn default_fallback(kind: &str) -> Shortcut {
         "capture" => (Modifiers::SUPER | Modifiers::SHIFT, Code::Space),
         "search" => (Modifiers::SUPER | Modifiers::SHIFT, Code::KeyF),
         "clipboard" => (Modifiers::SUPER | Modifiers::SHIFT, Code::KeyV),
+        "main" => (Modifiers::SUPER | Modifiers::SHIFT, Code::KeyA),
+        "screenshot" => (Modifiers::SUPER | Modifiers::SHIFT, Code::Digit6),
         _ => (Modifiers::SUPER | Modifiers::SHIFT, Code::KeyA),
     };
     #[cfg(not(target_os = "macos"))]
@@ -25,6 +27,8 @@ fn default_fallback(kind: &str) -> Shortcut {
         "capture" => (Modifiers::CONTROL | Modifiers::SHIFT, Code::Space),
         "search" => (Modifiers::CONTROL | Modifiers::SHIFT, Code::KeyF),
         "clipboard" => (Modifiers::CONTROL | Modifiers::SHIFT, Code::KeyV),
+        "main" => (Modifiers::CONTROL | Modifiers::SHIFT, Code::KeyA),
+        "screenshot" => (Modifiers::CONTROL | Modifiers::SHIFT, Code::Digit6),
         _ => (Modifiers::CONTROL | Modifiers::SHIFT, Code::KeyA),
     };
     Shortcut::new(Some(mods), code)
@@ -43,11 +47,12 @@ pub fn apply_shortcuts(app: &AppHandle) -> ShortcutApplyResult {
         .map(|s| s.shortcuts)
         .unwrap_or_else(ShortcutSettings::default);
 
-    let pairs: [(&str, String); 4] = [
+    let pairs: [(&str, String); 5] = [
         ("capture", settings.quick_capture.clone()),
         ("search", settings.search.clone()),
         ("clipboard", settings.clipboard.clone()),
         ("main", settings.focus_main.clone()),
+        ("screenshot", settings.screenshot_region.clone()),
     ];
 
     let mut seen = std::collections::HashSet::new();
@@ -98,6 +103,27 @@ pub fn apply_shortcuts(app: &AppHandle) -> ShortcutApplyResult {
                 }
                 "main" => {
                     let _ = commands::window_show_main(app.clone());
+                }
+                "screenshot" => {
+                    if let Some(state) = app.try_state::<AppState>() {
+                        match state.clipboard.capture_region_screenshot() {
+                            Ok(Some(_item)) => {
+                                let _ = app.emit(
+                                    "domain://changed",
+                                    serde_json::json!({
+                                        "entityType": "clipboard",
+                                        "entityId": "screenshot",
+                                        "change": "created",
+                                        "revision": 0
+                                    }),
+                                );
+                            }
+                            Ok(None) => {}
+                            Err(err) => {
+                                tracing::warn!(error = %err, "region screenshot failed");
+                            }
+                        }
+                    }
                 }
                 _ => {}
             }

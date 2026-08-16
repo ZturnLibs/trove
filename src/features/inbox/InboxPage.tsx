@@ -1,10 +1,24 @@
-import { useMemo, useState } from "react";
+import { useMemo, useRef, useState } from "react";
+import {
+  DndContext,
+  DragOverlay,
+  PointerSensor,
+  closestCenter,
+  useSensor,
+  useSensors,
+} from "@dnd-kit/core";
+import type { DragEndEvent, DragStartEvent } from "@dnd-kit/core";
+import {
+  SortableContext,
+  arrayMove,
+  verticalListSortingStrategy,
+} from "@dnd-kit/sortable";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { TaskDetailPanel } from "@/design-system/patterns/TaskDetailPanel";
-import { TaskRow } from "@/design-system/patterns/TaskRow";
+import { SortableTaskRow, TaskRow } from "@/design-system/patterns/TaskRow";
 import { EmptyState } from "@/components/PageScaffold";
 import { Button } from "@/design-system/primitives/Button";
-import { ipc } from "@/ipc/client";
+import { ipc, type PagedResult, type Task } from "@/ipc/client";
 import { formatShortcutLabel } from "@/lib/shortcuts";
 import {
   NewTaskButton,
@@ -19,6 +33,16 @@ export function InboxPage() {
   const queryClient = useQueryClient();
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [createdId, setCreatedId] = useState<string | null>(null);
+  const [activeDragId, setActiveDragId] = useState<string | null>(null);
+  // Browsers synthesize a click on the drop target after a drag ends; suppress
+  // clicks inside this window so reordering never accidentally selects a task.
+  const suppressClickUntilRef = useRef(0);
+
+  const sensors = useSensors(
+    useSensor(PointerSensor, {
+      activationConstraint: { distance: 8 },
+    }),
+  );
 
   const settingsQuery = useQuery({
     queryKey: ["settings"],
@@ -52,6 +76,11 @@ export function InboxPage() {
     onSuccess: () => void queryClient.invalidateQueries({ queryKey: ["tasks"] }),
   });
 
+  const reorderMutation = useMutation({
+    mutationFn: (orderedIds: string[]) => ipc.taskReorder(orderedIds),
+    onSuccess: () => void queryClient.invalidateQueries({ queryKey: ["tasks"] }),
+  });
+
   const moveUp = useMutation({
     mutationFn: async (id: string) => {
       const list = [...inboxTasks];
@@ -75,6 +104,54 @@ export function InboxPage() {
     },
     onSuccess: () => void queryClient.invalidateQueries({ queryKey: ["tasks"] }),
   });
+
+  const handleSelect = (id: string) => {
+    if (Date.now() < suppressClickUntilRef.current) return;
+    setSelectedId(id);
+  };
+
+  const handleDragStart = (event: DragStartEvent) => {
+    setActiveDragId(String(event.active.id));
+  };
+
+  const handleDragEnd = (event: DragEndEvent) => {
+    const { active, over } = event;
+    setActiveDragId(null);
+    suppressClickUntilRef.current = Date.now() + 300;
+    if (!over || active.id === over.id) return;
+    const oldIndex = inboxTasks.findIndex((t) => t.id === active.id);
+    const newIndex = inboxTasks.findIndex((t) => t.id === over.id);
+    if (oldIndex < 0 || newIndex < 0) return;
+    const orderedIds = arrayMove(
+      inboxTasks.map((t) => t.id),
+      oldIndex,
+      newIndex,
+    );
+    if (orderedIds.join("|") === inboxTasks.map((t) => t.id).join("|")) return;
+    queryClient.setQueryData<PagedResult<Task>>(["tasks", "inbox"], (old) => {
+      if (!old) return old;
+      const order = new Map(orderedIds.map((id, i) => [id, i]));
+      return {
+        ...old,
+        items: [...old.items].sort(
+          (a, b) =>
+            (order.get(a.id) ?? Number.MAX_SAFE_INTEGER) -
+            (order.get(b.id) ?? Number.MAX_SAFE_INTEGER),
+        ),
+      };
+    });
+    reorderMutation.mutate(orderedIds);
+  };
+
+  const handleDragCancel = () => {
+    setActiveDragId(null);
+    suppressClickUntilRef.current = Date.now() + 300;
+  };
+
+  const activeDragTask = useMemo(
+    () => inboxTasks.find((t) => t.id === activeDragId) ?? null,
+    [inboxTasks, activeDragId],
+  );
 
   const selected = useMemo(
     () => inboxTasks.find((t) => t.id === selectedId) ?? null,
@@ -119,16 +196,40 @@ export function InboxPage() {
           />
         ) : (
           <div>
-            {inboxTasks.map((task) => (
-              <TaskRow
-                key={task.id}
-                task={task}
-                selected={selectedId === task.id}
-                onSelect={() => setSelectedId(task.id)}
-                onToggleComplete={() => toggleMutation.mutate(task.id)}
-                onRename={rename}
-              />
-            ))}
+            <DndContext
+              sensors={sensors}
+              collisionDetection={closestCenter}
+              onDragStart={handleDragStart}
+              onDragEnd={handleDragEnd}
+              onDragCancel={handleDragCancel}
+            >
+              <SortableContext
+                items={inboxTasks.map((t) => t.id)}
+                strategy={verticalListSortingStrategy}
+              >
+                {inboxTasks.map((task) => (
+                  <SortableTaskRow
+                    key={task.id}
+                    task={task}
+                    selected={selectedId === task.id}
+                    onSelect={() => handleSelect(task.id)}
+                    onToggleComplete={() => toggleMutation.mutate(task.id)}
+                    onRename={rename}
+                  />
+                ))}
+              </SortableContext>
+              <DragOverlay>
+                {activeDragTask ? (
+                  <div className="rounded-md bg-surface shadow-lg ring-1 ring-border">
+                    <TaskRow
+                      task={activeDragTask}
+                      onSelect={() => {}}
+                      onToggleComplete={() => {}}
+                    />
+                  </div>
+                ) : null}
+              </DragOverlay>
+            </DndContext>
           </div>
         )
       }

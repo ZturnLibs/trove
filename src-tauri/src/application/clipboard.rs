@@ -1,11 +1,13 @@
-use crate::application::assets::AssetStore;
+use crate::application::assets::{AssetStore, GcPreview, GcSummary};
 use crate::application::links::EntityLinkService;
 use crate::application::memories::MemoryService;
 use crate::application::search::SearchService;
 use crate::application::tasks::TaskService;
 use crate::domain::{
-    new_id, stamp, ClipboardItem, ClipboardKind, ClipboardQuery, CreateMemoryInput,
-    CreateTaskInput, DomainError, EntityId, PagedResult, SearchEntityType, SystemClock,
+    classify_clipboard_text, new_id, parse_capture, stamp, ClipboardItem, ClipboardKind,
+    ClipboardKindHint, ClipboardQuery, ClipboardSmartContext, ClipboardTaskDraftInput,
+    CreateMemoryInput, CreateTaskInput, DomainError, EntityId, PagedResult, SearchEntityType,
+    SimilarTaskHit, SystemClock,
 };
 use crate::domain::{page_limit, page_offset};
 use crate::infrastructure::db::Database;
@@ -13,6 +15,7 @@ use crate::infrastructure::settings::SettingsService;
 use crate::platform::ocr;
 use rusqlite::{params, Connection, OptionalExtension};
 use sha2::{Digest, Sha256};
+use std::collections::HashSet;
 use std::path::PathBuf;
 use std::sync::Mutex;
 use std::time::{Duration, Instant};
@@ -52,6 +55,32 @@ impl ClipboardService {
 
     pub fn assets(&self) -> &AssetStore {
         &self.assets
+    }
+
+    pub fn assets_gc_preview(&self) -> Result<GcPreview, DomainError> {
+        let settings = self.settings.get()?;
+        self.assets.gc_preview(settings.clipboard_retention_days)
+    }
+
+    pub fn run_assets_gc(&self) -> Result<GcSummary, DomainError> {
+        let settings = self.settings.get()?;
+        self.assets.collect_garbage(settings.clipboard_retention_days)
+    }
+
+    pub fn capture_region_screenshot(&self) -> Result<Option<ClipboardItem>, DomainError> {
+        use crate::platform::{capture_region_png, ScreenshotError};
+        let png = match capture_region_png() {
+            Ok(bytes) => bytes,
+            Err(ScreenshotError::Cancelled) => return Ok(None),
+            Err(ScreenshotError::Unavailable) => {
+                return Err(DomainError::Validation("当前平台不支持区域截图".into()));
+            }
+        };
+        let img = image::load_from_memory(&png)
+            .map_err(|e| DomainError::Internal(format!("decode screenshot: {e}")))?;
+        let rgba = img.to_rgba8();
+        let (width, height) = rgba.dimensions();
+        self.capture_image(width, height, rgba.as_raw(), Some("区域截图".into()))
     }
 
     fn connect(&self) -> Result<Connection, DomainError> {
@@ -163,12 +192,21 @@ impl ClipboardService {
             .chars()
             .take(80)
             .collect::<String>();
+        let timezone = local_timezone();
+        let kind_hint = classify_clipboard_text(&content, &timezone);
         conn.execute(
             "INSERT INTO clipboard_items (
                 id, content, content_hash, source_app, favorite, use_count, last_used_at,
-                created_at, updated_at, revision, deleted_at, kind, asset_id
-             ) VALUES (?1, ?2, ?3, ?4, 0, 0, NULL, ?5, ?5, 1, NULL, 'text', NULL)",
-            params![id.to_string(), content, hash, source_app, now],
+                created_at, updated_at, revision, deleted_at, kind, asset_id, kind_hint
+             ) VALUES (?1, ?2, ?3, ?4, 0, 0, NULL, ?5, ?5, 1, NULL, 'text', NULL, ?6)",
+            params![
+                id.to_string(),
+                content,
+                hash,
+                source_app,
+                now,
+                kind_hint.as_str()
+            ],
         )
         .map_err(internal)?;
         self.search
@@ -244,18 +282,25 @@ impl ClipboardService {
                 .take(80)
                 .collect()
         };
+        let classify_source = if ocr.text.trim().is_empty() {
+            summary.as_str()
+        } else {
+            ocr.text.as_str()
+        };
+        let kind_hint = classify_clipboard_text(classify_source, &local_timezone());
         conn.execute(
             "INSERT INTO clipboard_items (
                 id, content, content_hash, source_app, favorite, use_count, last_used_at,
-                created_at, updated_at, revision, deleted_at, kind, asset_id
-             ) VALUES (?1, ?2, ?3, ?4, 0, 0, NULL, ?5, ?5, 1, NULL, 'image', ?6)",
+                created_at, updated_at, revision, deleted_at, kind, asset_id, kind_hint
+             ) VALUES (?1, ?2, ?3, ?4, 0, 0, NULL, ?5, ?5, 1, NULL, 'image', ?6, ?7)",
             params![
                 id.to_string(),
                 summary,
                 hash,
                 source_app,
                 now,
-                stored.asset.id.to_string()
+                stored.asset.id.to_string(),
+                kind_hint.as_str()
             ],
         )
         .map_err(internal)?;
@@ -329,7 +374,7 @@ impl ClipboardService {
             .query_row(
                 "SELECT c.id, c.content, c.content_hash, c.source_app, c.favorite, c.use_count, c.last_used_at,
                         c.created_at, c.updated_at, c.revision, c.kind, c.asset_id,
-                        a.width, a.height
+                        a.width, a.height, c.kind_hint
                  FROM clipboard_items c
                  LEFT JOIN assets a ON a.id = c.asset_id AND a.deleted_at IS NULL
                  WHERE c.id = ?1 AND c.deleted_at IS NULL",
@@ -341,6 +386,48 @@ impl ClipboardService {
             .ok_or_else(|| DomainError::NotFound("剪切板条目不存在".into()))?;
         self.attach_thumb(&mut item)?;
         Ok(item)
+    }
+
+    /// Unfavorited image clipboard rows at or above `min_bytes` (weekly review).
+    pub fn query_large_unfavorited(
+        &self,
+        min_bytes: i64,
+        limit: i64,
+    ) -> Result<PagedResult<ClipboardItem>, DomainError> {
+        let conn = self.connect()?;
+        let limit = page_limit(Some(limit));
+        let min_bytes = min_bytes.max(1);
+        let filters = " AND c.deleted_at IS NULL AND c.favorite = 0
+             AND c.kind = 'image' AND COALESCE(a.byte_size, 0) >= ?1";
+        let from_clause = " FROM clipboard_items c
+             LEFT JOIN assets a ON a.id = c.asset_id AND a.deleted_at IS NULL";
+        let total: i64 = conn
+            .query_row(
+                &format!("SELECT COUNT(*){from_clause} WHERE 1=1{filters}"),
+                [min_bytes],
+                |row| row.get(0),
+            )
+            .map_err(internal)?;
+        let sql = format!(
+            "SELECT c.id, c.content, c.content_hash, c.source_app, c.favorite, c.use_count, c.last_used_at,
+                    c.created_at, c.updated_at, c.revision, c.kind, c.asset_id,
+                    a.width, a.height, c.kind_hint
+             {from_clause}
+             WHERE 1=1{filters}
+             ORDER BY COALESCE(a.byte_size, 0) DESC, c.created_at DESC
+             LIMIT ?"
+        );
+        let mut stmt = conn.prepare(&sql).map_err(internal)?;
+        let rows = stmt
+            .query_map(params![min_bytes, limit], map_item)
+            .map_err(internal)?;
+        let mut items = Vec::new();
+        for row in rows {
+            let mut item = row.map_err(internal)?;
+            self.attach_thumb(&mut item)?;
+            items.push(item);
+        }
+        Ok(PagedResult::new(items, total, 0))
     }
 
     fn attach_thumb(&self, item: &mut ClipboardItem) -> Result<(), DomainError> {
@@ -370,6 +457,10 @@ impl ClipboardService {
         if let Some(kind) = query.kind {
             filters.push_str(" AND c.kind = ?");
             values.push(Box::new(kind.as_str().to_string()));
+        }
+        if let Some(hint) = query.kind_hint {
+            filters.push_str(" AND c.kind_hint = ?");
+            values.push(Box::new(hint.as_str().to_string()));
         }
         if let Some(search) = query.search.as_ref().map(|s| s.trim().to_string()) {
             if !search.is_empty() {
@@ -416,7 +507,7 @@ impl ClipboardService {
         let sql = format!(
             "SELECT c.id, c.content, c.content_hash, c.source_app, c.favorite, c.use_count, c.last_used_at,
                     c.created_at, c.updated_at, c.revision, c.kind, c.asset_id,
-                    a.width, a.height{from_clause}{filters}
+                    a.width, a.height, c.kind_hint{from_clause}{filters}
              ORDER BY c.favorite DESC, c.created_at DESC LIMIT ? OFFSET ?"
         );
         values.push(Box::new(limit));
@@ -531,59 +622,87 @@ impl ClipboardService {
         Ok(count)
     }
 
-    pub fn convert_to_task(&self, id: EntityId) -> Result<EntityId, DomainError> {
+    pub fn convert_to_task(
+        &self,
+        id: EntityId,
+        draft: Option<ClipboardTaskDraftInput>,
+    ) -> Result<EntityId, DomainError> {
+        if let Some(task_id) = self.linked_task_id(id)? {
+            return Ok(task_id);
+        }
         let item = self.get(id)?;
-        let notes = if item.kind == ClipboardKind::Image {
-            if let Some(asset_id) = item.asset_id {
-                let ocr = self.ocr_text_for_asset(asset_id)?;
-                if ocr.is_empty() {
-                    item.content.clone()
+        let notes = self.text_for_actions(&item)?;
+        let parsed = parse_capture(&notes, &local_timezone());
+        let title = draft
+            .as_ref()
+            .and_then(|d| d.title.clone())
+            .unwrap_or_else(|| {
+                parsed
+                    .title
+                    .chars()
+                    .take(80)
+                    .collect::<String>()
+                    .trim()
+                    .to_string()
+            });
+        let title = if title.is_empty() {
+            notes
+                .lines()
+                .next()
+                .unwrap_or(if item.kind_hint == ClipboardKindHint::Error {
+                    "排查任务"
                 } else {
-                    ocr
-                }
-            } else {
-                item.content.clone()
-            }
+                    "剪切板任务"
+                })
+                .chars()
+                .take(80)
+                .collect()
         } else {
-            item.content.clone()
+            title
         };
-        let title = notes
-            .lines()
-            .next()
-            .unwrap_or("剪切板任务")
-            .chars()
-            .take(80)
-            .collect::<String>();
+        let body = draft
+            .as_ref()
+            .and_then(|d| d.notes.clone())
+            .unwrap_or(notes);
         let task = self.tasks.create_task(CreateTaskInput {
             title,
-            notes: Some(notes),
-            priority: None,
+            notes: Some(body),
+            priority: draft.as_ref().and_then(|d| d.priority).or({
+                if parsed.priority != crate::domain::TaskPriority::None {
+                    Some(parsed.priority)
+                } else {
+                    None
+                }
+            }),
             list_id: None,
-            due_date: None,
-            due_time: None,
+            due_date: draft
+                .as_ref()
+                .and_then(|d| d.due_date.clone())
+                .or(parsed.due_date),
+            due_time: draft
+                .as_ref()
+                .and_then(|d| d.due_time.clone())
+                .or(parsed.due_time),
             tag_names: None,
         })?;
         self.search
             .upsert(SearchEntityType::Task, task.id, &task.title, &task.notes)?;
+        self.links.link(
+            "clipboard",
+            id,
+            "task",
+            task.id,
+            crate::domain::LINK_KIND_CONVERTED_TO,
+        )?;
         Ok(task.id)
     }
 
     pub fn convert_to_memory(&self, id: EntityId) -> Result<EntityId, DomainError> {
+        if let Some(memory_id) = self.linked_memory_id(id)? {
+            return Ok(memory_id);
+        }
         let item = self.get(id)?;
-        let body = if item.kind == ClipboardKind::Image {
-            if let Some(asset_id) = item.asset_id {
-                let ocr = self.ocr_text_for_asset(asset_id)?;
-                if ocr.is_empty() {
-                    item.content.clone()
-                } else {
-                    format!("[来自图片识别]\n{ocr}")
-                }
-            } else {
-                item.content.clone()
-            }
-        } else {
-            item.content.clone()
-        };
+        let body = self.text_for_actions(&item)?;
         let title = body
             .lines()
             .find(|l| !l.starts_with('['))
@@ -604,7 +723,137 @@ impl ClipboardService {
             self.links
                 .link("memory", memory.id, "asset", asset_id, "attachment")?;
         }
+        self.links.link(
+            "clipboard",
+            id,
+            "memory",
+            memory.id,
+            crate::domain::LINK_KIND_CONVERTED_TO,
+        )?;
         Ok(memory.id)
+    }
+
+    pub fn link_to_task(&self, clipboard_id: EntityId, task_id: EntityId) -> Result<(), DomainError> {
+        let _ = self.get(clipboard_id)?;
+        let _ = self.tasks.get_task(task_id)?;
+        self.links.link(
+            "clipboard",
+            clipboard_id,
+            "task",
+            task_id,
+            crate::domain::LINK_KIND_RELATED,
+        )?;
+        Ok(())
+    }
+
+    pub fn smart_context(&self, id: EntityId) -> Result<ClipboardSmartContext, DomainError> {
+        let item = self.get(id)?;
+        let settings = self.settings.get()?;
+        let text = self.text_for_actions(&item)?;
+        let timezone = local_timezone();
+        let task_draft = if matches!(
+            item.kind_hint,
+            ClipboardKindHint::Date | ClipboardKindHint::Plain | ClipboardKindHint::Error
+        ) {
+            let parsed = parse_capture(&text, &timezone);
+            if parsed.due_date.is_some()
+                || parsed.due_time.is_some()
+                || !parsed.ambiguous_fields.is_empty()
+                || item.kind_hint == ClipboardKindHint::Date
+            {
+                Some(parsed)
+            } else {
+                None
+            }
+        } else {
+            None
+        };
+        let similar_tasks = if settings.clipboard_smart_actions_enabled {
+            self.find_similar_tasks(&text)?
+        } else {
+            Vec::new()
+        };
+        Ok(ClipboardSmartContext {
+            kind_hint: item.kind_hint,
+            task_draft,
+            similar_tasks,
+            linked_task_id: self.linked_task_id(id)?,
+            linked_memory_id: self.linked_memory_id(id)?,
+        })
+    }
+
+    fn text_for_actions(&self, item: &ClipboardItem) -> Result<String, DomainError> {
+        if item.kind == ClipboardKind::Image {
+            if let Some(asset_id) = item.asset_id {
+                let ocr = self.ocr_text_for_asset(asset_id)?;
+                if !ocr.is_empty() {
+                    return Ok(ocr);
+                }
+            }
+        }
+        Ok(item.content.clone())
+    }
+
+    fn linked_task_id(&self, clipboard_id: EntityId) -> Result<Option<EntityId>, DomainError> {
+        for link in self.links.list_outgoing("clipboard", clipboard_id)? {
+            if link.target_type == "task" {
+                return Ok(Some(link.target_id));
+            }
+        }
+        Ok(None)
+    }
+
+    fn linked_memory_id(&self, clipboard_id: EntityId) -> Result<Option<EntityId>, DomainError> {
+        for link in self.links.list_outgoing("clipboard", clipboard_id)? {
+            if link.target_type == "memory" && link.link_kind == crate::domain::LINK_KIND_CONVERTED_TO
+            {
+                return Ok(Some(link.target_id));
+            }
+        }
+        Ok(None)
+    }
+
+    fn find_similar_tasks(&self, text: &str) -> Result<Vec<SimilarTaskHit>, DomainError> {
+        let tokens = tokenize(text);
+        if tokens.is_empty() {
+            return Ok(Vec::new());
+        }
+        let conn = self.connect()?;
+        let mut stmt = conn
+            .prepare(
+                "SELECT id, title, notes FROM tasks
+                 WHERE deleted_at IS NULL AND status = 'todo' AND workflow_state = 'active'
+                 ORDER BY updated_at DESC LIMIT 80",
+            )
+            .map_err(internal)?;
+        let rows = stmt
+            .query_map([], |row| {
+                Ok((
+                    row.get::<_, String>(0)?,
+                    row.get::<_, String>(1)?,
+                    row.get::<_, String>(2)?,
+                ))
+            })
+            .map_err(internal)?;
+        let mut hits = Vec::new();
+        for row in rows {
+            let (id, title, notes) = row.map_err(internal)?;
+            let score = jaccard_similarity(&tokens, &tokenize(&format!("{title}\n{notes}")));
+            if score >= 0.25 {
+                hits.push(SimilarTaskHit {
+                    task_id: id.parse().map_err(internal)?,
+                    title,
+                    score,
+                });
+            }
+        }
+        hits.sort_by(|a, b| {
+            b.score
+                .partial_cmp(&a.score)
+                .unwrap_or(std::cmp::Ordering::Equal)
+        });
+        hits.truncate(3);
+        Ok(hits)
     }
 
     fn is_asset_linked(&self, asset_id: &str) -> Result<bool, DomainError> {
@@ -739,9 +988,33 @@ fn map_item(row: &rusqlite::Row<'_>) -> Result<ClipboardItem, rusqlite::Error> {
         asset_id,
         width: row.get(12)?,
         height: row.get(13)?,
+        kind_hint: ClipboardKindHint::parse(&row.get::<_, String>(14)?).map_err(|e| {
+            rusqlite::Error::FromSqlConversionFailure(14, rusqlite::types::Type::Text, Box::new(e))
+        })?,
         thumb_base64: None,
         ocr_text: None,
     })
+}
+
+fn local_timezone() -> String {
+    iana_time_zone::get_timezone().unwrap_or_else(|_| "Asia/Shanghai".to_string())
+}
+
+fn tokenize(text: &str) -> HashSet<String> {
+    text.to_lowercase()
+        .split(|c: char| !c.is_alphanumeric() && c != '_')
+        .filter(|w| w.len() >= 3)
+        .map(str::to_string)
+        .collect()
+}
+
+fn jaccard_similarity(a: &HashSet<String>, b: &HashSet<String>) -> f64 {
+    if a.is_empty() || b.is_empty() {
+        return 0.0;
+    }
+    let inter = a.intersection(b).count();
+    let union = a.union(b).count();
+    inter as f64 / union as f64
 }
 
 fn internal<E: std::fmt::Display>(err: E) -> DomainError {
@@ -867,5 +1140,19 @@ mod tests {
 
         assert!(svc.assets().get(asset_id).is_err());
         assert!(!file.exists());
+    }
+
+    #[test]
+    fn capture_text_classifies_url_and_convert_is_idempotent() {
+        let dir = tempdir().unwrap();
+        let svc = svc(dir.path());
+        let item = svc
+            .capture_text("https://example.com/doc".into(), None)
+            .unwrap()
+            .unwrap();
+        assert_eq!(item.kind_hint, ClipboardKindHint::Url);
+        let task1 = svc.convert_to_task(item.id, None).unwrap();
+        let task2 = svc.convert_to_task(item.id, None).unwrap();
+        assert_eq!(task1, task2);
     }
 }

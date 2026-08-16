@@ -187,36 +187,10 @@ impl AssetStore {
     }
 
     pub fn collect_garbage(&self, retention_days: u32) -> Result<GcSummary, DomainError> {
-        let cutoff = (chrono::Local::now() - chrono::Duration::days(retention_days as i64))
-            .format("%Y-%m-%dT%H:%M:%S")
-            .to_string();
-        let conn = self.connect()?;
-        let candidates: Vec<(String, String, Option<String>, i64)> = {
-            let mut stmt = conn
-                .prepare(
-                    "SELECT a.id, a.relative_path, a.thumb_path, a.byte_size FROM assets a
-                     WHERE a.deleted_at IS NULL
-                       AND a.created_at < ?1
-                       AND NOT EXISTS (SELECT 1 FROM entity_links el
-                                       WHERE el.target_type = 'asset' AND el.target_id = a.id)
-                       AND NOT EXISTS (SELECT 1 FROM clipboard_items ci
-                                       WHERE ci.asset_id = a.id)",
-                )
-                .map_err(internal)?;
-            let rows = stmt
-                .query_map([&cutoff], |row| {
-                    Ok((row.get(0)?, row.get(1)?, row.get(2)?, row.get(3)?))
-                })
-                .map_err(internal)?;
-            let mut out = Vec::new();
-            for row in rows {
-                out.push(row.map_err(internal)?);
-            }
-            out
-        };
-
+        let candidates = self.gc_candidates(retention_days)?;
         let mut removed = 0usize;
         let mut freed_bytes = 0i64;
+        let conn = self.connect()?;
         for (id, rel, thumb_rel, byte_size) in candidates {
             conn.execute("DELETE FROM assets WHERE id = ?1", [&id])
                 .map_err(internal)?;
@@ -232,6 +206,47 @@ impl AssetStore {
             freed_bytes,
         })
     }
+
+    pub fn gc_preview(&self, retention_days: u32) -> Result<GcPreview, DomainError> {
+        let candidates = self.gc_candidates(retention_days)?;
+        let candidate_bytes = candidates.iter().map(|(_, _, _, size)| size).sum();
+        Ok(GcPreview {
+            candidate_count: candidates.len(),
+            candidate_bytes,
+            retention_days,
+        })
+    }
+
+    fn gc_candidates(
+        &self,
+        retention_days: u32,
+    ) -> Result<Vec<(String, String, Option<String>, i64)>, DomainError> {
+        let cutoff = (chrono::Local::now() - chrono::Duration::days(retention_days as i64))
+            .format("%Y-%m-%dT%H:%M:%S")
+            .to_string();
+        let conn = self.connect()?;
+        let mut stmt = conn
+            .prepare(
+                "SELECT a.id, a.relative_path, a.thumb_path, a.byte_size FROM assets a
+                 WHERE a.deleted_at IS NULL
+                   AND a.created_at < ?1
+                   AND NOT EXISTS (SELECT 1 FROM entity_links el
+                                   WHERE el.target_type = 'asset' AND el.target_id = a.id)
+                   AND NOT EXISTS (SELECT 1 FROM clipboard_items ci
+                                   WHERE ci.asset_id = a.id AND ci.deleted_at IS NULL)",
+            )
+            .map_err(internal)?;
+        let rows = stmt
+            .query_map([&cutoff], |row| {
+                Ok((row.get(0)?, row.get(1)?, row.get(2)?, row.get(3)?))
+            })
+            .map_err(internal)?;
+        let mut out = Vec::new();
+        for row in rows {
+            out.push(row.map_err(internal)?);
+        }
+        Ok(out)
+    }
 }
 
 #[derive(Debug, Clone, Default, serde::Serialize)]
@@ -239,6 +254,14 @@ impl AssetStore {
 pub struct GcSummary {
     pub removed: usize,
     pub freed_bytes: i64,
+}
+
+#[derive(Debug, Clone, serde::Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct GcPreview {
+    pub candidate_count: usize,
+    pub candidate_bytes: i64,
+    pub retention_days: u32,
 }
 
 fn resize_thumb(img: &RgbaImage) -> RgbaImage {
