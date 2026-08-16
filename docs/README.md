@@ -8,6 +8,7 @@
 - [快捷键一览](./keyboard-shortcuts.md)：全局 / 应用内 / 快捷窗口键位定稿、设置页交互与实现对照。
 - [URL Scheme（trove://）](./url-scheme.md)：深度链接动作清单与安全约束，供 Raycast/快捷指令集成。
 - [浏览器扩展（规划）](./browser-extension/README.md)：`v1.4+` 网页捕获扩展 follow-up。
+- [版本发布说明](./releases/v1.3.0.md)：`v1.3.0` 功能清单与升级说明。
 - [空状态与权限文案](./empty-states-and-permissions.md)：空状态、权限横幅、确认框、引导与错误提示文案。
 - [隐私与数据说明](./privacy-and-data.md)：数据存放位置、权限用途、剪切板隐私与备份恢复说明。
 - [自动更新](./auto-update.md)：签名密钥、GitHub Secret、发版验证与客户端更新行为。
