@@ -2,8 +2,9 @@
 
 mod app_state;
 mod application;
+pub mod cli_protocol;
 mod commands;
-mod domain;
+pub mod domain;
 mod infrastructure;
 mod menu_bar;
 mod platform;
@@ -458,14 +459,17 @@ pub fn run() {
             None,
         ))
         .plugin(tauri_plugin_single_instance::init(|app, argv, _cwd| {
-            let mut saw_trove = false;
+            let mut saw_action = false;
             for arg in argv {
                 if arg.starts_with("trove://") {
                     application::url_scheme::handle_trove_url(app, &arg);
-                    saw_trove = true;
+                    saw_action = true;
+                } else if arg.starts_with(cli_protocol::TROVE_ACTION_PREFIX) {
+                    cli_protocol::handle_cli_dispatch(app, &arg);
+                    saw_action = true;
                 }
             }
-            if !saw_trove {
+            if !saw_action {
                 let _ = commands::window_show_main(app.clone());
             }
         }))
@@ -512,6 +516,13 @@ pub fn run() {
             };
 
             app.manage(state);
+
+            let handle = app.handle().clone();
+            for arg in std::env::args().skip(1) {
+                if cli_protocol::is_cli_action_arg(&arg) {
+                    cli_protocol::handle_cli_dispatch(&handle, &arg);
+                }
+            }
 
             clamp_main_window(app.handle());
             // The window-state plugin applies the restored geometry after setup,
@@ -689,6 +700,7 @@ pub fn run() {
             commands::window_show_quick,
             commands::window_hide_quick,
             commands::url_scheme_handle,
+            commands::workbench_action_dispatch,
             commands::app_quit,
         ])
         .run(tauri::generate_context!())

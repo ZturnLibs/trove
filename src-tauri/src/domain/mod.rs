@@ -15,6 +15,7 @@ mod task;
 mod task_activity;
 mod today_smart_sort;
 mod url_scheme;
+mod workbench_action;
 
 pub use clipboard::*;
 pub use clipboard_classify::classify_clipboard_text;
@@ -33,6 +34,7 @@ pub use task::*;
 pub use task_activity::should_apply_active_list_filter;
 pub use today_smart_sort::*;
 pub use url_scheme::*;
+pub use workbench_action::*;
 
 use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};

@@ -47,4 +47,6 @@ trove://create?type=memory&title=Meeting%20notes&body=Discussed%20roadmap
 
 ## 与 v1.4 动作层
 
-当前实现通过 Rust 解析 + Tauri 事件分发（`main://navigate`、`url-scheme://pending-create`）。后续 v1.4 统一动作层可复用同一解析结果，避免重复 IPC。
+当前实现：`parse_trove_url` → `WorkbenchAction` → `workbench_action_dispatch` 统一分发。详见 [action-layer.md](./action-layer.md)。
+
+创建预览仍经主窗确认对话框；`url-scheme://pending-create` 事件载荷形状不变。

@@ -18,3 +18,4 @@ pub mod smoke_notes;
 pub mod tasks;
 pub mod templates;
 pub mod url_scheme;
+pub mod workbench_actions;

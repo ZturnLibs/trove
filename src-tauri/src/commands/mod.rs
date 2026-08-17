@@ -8,12 +8,13 @@ use crate::application::templates::{
     CreateTemplateInput, ItemTemplate, TemplateKind, TemplatePreview,
 };
 use crate::domain::{
-    parse_capture, AppError, ClipboardItem, ClipboardKind, ClipboardQuery,
+    parse_capture,     AppError, ClipboardItem, ClipboardKind, ClipboardQuery,
     ConvertMemoryToTaskResult, CreateMemoryInput, CreateReminderInput, CreateTaskInput, EntityId,
     EntityLink, LinkInput, Memory, MemoryQuery, PagedResult, ParsedCapture, RecurrenceRule, Reminder,
     ReminderOccurrence, SearchEntityType, SearchQuery, SearchResults, SmartListKind, SnoozePreset,
     Tag, Task, TaskList, TaskQuery, TodaySortSuggestions, TodayTasks, UpdateMemoryInput, UpdateReminderInput,
     UpdateTaskInput, DeleteListResult, ListDeleteDisposition,
+    ActionDispatchOptions, ActionOutcome, WorkbenchAction,
 };
 use crate::infrastructure::db::DbHealth;
 use crate::infrastructure::settings::{AppSettings, ShortcutSettings};
@@ -1566,6 +1567,17 @@ pub fn window_hide_quick(app: tauri::AppHandle) -> Result<(), AppError> {
 pub fn url_scheme_handle(app: tauri::AppHandle, url: String) -> Result<(), AppError> {
     crate::application::url_scheme::handle_trove_url(&app, &url);
     Ok(())
+}
+
+#[tauri::command]
+pub fn workbench_action_dispatch(
+    app: AppHandle,
+    state: State<'_, AppState>,
+    action: WorkbenchAction,
+    options: ActionDispatchOptions,
+) -> Result<ActionOutcome, AppError> {
+    crate::application::workbench_actions::dispatch(&app, Some(state.inner()), action, options)
+        .map_err(Into::into)
 }
 
 #[tauri::command]
