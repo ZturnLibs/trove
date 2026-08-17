@@ -1,18 +1,17 @@
-use crate::application::reminders::ReminderService;
-use crate::domain::local_now_naive;
-use std::sync::Arc;
+use crate::app_state::AppState;
+use crate::application::automation::event_from_reminder_fired;
 use std::time::Duration;
 use tauri::{AppHandle, Emitter, Manager};
 use tauri_plugin_notification::NotificationExt;
 
-pub fn start(app: AppHandle, reminders: Arc<ReminderService>) {
+pub fn start(app: AppHandle, state: AppState) {
     std::thread::spawn(move || {
-        if let Err(err) = reminders.reconcile_on_startup() {
+        if let Err(err) = state.reminders.reconcile_on_startup() {
             tracing::warn!(error = %err, "reminder reconcile failed");
         }
 
         loop {
-            if let Err(err) = tick(&app, &reminders) {
+            if let Err(err) = tick(&app, &state) {
                 tracing::warn!(error = %err, "reminder scheduler tick failed");
             }
             std::thread::sleep(Duration::from_secs(20));
@@ -20,12 +19,14 @@ pub fn start(app: AppHandle, reminders: Arc<ReminderService>) {
     });
 }
 
-fn tick(app: &AppHandle, reminders: &ReminderService) -> Result<(), String> {
-    let now = local_now_naive();
-    let due = reminders.due_occurrences(now).map_err(|e| e.to_string())?;
+fn tick(app: &AppHandle, state: &AppState) -> Result<(), String> {
+    let now = crate::domain::local_now_naive();
+    let due = state
+        .reminders
+        .due_occurrences(now)
+        .map_err(|e| e.to_string())?;
 
     for occ in due {
-        // Format the planned time as `YYYY-MM-DD HH:MM` (drop seconds if present).
         let scheduled_at = occ
             .scheduled_at
             .replace('T', " ")
@@ -43,7 +44,7 @@ fn tick(app: &AppHandle, reminders: &ReminderService) -> Result<(), String> {
 
         match shown {
             Ok(()) => {
-                let _ = reminders.mark_notified(occ.id, None);
+                let _ = state.reminders.mark_notified(occ.id, None);
                 let _ = app.emit(
                     "domain://changed",
                     serde_json::json!({
@@ -53,7 +54,6 @@ fn tick(app: &AppHandle, reminders: &ReminderService) -> Result<(), String> {
                         "revision": occ.revision,
                     }),
                 );
-                // Keep a soft open path for the main window.
                 if let Some(main) = app.get_webview_window("main") {
                     let _ = main.emit(
                         "reminder://fired",
@@ -64,6 +64,17 @@ fn tick(app: &AppHandle, reminders: &ReminderService) -> Result<(), String> {
                             "title": occ.title,
                         }),
                     );
+                }
+                let event = event_from_reminder_fired(&occ);
+                if let Err(err) = state.automation.run_for_event(
+                    app,
+                    &state.settings,
+                    &state.tasks,
+                    &state.memories,
+                    event,
+                    false,
+                ) {
+                    tracing::warn!(error = %err, "automation on reminder fired failed");
                 }
             }
             Err(err) => {

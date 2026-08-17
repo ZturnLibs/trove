@@ -1,3 +1,5 @@
+use crate::application::csv_tasks::CsvTaskService;
+use crate::application::automation::AutomationService;
 use crate::application::backup::BackupService;
 use crate::application::clipboard::ClipboardService;
 use crate::application::daily_wrap::DailyWrapService;
@@ -39,6 +41,8 @@ pub struct AppState {
     pub weekly_review: Arc<WeeklyReviewService>,
     pub health_dashboard: Arc<HealthDashboardService>,
     pub file_refs: Arc<FileReferenceService>,
+    pub automation: Arc<AutomationService>,
+    pub csv_tasks: Arc<CsvTaskService>,
 }
 
 impl AppState {
@@ -63,6 +67,8 @@ impl AppState {
         let daily_wrap = DailyWrapService::new(db.as_ref().clone());
         let weekly_review = WeeklyReviewService::new(db.as_ref().clone());
         let file_refs = FileReferenceService::new(db.as_ref().clone());
+        let automation = AutomationService::new(db.as_ref().clone());
+        let csv_tasks = CsvTaskService::new(db.as_ref().clone());
         let state = Self {
             settings: Arc::new(SettingsService::new(db.as_ref().clone())),
             smoke_notes: Arc::new(SmokeNoteService::new(db.as_ref().clone())),
@@ -81,6 +87,8 @@ impl AppState {
             weekly_review: Arc::new(weekly_review),
             health_dashboard: Arc::new(health_dashboard),
             file_refs: Arc::new(file_refs),
+            automation: Arc::new(automation),
+            csv_tasks: Arc::new(csv_tasks),
             db,
         };
         if let Err(err) = state.search.rebuild_all() {

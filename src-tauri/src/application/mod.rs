@@ -1,3 +1,5 @@
+pub mod csv_tasks;
+pub mod automation;
 pub mod assets;
 pub mod backup;
 pub mod clipboard;
@@ -18,3 +20,4 @@ pub mod smoke_notes;
 pub mod tasks;
 pub mod templates;
 pub mod url_scheme;
+pub mod workbench_actions;

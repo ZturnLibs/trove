@@ -7,6 +7,8 @@ import { RecurrencePicker } from "@/design-system/patterns/RecurrencePicker";
 import { ConfirmButton } from "@/design-system/patterns/ConfirmButton";
 import { Input } from "@/design-system/primitives/Input";
 import { ShortcutRow } from "@/features/settings/ShortcutRow";
+import { AutomationRulesSection } from "@/features/settings/AutomationRulesSection";
+import { CsvTasksSection } from "@/features/settings/CsvTasksSection";
 import {
   ipc,
   type AppSettings,
@@ -1144,7 +1146,14 @@ export function SettingsPage() {
               ) : null}
             </div>
           ) : null}
+          <CsvTasksSection onMessage={setMessage} />
         </section>
+
+        <AutomationRulesSection
+          settings={settings}
+          onSaveSettings={(next) => saveSettings.mutate(next)}
+          onMessage={setMessage}
+        />
 
         <section className="rounded-[var(--radius-panel)] border border-border bg-surface-raised p-4">
           <h2 className="text-[13px] font-semibold">权限与隐私</h2>
