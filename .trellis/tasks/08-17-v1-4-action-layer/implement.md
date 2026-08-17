@@ -23,3 +23,10 @@
 - [x] IPC：`automation_*` 命令
 - [x] `docs/automation.md`
 - [x] `cargo test`
+
+## 切片 4 — macOS 快捷指令
+
+- [x] 动作层只读查询：今日 / 逾期 / 收件箱 / 清单 / 记忆 / 片段
+- [x] `trove-cli query …` + `--json`
+- [x] `docs/shortcuts.md`
+- [x] `cargo test`

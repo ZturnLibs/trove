@@ -66,6 +66,45 @@ enum Commands {
         #[arg(long)]
         json: String,
     },
+    /// 查询数据（供快捷指令 / 脚本读取，需应用在运行）
+    Query {
+        #[command(subcommand)]
+        target: QueryTarget,
+    },
+}
+
+#[derive(Subcommand)]
+enum QueryTarget {
+    /// 今日逾期 / 到期 / 重点 / 提醒
+    Today,
+    /// 逾期任务
+    Overdue {
+        #[arg(long)]
+        limit: Option<i64>,
+    },
+    /// 收件箱未完成任务
+    Inbox {
+        #[arg(long)]
+        limit: Option<i64>,
+    },
+    /// 指定清单的未完成任务
+    List {
+        list_id: String,
+        #[arg(long)]
+        limit: Option<i64>,
+    },
+    /// 搜索记忆
+    Memories {
+        query: String,
+        #[arg(long)]
+        limit: Option<i64>,
+    },
+    /// 收藏的文本片段
+    Snippets {
+        query: Option<String>,
+        #[arg(long)]
+        limit: Option<i64>,
+    },
 }
 
 #[derive(Clone, Copy, ValueEnum)]
@@ -155,6 +194,34 @@ fn run() -> Result<(), String> {
                 serde_json::from_str(json).map_err(|e| format!("动作 JSON 无效: {e}"))?;
             dispatch_action(&cli, action)
         }
+        Commands::Query { target } => {
+            let action = query_action(target)?;
+            dispatch_action(&cli, action)
+        }
+    }
+}
+
+fn query_action(target: &QueryTarget) -> Result<WorkbenchAction, String> {
+    match target {
+        QueryTarget::Today => Ok(WorkbenchAction::QueryToday),
+        QueryTarget::Overdue { limit } => Ok(WorkbenchAction::QueryOverdue { limit: *limit }),
+        QueryTarget::Inbox { limit } => Ok(WorkbenchAction::QueryInbox { limit: *limit }),
+        QueryTarget::List { list_id, limit } => {
+            let id = uuid::Uuid::parse_str(list_id)
+                .map_err(|_| "list_id 不是有效 UUID".to_string())?;
+            Ok(WorkbenchAction::QueryList {
+                list_id: id,
+                limit: *limit,
+            })
+        }
+        QueryTarget::Memories { query, limit } => Ok(WorkbenchAction::SearchMemories {
+            query: query.clone(),
+            limit: *limit,
+        }),
+        QueryTarget::Snippets { query, limit } => Ok(WorkbenchAction::GetSnippets {
+            query: query.clone(),
+            limit: *limit,
+        }),
     }
 }
 
@@ -300,6 +367,23 @@ fn format_outcome_human(outcome: &ActionOutcome) -> String {
         ActionOutcome::ReminderCreated { reminder } => format!("已创建提醒 {}", reminder.id),
         ActionOutcome::MemoryCreated { memory } => format!("已创建记忆 {}", memory.id),
         ActionOutcome::TaskCompleted { task } => format!("已完成任务 {}", task.id),
+        ActionOutcome::TodayQueried { data } => format!(
+            "今日 {}：逾期 {} · 到期 {} · 重点 {} · 提醒 {}",
+            data.today,
+            data.overdue.len(),
+            data.due_today.len(),
+            data.focus.len(),
+            data.reminders_today.len()
+        ),
+        ActionOutcome::TasksQueried { items, total } => {
+            format!("任务 {}/{} 条", items.len(), total)
+        }
+        ActionOutcome::MemoriesQueried { items, total } => {
+            format!("记忆 {}/{} 条", items.len(), total)
+        }
+        ActionOutcome::SnippetsQueried { items, total } => {
+            format!("片段 {}/{} 条", items.len(), total)
+        }
         ActionOutcome::Rejected { reason } => format!("拒绝：{reason}"),
     }
 }

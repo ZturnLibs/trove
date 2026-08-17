@@ -38,6 +38,13 @@ trove-cli complete <task-uuid> --yes
 # 预览
 trove-cli --dry-run today
 trove-cli --dry-run --json create task --title "x" --yes
+
+# 查询（需 Trove 在运行；供快捷指令）
+trove-cli --json query today
+trove-cli --json query overdue --limit 10
+trove-cli --json query inbox
+trove-cli --json query memories "周报"
+trove-cli --json query snippets
 ```
 
 ## 协议

@@ -2,7 +2,7 @@ use serde::{Deserialize, Serialize};
 
 use super::{
     CreateMemoryInput, CreateReminderInput, CreateTaskInput, DomainError, EntityId, Memory,
-    Reminder, Task, UrlCreateKind, UrlSchemeAction,
+    Reminder, Task, TaskPriority, TaskStatus, UrlCreateKind, UrlSchemeAction,
 };
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
@@ -66,6 +66,151 @@ pub enum WorkbenchAction {
         task_id: EntityId,
         confirmed: bool,
     },
+    /// Read-only: today's overdue / due / focus / reminders.
+    QueryToday,
+    QueryOverdue {
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        limit: Option<i64>,
+    },
+    QueryInbox {
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        limit: Option<i64>,
+    },
+    QueryList {
+        list_id: EntityId,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        limit: Option<i64>,
+    },
+    SearchMemories {
+        query: String,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        limit: Option<i64>,
+    },
+    GetSnippets {
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        query: Option<String>,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        limit: Option<i64>,
+    },
+}
+
+const PREVIEW_LEN: usize = 120;
+const SNIPPET_LEN: usize = 4000;
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ActionTaskHit {
+    pub id: EntityId,
+    pub title: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub notes_preview: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub due_date: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub due_time: Option<String>,
+    pub priority: TaskPriority,
+    pub list_name: String,
+    pub status: TaskStatus,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ActionReminderHit {
+    pub id: EntityId,
+    pub title: String,
+    pub next_fire_at: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ActionTodayHit {
+    pub today: String,
+    pub overdue: Vec<ActionTaskHit>,
+    pub due_today: Vec<ActionTaskHit>,
+    pub focus: Vec<ActionTaskHit>,
+    pub reminders_today: Vec<ActionReminderHit>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ActionMemoryHit {
+    pub id: EntityId,
+    pub title: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub body_preview: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ActionSnippetHit {
+    pub id: EntityId,
+    pub content: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub source_app: Option<String>,
+    pub favorite: bool,
+}
+
+pub fn task_hit(task: &Task) -> ActionTaskHit {
+    ActionTaskHit {
+        id: task.id,
+        title: task.title.clone(),
+        notes_preview: preview_text(&task.notes, PREVIEW_LEN),
+        due_date: task.due_date.clone(),
+        due_time: task.due_time.clone(),
+        priority: task.priority,
+        list_name: task.list_name.clone(),
+        status: task.status,
+    }
+}
+
+pub fn reminder_hit(id: EntityId, title: &str, next_fire_at: &str) -> ActionReminderHit {
+    ActionReminderHit {
+        id,
+        title: title.to_string(),
+        next_fire_at: next_fire_at.to_string(),
+    }
+}
+
+pub fn memory_hit(memory: &Memory) -> ActionMemoryHit {
+    ActionMemoryHit {
+        id: memory.id,
+        title: memory.title.clone(),
+        body_preview: preview_text(&memory.body, PREVIEW_LEN),
+    }
+}
+
+fn preview_text(value: &str, max: usize) -> Option<String> {
+    let trimmed = value.trim();
+    if trimmed.is_empty() {
+        return None;
+    }
+    let mut iter = trimmed.chars();
+    let preview: String = iter.by_ref().take(max).collect();
+    if iter.next().is_some() {
+        Some(format!("{preview}…"))
+    } else {
+        Some(preview)
+    }
+}
+
+pub fn snippet_hit(
+    id: EntityId,
+    content: &str,
+    source_app: Option<String>,
+    favorite: bool,
+) -> ActionSnippetHit {
+    let mut iter = content.chars();
+    let clipped: String = iter.by_ref().take(SNIPPET_LEN).collect();
+    ActionSnippetHit {
+        id,
+        content: clipped,
+        source_app,
+        favorite,
+    }
+}
+
+pub fn query_limit(limit: Option<i64>) -> i64 {
+    limit.unwrap_or(20).clamp(1, 100)
 }
 
 impl From<UrlSchemeAction> for WorkbenchAction {
@@ -146,6 +291,21 @@ pub enum ActionOutcome {
     TaskCompleted {
         task: Task,
     },
+    TodayQueried {
+        data: ActionTodayHit,
+    },
+    TasksQueried {
+        items: Vec<ActionTaskHit>,
+        total: i64,
+    },
+    MemoriesQueried {
+        items: Vec<ActionMemoryHit>,
+        total: i64,
+    },
+    SnippetsQueried {
+        items: Vec<ActionSnippetHit>,
+        total: i64,
+    },
     Rejected {
         reason: String,
     },
@@ -171,6 +331,15 @@ pub fn workbench_action_description(action: &WorkbenchAction) -> String {
         WorkbenchAction::CreateReminder { input, .. } => format!("创建提醒：{}", input.title),
         WorkbenchAction::CreateMemory { input, .. } => format!("创建记忆：{}", input.title),
         WorkbenchAction::CompleteTask { task_id, .. } => format!("完成任务 {task_id}"),
+        WorkbenchAction::QueryToday => "查询今日事项".into(),
+        WorkbenchAction::QueryOverdue { .. } => "查询逾期任务".into(),
+        WorkbenchAction::QueryInbox { .. } => "查询收件箱".into(),
+        WorkbenchAction::QueryList { list_id, .. } => format!("查询清单 {list_id}"),
+        WorkbenchAction::SearchMemories { query, .. } => format!("搜索记忆：{query}"),
+        WorkbenchAction::GetSnippets { query, .. } => match query {
+            Some(q) if !q.trim().is_empty() => format!("查询文本片段：{q}"),
+            _ => "查询收藏文本片段".into(),
+        },
     }
 }
 
@@ -212,5 +381,19 @@ mod tests {
             confirmed: false,
         };
         assert!(reject_unconfirmed(&action).is_err());
+    }
+
+    #[test]
+    fn query_actions_skip_confirmation() {
+        assert!(!WorkbenchAction::QueryToday.requires_confirmation());
+        assert!(WorkbenchAction::QueryToday.is_confirmed());
+        assert!(reject_unconfirmed(&WorkbenchAction::QueryToday).is_ok());
+    }
+
+    #[test]
+    fn query_limit_defaults_and_clamps() {
+        assert_eq!(query_limit(None), 20);
+        assert_eq!(query_limit(Some(0)), 1);
+        assert_eq!(query_limit(Some(500)), 100);
     }
 }

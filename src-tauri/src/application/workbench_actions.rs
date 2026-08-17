@@ -4,8 +4,10 @@ use tauri::{AppHandle, Emitter, Manager};
 use crate::app_state::AppState;
 use crate::commands;
 use crate::domain::{
-    format_local_datetime, local_now_naive, ActionDispatchOptions, ActionOutcome, ActionSource,
-    DomainError, UrlCreateKind, UrlSchemeAction, WorkbenchAction,
+    format_local_datetime, local_now_naive, memory_hit, query_limit, reminder_hit, snippet_hit,
+    task_hit, ActionDispatchOptions, ActionOutcome, ActionSource, ActionTodayHit, ClipboardKind,
+    ClipboardQuery, DomainError, MemoryQuery, SmartListKind, TaskQuery, TaskStatus,
+    UrlCreateKind, UrlSchemeAction, WorkbenchAction,
 };
 
 pub fn dispatch(
@@ -86,7 +88,102 @@ pub fn dispatch(
             emit_task_change(app, &task, "completed");
             Ok(ActionOutcome::TaskCompleted { task })
         }
+        WorkbenchAction::QueryToday => {
+            let state = state.ok_or_else(|| DomainError::Validation("应用未就绪".into()))?;
+            let today = state.tasks.today_tasks()?;
+            Ok(ActionOutcome::TodayQueried {
+                data: ActionTodayHit {
+                    today: today.today,
+                    overdue: today.overdue.iter().map(task_hit).collect(),
+                    due_today: today.due_today.iter().map(task_hit).collect(),
+                    focus: today.focus.iter().map(task_hit).collect(),
+                    reminders_today: today
+                        .reminders_today
+                        .iter()
+                        .map(|item| {
+                            reminder_hit(item.reminder.id, &item.reminder.title, &item.reminder.next_fire_at)
+                        })
+                        .collect(),
+                },
+            })
+        }
+        WorkbenchAction::QueryOverdue { limit } => {
+            let state = state.ok_or_else(|| DomainError::Validation("应用未就绪".into()))?;
+            query_smart_list(state, SmartListKind::Overdue, limit)
+        }
+        WorkbenchAction::QueryInbox { limit } => {
+            let state = state.ok_or_else(|| DomainError::Validation("应用未就绪".into()))?;
+            let page = state.tasks.query_tasks(TaskQuery {
+                inbox_only: Some(true),
+                status: Some(TaskStatus::Todo),
+                limit: Some(query_limit(limit)),
+                ..Default::default()
+            })?;
+            Ok(ActionOutcome::TasksQueried {
+                items: page.items.iter().map(task_hit).collect(),
+                total: page.total,
+            })
+        }
+        WorkbenchAction::QueryList { list_id, limit } => {
+            let state = state.ok_or_else(|| DomainError::Validation("应用未就绪".into()))?;
+            let page = state.tasks.query_tasks(TaskQuery {
+                list_id: Some(list_id),
+                status: Some(TaskStatus::Todo),
+                limit: Some(query_limit(limit)),
+                ..Default::default()
+            })?;
+            Ok(ActionOutcome::TasksQueried {
+                items: page.items.iter().map(task_hit).collect(),
+                total: page.total,
+            })
+        }
+        WorkbenchAction::SearchMemories { query, limit } => {
+            let state = state.ok_or_else(|| DomainError::Validation("应用未就绪".into()))?;
+            let page = state.memories.query(MemoryQuery {
+                search: Some(query),
+                limit: Some(query_limit(limit)),
+                ..Default::default()
+            })?;
+            Ok(ActionOutcome::MemoriesQueried {
+                items: page.items.iter().map(memory_hit).collect(),
+                total: page.total,
+            })
+        }
+        WorkbenchAction::GetSnippets { query, limit } => {
+            let state = state.ok_or_else(|| DomainError::Validation("应用未就绪".into()))?;
+            let page = state.clipboard.query(ClipboardQuery {
+                favorites_only: Some(true),
+                search: query.filter(|q| !q.trim().is_empty()),
+                kind: Some(ClipboardKind::Text),
+                limit: Some(query_limit(limit)),
+                ..Default::default()
+            })?;
+            Ok(ActionOutcome::SnippetsQueried {
+                items: page
+                    .items
+                    .iter()
+                    .map(|item| {
+                        snippet_hit(item.id, &item.content, item.source_app.clone(), item.favorite)
+                    })
+                    .collect(),
+                total: page.total,
+            })
+        }
     }
+}
+
+fn query_smart_list(
+    state: &AppState,
+    kind: SmartListKind,
+    limit: Option<i64>,
+) -> Result<ActionOutcome, DomainError> {
+    let page = state
+        .tasks
+        .smart_list(kind, Some(query_limit(limit)), Some(0))?;
+    Ok(ActionOutcome::TasksQueried {
+        items: page.items.iter().map(task_hit).collect(),
+        total: page.total,
+    })
 }
 
 fn dispatch_create_preview(

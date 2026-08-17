@@ -11,6 +11,8 @@
 | `createPreview` | 弹出创建确认对话框 | ✅ `trove://create` |
 | `createTask` / `createReminder` / `createMemory` | 直接写入 | ❌ 须 `confirmed: true` 且非 UrlScheme |
 | `completeTask` | 完成任务 | ❌ 同上 |
+| `queryToday` / `queryOverdue` / `queryInbox` / `queryList` | 查询任务摘要 | ✅ CLI / 快捷指令 |
+| `searchMemories` / `getSnippets` | 搜索记忆、收藏文本片段 | ✅ CLI / 快捷指令 |
 
 ## 分发选项
 
@@ -40,4 +42,4 @@
 
 - ~~本地 CLI~~ → 见 [cli.md](./cli.md)（`trove-cli` 二进制）
 - ~~规则自动化~~ → 见 [automation.md](./automation.md)（首版动作直接调用应用服务；后续可收敛到 `WorkbenchAction`）
-- macOS 快捷指令 Actions 映射到同一枚举
+- ~~macOS 快捷指令~~ → 见 [shortcuts.md](./shortcuts.md)（经 `trove-cli --json` 映射到同一枚举）
