@@ -30,3 +30,11 @@
 - [x] `trove-cli query …` + `--json`
 - [x] `docs/shortcuts.md`
 - [x] `cargo test`
+
+## 切片 5 — CSV 任务导入导出
+
+- [x] `migrations/0018_import_batches.sql`
+- [x] `application/csv_tasks.rs` 导出 / 预览 / 导入 / 撤销
+- [x] 设置页「任务 CSV」区块
+- [x] `docs/csv-import.md`
+- [x] `cargo test`

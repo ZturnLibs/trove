@@ -8,6 +8,7 @@ import { ConfirmButton } from "@/design-system/patterns/ConfirmButton";
 import { Input } from "@/design-system/primitives/Input";
 import { ShortcutRow } from "@/features/settings/ShortcutRow";
 import { AutomationRulesSection } from "@/features/settings/AutomationRulesSection";
+import { CsvTasksSection } from "@/features/settings/CsvTasksSection";
 import {
   ipc,
   type AppSettings,
@@ -1145,6 +1146,7 @@ export function SettingsPage() {
               ) : null}
             </div>
           ) : null}
+          <CsvTasksSection onMessage={setMessage} />
         </section>
 
         <AutomationRulesSection

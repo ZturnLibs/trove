@@ -353,13 +353,13 @@ mod tests {
         }
 
         let db = Database::open(&db_path).unwrap();
-        assert_eq!(db.health_check().unwrap().schema_version, 17);
+        assert_eq!(db.health_check().unwrap().schema_version, 18);
 
         let svc = BackupService::new(db.clone(), backup_dir);
         svc.restore("workbench-old-v2-20260101-000000.db").unwrap();
 
         // Restored DB is migrated up to the current schema.
-        assert_eq!(db.health_check().unwrap().schema_version, 17);
+        assert_eq!(db.health_check().unwrap().schema_version, 18);
         let name: String = db
             .connect()
             .unwrap()

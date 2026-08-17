@@ -86,6 +86,65 @@ export type ImportResult = {
   rows: number;
 };
 
+export type CsvFieldMapping = {
+  title?: string | null;
+  notes?: string | null;
+  status?: string | null;
+  priority?: string | null;
+  list?: string | null;
+  dueDate?: string | null;
+  dueTime?: string | null;
+  tags?: string | null;
+};
+
+export type CsvRowIssue = {
+  row: number;
+  title?: string | null;
+  message: string;
+};
+
+export type CsvSampleRow = {
+  title: string;
+  list?: string | null;
+  dueDate?: string | null;
+  priority: string;
+  duplicate: boolean;
+};
+
+export type CsvPreview = {
+  headers: string[];
+  mapping: CsvFieldMapping;
+  rowCount: number;
+  validCount: number;
+  duplicateCount: number;
+  errorCount: number;
+  errors: CsvRowIssue[];
+  duplicates: CsvRowIssue[];
+  unmappedLists: string[];
+  sample: CsvSampleRow[];
+};
+
+export type CsvImportResult = {
+  batchId: string;
+  created: number;
+  skipped: number;
+};
+
+export type ImportBatch = {
+  id: string;
+  source: string;
+  created: number;
+  skipped: number;
+  status: string;
+  createdAt: string;
+  undoneAt?: string | null;
+};
+
+export type CsvUndoResult = {
+  deleted: number;
+  kept: number;
+};
+
 export type SmokeNote = {
   id: string;
   body: string;
@@ -1030,6 +1089,16 @@ export const ipc = {
     invoke<void>("backup_restore", { fileName }),
   dataExport: () => invoke<string>("data_export"),
   dataImport: (json: string) => invoke<ImportResult>("data_import", { json }),
+  csvExportTasks: () => invoke<string>("csv_export_tasks"),
+  csvPreviewTasks: (csv: string, mapping?: CsvFieldMapping | null) =>
+    invoke<CsvPreview>("csv_preview_tasks", { csv, mapping: mapping ?? null }),
+  csvImportTasks: (input: {
+    csv: string;
+    skipDuplicates?: boolean;
+    mapping?: CsvFieldMapping | null;
+  }) => invoke<CsvImportResult>("csv_import_tasks", { input }),
+  csvImportBatches: () => invoke<ImportBatch[]>("csv_import_batches"),
+  csvUndoImport: (id: string) => invoke<CsvUndoResult>("csv_undo_import", { id }),
   windowShowMain: () => invoke<void>("window_show_main"),
   windowShowQuick: (mode?: "capture" | "search" | "clip") =>
     invoke<void>("window_show_quick", { mode }),

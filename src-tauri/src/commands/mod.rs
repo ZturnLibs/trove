@@ -4,6 +4,9 @@ use crate::application::automation::{
     event_from_task_created, event_from_task_moved, event_from_task_tag_added,
 };
 use crate::application::backup::{BackupInfo, BackupStatus};
+use crate::application::csv_tasks::{
+    CsvImportInput, CsvImportResult, CsvPreview, CsvUndoResult, ImportBatch,
+};
 use crate::application::data_port::ImportResult;
 use crate::application::saved_views::{CreateSavedViewInput, SavedView};
 use crate::application::smoke_notes::SmokeNote;
@@ -1557,6 +1560,66 @@ pub fn data_import(
             entity_type: "data".into(),
             entity_id: "*".into(),
             change: "imported".into(),
+            revision: 0,
+        },
+    );
+    Ok(result)
+}
+
+#[tauri::command]
+pub fn csv_export_tasks(state: State<'_, AppState>) -> Result<String, AppError> {
+    state.csv_tasks.export_csv().map_err(Into::into)
+}
+
+#[tauri::command]
+pub fn csv_preview_tasks(
+    state: State<'_, AppState>,
+    csv: String,
+    mapping: Option<crate::application::csv_tasks::CsvFieldMapping>,
+) -> Result<CsvPreview, AppError> {
+    state.csv_tasks.preview(&csv, mapping).map_err(Into::into)
+}
+
+#[tauri::command]
+pub fn csv_import_tasks(
+    app: AppHandle,
+    state: State<'_, AppState>,
+    input: CsvImportInput,
+) -> Result<CsvImportResult, AppError> {
+    let result = state.csv_tasks.import(input)?;
+    if let Err(err) = state.search.rebuild_all() {
+        tracing::warn!(error = %err, "search rebuild after csv import failed");
+    }
+    let _ = app.emit(
+        "domain://changed",
+        DomainChangeEvent {
+            entity_type: "task".into(),
+            entity_id: "*".into(),
+            change: "imported".into(),
+            revision: 0,
+        },
+    );
+    Ok(result)
+}
+
+#[tauri::command]
+pub fn csv_import_batches(state: State<'_, AppState>) -> Result<Vec<ImportBatch>, AppError> {
+    state.csv_tasks.list_batches().map_err(Into::into)
+}
+
+#[tauri::command]
+pub fn csv_undo_import(
+    app: AppHandle,
+    state: State<'_, AppState>,
+    id: EntityId,
+) -> Result<CsvUndoResult, AppError> {
+    let result = state.csv_tasks.undo_batch(id)?;
+    let _ = app.emit(
+        "domain://changed",
+        DomainChangeEvent {
+            entity_type: "task".into(),
+            entity_id: "*".into(),
+            change: "updated".into(),
             revision: 0,
         },
     );
