@@ -4,6 +4,7 @@ version = "1.4.0"
 description = "Trove — 一站式个人工作台"
 authors = ["you"]
 edition = "2021"
+default-run = "trove"
 
 [lib]
 name = "trove_lib"
