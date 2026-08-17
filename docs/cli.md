@@ -9,7 +9,7 @@ cd src-tauri
 cargo build --release --bin trove-cli
 ```
 
-产物：`target/release/trove-cli`（与 `trove` 主程序同目录）。
+产物：`target/release/trove-cli`（与 `trove` 主程序同目录）。安装包会把 `trove-cli` 放到应用可执行文件旁（macOS：`Trove.app/Contents/MacOS/trove-cli`）。
 
 ## 全局选项
 
