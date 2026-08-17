@@ -18,7 +18,7 @@ cargo build --release --bin trove-cli
 
 ```bash
 export PATH="/Applications/Trove.app/Contents/MacOS:$PATH"
-# 若 CLI 尚未随 App 分发，改成你的 target/release 路径
+# 本地开发可改成 src-tauri/target/release
 ```
 
 ## 首批动作
