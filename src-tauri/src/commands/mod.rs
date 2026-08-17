@@ -1,4 +1,8 @@
 use crate::app_state::AppState;
+use crate::application::automation::{
+    event_from_clipboard_favorited, event_from_memory_created, event_from_reminder_created,
+    event_from_task_created, event_from_task_moved, event_from_task_tag_added,
+};
 use crate::application::backup::{BackupInfo, BackupStatus};
 use crate::application::data_port::ImportResult;
 use crate::application::saved_views::{CreateSavedViewInput, SavedView};
@@ -8,13 +12,14 @@ use crate::application::templates::{
     CreateTemplateInput, ItemTemplate, TemplateKind, TemplatePreview,
 };
 use crate::domain::{
-    parse_capture,     AppError, ClipboardItem, ClipboardKind, ClipboardQuery,
-    ConvertMemoryToTaskResult, CreateMemoryInput, CreateReminderInput, CreateTaskInput, EntityId,
-    EntityLink, LinkInput, Memory, MemoryQuery, PagedResult, ParsedCapture, RecurrenceRule, Reminder,
-    ReminderOccurrence, SearchEntityType, SearchQuery, SearchResults, SmartListKind, SnoozePreset,
-    Tag, Task, TaskList, TaskQuery, TodaySortSuggestions, TodayTasks, UpdateMemoryInput, UpdateReminderInput,
-    UpdateTaskInput, DeleteListResult, ListDeleteDisposition,
-    ActionDispatchOptions, ActionOutcome, WorkbenchAction,
+    parse_capture,     AppError, AutomationDryRunResult, AutomationEvent, AutomationRule,
+    AutomationRun, ClipboardItem, ClipboardKind, ClipboardQuery,
+    ConvertMemoryToTaskResult, CreateAutomationRuleInput, CreateMemoryInput, CreateReminderInput,
+    CreateTaskInput, EntityId, EntityLink, LinkInput, Memory, MemoryQuery, PagedResult,
+    ParsedCapture, RecurrenceRule, Reminder, ReminderOccurrence, SearchEntityType, SearchQuery,
+    SearchResults, SmartListKind, SnoozePreset, Tag, Task, TaskList, TaskQuery, TodaySortSuggestions,
+    TodayTasks, UpdateAutomationRuleInput, UpdateMemoryInput, UpdateReminderInput, UpdateTaskInput,
+    DeleteListResult, ListDeleteDisposition, ActionDispatchOptions, ActionOutcome, WorkbenchAction,
 };
 use crate::infrastructure::db::DbHealth;
 use crate::infrastructure::settings::{AppSettings, ShortcutSettings};
@@ -68,6 +73,39 @@ fn index_reminder(state: &AppState, reminder: &Reminder) {
         &reminder.title,
         &reminder.notes,
     );
+}
+
+fn maybe_run_automation(app: &AppHandle, state: &AppState, event: AutomationEvent) {
+    if let Err(err) = state.automation.run_for_event(
+        app,
+        &state.settings,
+        &state.tasks,
+        &state.memories,
+        event,
+        false,
+    ) {
+        tracing::warn!(error = %err, "automation run failed");
+    }
+}
+
+fn maybe_run_automation_task_updated(
+    app: &AppHandle,
+    state: &AppState,
+    before: &Task,
+    after: &Task,
+) {
+    if before.list_id != after.list_id {
+        maybe_run_automation(app, state, event_from_task_moved(after, before.list_id));
+    }
+    for tag in &after.tag_names {
+        if !before
+            .tag_names
+            .iter()
+            .any(|t| t.eq_ignore_ascii_case(tag))
+        {
+            maybe_run_automation(app, state, event_from_task_tag_added(after, tag));
+        }
+    }
 }
 
 #[tauri::command]
@@ -225,6 +263,7 @@ pub fn task_create(
     let task = state.tasks.create_task(input)?;
     index_task(&state, &task);
     emit_task_change(&app, &task, "created");
+    maybe_run_automation(&app, &state, event_from_task_created(&task));
     Ok(task)
 }
 
@@ -234,9 +273,11 @@ pub fn task_update(
     state: State<'_, AppState>,
     input: UpdateTaskInput,
 ) -> Result<Task, AppError> {
+    let existing = state.tasks.get_task(input.id)?;
     let task = state.tasks.update_task(input)?;
     index_task(&state, &task);
     emit_task_change(&app, &task, "updated");
+    maybe_run_automation_task_updated(&app, &state, &existing, &task);
     Ok(task)
 }
 
@@ -344,6 +385,7 @@ pub fn reminder_create(
             revision: reminder.revision,
         },
     );
+    maybe_run_automation(&app, &state, event_from_reminder_created(&reminder));
     Ok(reminder)
 }
 
@@ -917,6 +959,7 @@ pub fn memory_create(
             revision: memory.revision,
         },
     );
+    maybe_run_automation(&app, &state, event_from_memory_created(&memory));
     Ok(memory)
 }
 
@@ -1175,6 +1218,9 @@ pub fn clipboard_set_favorite(
 ) -> Result<ClipboardItem, AppError> {
     let item = state.clipboard.set_favorite(id, favorite)?;
     emit_clipboard_change(&app, &item, "updated");
+    if favorite {
+        maybe_run_automation(&app, &state, event_from_clipboard_favorited(&item));
+    }
     Ok(item)
 }
 
@@ -1578,6 +1624,62 @@ pub fn workbench_action_dispatch(
 ) -> Result<ActionOutcome, AppError> {
     crate::application::workbench_actions::dispatch(&app, Some(state.inner()), action, options)
         .map_err(Into::into)
+}
+
+#[tauri::command]
+pub fn automation_list(state: State<'_, AppState>) -> Result<Vec<AutomationRule>, AppError> {
+    state.automation.list().map_err(Into::into)
+}
+
+#[tauri::command]
+pub fn automation_create(
+    state: State<'_, AppState>,
+    input: CreateAutomationRuleInput,
+) -> Result<AutomationRule, AppError> {
+    state.automation.create(input).map_err(Into::into)
+}
+
+#[tauri::command]
+pub fn automation_update(
+    state: State<'_, AppState>,
+    input: UpdateAutomationRuleInput,
+) -> Result<AutomationRule, AppError> {
+    state.automation.update(input).map_err(Into::into)
+}
+
+#[tauri::command]
+pub fn automation_delete(state: State<'_, AppState>, id: EntityId) -> Result<(), AppError> {
+    state.automation.delete(id).map_err(Into::into)
+}
+
+#[tauri::command]
+pub fn automation_set_enabled(
+    state: State<'_, AppState>,
+    id: EntityId,
+    enabled: bool,
+) -> Result<AutomationRule, AppError> {
+    state.automation.set_enabled(id, enabled).map_err(Into::into)
+}
+
+#[tauri::command]
+pub fn automation_runs_list(
+    state: State<'_, AppState>,
+    rule_id: Option<EntityId>,
+    limit: Option<i64>,
+) -> Result<Vec<AutomationRun>, AppError> {
+    state
+        .automation
+        .list_runs(rule_id, limit.unwrap_or(50))
+        .map_err(Into::into)
+}
+
+#[tauri::command]
+pub fn automation_dry_run(
+    state: State<'_, AppState>,
+    rule_id: EntityId,
+    event: AutomationEvent,
+) -> Result<AutomationDryRunResult, AppError> {
+    state.automation.dry_run(rule_id, event).map_err(Into::into)
 }
 
 #[tauri::command]

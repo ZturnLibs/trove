@@ -32,6 +32,7 @@ export type AppSettings = {
   backupRetentionCount: number;
   onboardingCompleted: boolean;
   lastFocusCarryDismissedDate?: string | null;
+  automationEnabled: boolean;
 };
 
 export type DbHealth = {
@@ -724,6 +725,109 @@ export type LinkedAsset = {
   createdAt: string;
 };
 
+export type AutomationEntityType = "task" | "reminder" | "memory" | "clipboard";
+
+export type AutomationEventKind =
+  | "taskCreated"
+  | "reminderCreated"
+  | "memoryCreated"
+  | "clipboardFavorited"
+  | "reminderFired"
+  | "taskMovedToList"
+  | "taskTagAdded";
+
+export type AutomationTrigger =
+  | { kind: "taskCreated" }
+  | { kind: "reminderCreated" }
+  | { kind: "memoryCreated" }
+  | { kind: "clipboardFavorited" }
+  | { kind: "reminderFired" }
+  | { kind: "taskMovedToList"; listId?: string | null }
+  | { kind: "taskTagAdded"; tagName?: string | null };
+
+export type AutomationCondition =
+  | { kind: "titleContains"; text: string; caseInsensitive?: boolean }
+  | { kind: "bodyContains"; text: string; caseInsensitive?: boolean }
+  | { kind: "entityType"; entityType: AutomationEntityType }
+  | { kind: "listId"; listId: string }
+  | { kind: "hasTag"; tagName: string }
+  | { kind: "priority"; priority: TaskPriority }
+  | { kind: "sourceApp"; app: string }
+  | { kind: "weekday"; days: number[] }
+  | { kind: "timeRange"; start: string; end: string };
+
+export type AutomationAction =
+  | { kind: "setPriority"; priority: TaskPriority }
+  | { kind: "moveToList"; listId: string }
+  | { kind: "addTag"; tagName: string }
+  | { kind: "pinMemory" }
+  | { kind: "notify"; title: string; body: string };
+
+export type AutomationRuleDefinition = {
+  trigger: AutomationTrigger;
+  conditions: AutomationCondition[];
+  actions: AutomationAction[];
+};
+
+export type AutomationRule = {
+  id: string;
+  name: string;
+  enabled: boolean;
+  definition: AutomationRuleDefinition;
+  createdAt: string;
+  updatedAt: string;
+  revision: number;
+};
+
+export type AutomationRunStatus = "success" | "skipped" | "failed" | "dryRun";
+
+export type AutomationRun = {
+  id: string;
+  ruleId: string;
+  ruleName: string;
+  entityType: AutomationEntityType;
+  entityId: string;
+  status: AutomationRunStatus;
+  actionsApplied: AutomationAction[];
+  errorSummary?: string | null;
+  dryRun: boolean;
+  createdAt: string;
+};
+
+export type AutomationDryRunResult = {
+  ruleId: string;
+  ruleName: string;
+  matched: boolean;
+  actions: AutomationAction[];
+  skipReason?: string | null;
+};
+
+export type AutomationEvent = {
+  kind: AutomationEventKind;
+  entityType: AutomationEntityType;
+  entityId: string;
+  title: string;
+  body: string;
+  listId?: string | null;
+  tagNames: string[];
+  priority?: TaskPriority | null;
+  sourceApp?: string | null;
+  addedTag?: string | null;
+  targetListId?: string | null;
+};
+
+export type CreateAutomationRuleInput = {
+  name: string;
+  definition: AutomationRuleDefinition;
+};
+
+export type UpdateAutomationRuleInput = {
+  id: string;
+  name: string;
+  enabled: boolean;
+  definition: AutomationRuleDefinition;
+};
+
 export const ipc = {
   appHealth: () => invoke<AppHealth>("app_health"),
   settingsGet: () => invoke<AppSettings>("settings_get"),
@@ -931,5 +1035,20 @@ export const ipc = {
     invoke<void>("window_show_quick", { mode }),
   windowHideQuick: () => invoke<void>("window_hide_quick"),
   urlSchemeHandle: (url: string) => invoke<void>("url_scheme_handle", { url }),
+  automationList: () => invoke<AutomationRule[]>("automation_list"),
+  automationCreate: (input: CreateAutomationRuleInput) =>
+    invoke<AutomationRule>("automation_create", { input }),
+  automationUpdate: (input: UpdateAutomationRuleInput) =>
+    invoke<AutomationRule>("automation_update", { input }),
+  automationDelete: (id: string) => invoke<void>("automation_delete", { id }),
+  automationSetEnabled: (id: string, enabled: boolean) =>
+    invoke<AutomationRule>("automation_set_enabled", { id, enabled }),
+  automationRunsList: (ruleId: string | null, limit?: number) =>
+    invoke<AutomationRun[]>("automation_runs_list", {
+      ruleId,
+      limit: limit ?? null,
+    }),
+  automationDryRun: (ruleId: string, event: AutomationEvent) =>
+    invoke<AutomationDryRunResult>("automation_dry_run", { ruleId, event }),
   appQuit: () => invoke<void>("app_quit"),
 };

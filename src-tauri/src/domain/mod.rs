@@ -1,3 +1,4 @@
+mod automation;
 mod clipboard;
 mod clipboard_classify;
 mod health;
@@ -17,6 +18,7 @@ mod today_smart_sort;
 mod url_scheme;
 mod workbench_action;
 
+pub use automation::*;
 pub use clipboard::*;
 pub use clipboard_classify::classify_clipboard_text;
 pub use health::*;

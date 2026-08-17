@@ -38,6 +38,6 @@
 
 ## 后续（v1.4+）
 
-- 本地 CLI 调用 `workbench_action_dispatch` 或专用子命令
-- 规则自动化在触发后构造 `WorkbenchAction`
+- ~~本地 CLI~~ → 见 [cli.md](./cli.md)（`trove-cli` 二进制）
+- ~~规则自动化~~ → 见 [automation.md](./automation.md)（首版动作直接调用应用服务；后续可收敛到 `WorkbenchAction`）
 - macOS 快捷指令 Actions 映射到同一枚举

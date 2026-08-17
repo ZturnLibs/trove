@@ -25,6 +25,8 @@ pub struct AppSettings {
     pub auto_backup_on_launch: bool,
     #[serde(default = "default_true")]
     pub auto_check_updates: bool,
+    #[serde(default = "default_true")]
+    pub automation_enabled: bool,
     #[serde(default = "default_backup_keep")]
     pub backup_retention_count: u32,
     #[serde(default)]
@@ -93,6 +95,7 @@ impl Default for AppSettings {
             today_smart_sort_enabled: true,
             auto_backup_on_launch: true,
             auto_check_updates: true,
+            automation_enabled: true,
             backup_retention_count: 10,
             onboarding_completed: false,
             last_focus_carry_dismissed_date: None,

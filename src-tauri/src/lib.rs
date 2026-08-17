@@ -486,7 +486,7 @@ pub fn run() {
                 .map_err(|e| e.to_string())?;
             let state = AppState::new(db, backup_dir, assets_dir)?;
             let settings = state.settings.get().unwrap_or_default();
-            let reminders = state.reminders.clone();
+            let scheduler_state = state.clone();
             let clipboard = state.clipboard.clone();
             let backups = state.backups.clone();
 
@@ -554,7 +554,7 @@ pub fn run() {
                 &TRAY_TODAY_LAST_SHOWN_MS,
                 &TRAY_TODAY_BLUR_TOKEN,
             );
-            application::scheduler::start(app.handle().clone(), reminders);
+            application::scheduler::start(app.handle().clone(), scheduler_state);
             application::clipboard_poller::start(app.handle().clone(), clipboard);
 
             #[cfg(desktop)]
@@ -701,6 +701,13 @@ pub fn run() {
             commands::window_hide_quick,
             commands::url_scheme_handle,
             commands::workbench_action_dispatch,
+            commands::automation_list,
+            commands::automation_create,
+            commands::automation_update,
+            commands::automation_delete,
+            commands::automation_set_enabled,
+            commands::automation_runs_list,
+            commands::automation_dry_run,
             commands::app_quit,
         ])
         .run(tauri::generate_context!())

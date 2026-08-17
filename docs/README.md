@@ -7,6 +7,7 @@
 - [应用菜单](./app-menu-design.md)：菜单栏、托盘菜单、上下文菜单的信息架构、启用规则与快捷键归属。
 - [快捷键一览](./keyboard-shortcuts.md)：全局 / 应用内 / 快捷窗口键位定稿、设置页交互与实现对照。
 - [URL Scheme（trove://）](./url-scheme.md)：深度链接动作清单与安全约束，供 Raycast/快捷指令集成。
+- [本地 CLI（trove-cli）](./cli.md)：`v1.4` 命令行入口，复用统一动作层。
 - [浏览器扩展（规划）](./browser-extension/README.md)：`v1.4+` 网页捕获扩展 follow-up。
 - [版本发布说明](./releases/v1.3.0.md)：`v1.3.0` 功能清单与升级说明。
 - [版本发布说明](./releases/v1.3.1.md)：`v1.3.1` 文档同步补丁。
