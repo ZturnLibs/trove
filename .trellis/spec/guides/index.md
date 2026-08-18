@@ -42,6 +42,8 @@ These guides help you **ask the right questions before coding**.
 
 → Read [Cross-Layer Thinking Guide](./cross-layer-thinking-guide.md)
 
+Adding `src/bin/*` or cutting a GitHub Release → also read [Tauri extra binaries](../tauri/extra-binaries-and-release.md). Changing `WorkbenchAction` → [workbench-action.md](../tauri/workbench-action.md).
+
 ### When to Think About Code Reuse
 
 - [ ] You're writing similar code to something that exists
