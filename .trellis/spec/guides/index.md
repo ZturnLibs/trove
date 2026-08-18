@@ -23,6 +23,7 @@ These guides help you **ask the right questions before coding**.
 |-------|---------|-------------|
 | [Code Reuse Thinking Guide](./code-reuse-thinking-guide.md) | Identify patterns and reduce duplication | When you notice repeated patterns |
 | [Cross-Layer Thinking Guide](./cross-layer-thinking-guide.md) | Think through data flow across layers | Features spanning multiple layers |
+| [Tauri extra binaries](../tauri/extra-binaries-and-release.md) | Release/build contracts for extra bins | Adding `src/bin`, cutting a `v*` tag |
 
 ---
 
@@ -36,6 +37,8 @@ These guides help you **ask the right questions before coding**.
 - [ ] You're not sure where to put some logic
 - [ ] You are adding an event kind, JSONL record, RPC payload, or config field
 - [ ] UI / command code starts casting raw payload fields directly
+- [ ] Adding `src-tauri/src/bin/*` (extra Cargo binary beside the Tauri app)
+- [ ] Changing `WorkbenchAction` serde or IPC `workbench_action_dispatch`
 
 → Read [Cross-Layer Thinking Guide](./cross-layer-thinking-guide.md)
 
