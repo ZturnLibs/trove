@@ -8,8 +8,8 @@
 
 <!-- @@@auto:current-status -->
 - **Active File**: `journal-1.md`
-- **Total Sessions**: 1
-- **Last Active**: 2026-08-05
+- **Total Sessions**: 2
+- **Last Active**: 2026-08-18
 <!-- @@@/auto:current-status -->
 
 ---
@@ -19,7 +19,7 @@
 <!-- @@@auto:active-documents -->
 | File | Lines | Status |
 |------|-------|--------|
-| `journal-1.md` | ~30 | Active |
+| `journal-1.md` | ~77 | Active |
 <!-- @@@/auto:active-documents -->
 
 ---
@@ -29,6 +29,7 @@
 <!-- @@@auto:session-history -->
 | # | Date | Title | Commits | Branch |
 |---|------|-------|---------|--------|
+| 2 | 2026-08-18 | v1.4 统一动作层并发布 v1.4.0 | `c2fb1f8`, `34577ef`, `82796c3`, `afdb004`, `b9ef347`, `a9c894c`, `f7f19fa`, `4ebd3e3`, `f52648d`, `8892c69`, `bcc5633` | `feat-improve` |
 | 1 | 2026-08-05 | 今日页底部快速输入任务 & 修复 confirm 失效 | `04c02d2`, `aedae3f`, `a12eda1` | `main` |
 <!-- @@@/auto:session-history -->
 
