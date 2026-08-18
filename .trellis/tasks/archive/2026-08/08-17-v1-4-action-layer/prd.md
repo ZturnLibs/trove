@@ -14,9 +14,9 @@
 
 ## Acceptance Criteria
 
-- [ ] `trove://` 行为不变（导航 / 搜索 / 创建预览）
-- [ ] Rust 单测覆盖 action 转换与确认门禁
-- [ ] `cargo test` 全绿
+- [x] `trove://` 行为不变（导航 / 搜索 / 创建预览）
+- [x] Rust 单测覆盖 action 转换与确认门禁
+- [x] `cargo test` 全绿
 
 ## 明确不做（本切片）
 
