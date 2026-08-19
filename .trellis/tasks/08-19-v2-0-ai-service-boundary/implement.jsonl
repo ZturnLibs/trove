@@ -1,0 +1,4 @@
+{"file": ".trellis/spec/tauri/index.md", "reason": "Tauri 后端分层与合同入口（新增 application/infrastructure 边界需遵循）"}
+{"file": ".trellis/spec/tauri/workbench-action.md", "reason": "v1.4 动作层合同：建议确认后经 WorkbenchActionService 分发"}
+{"file": ".trellis/tasks/08-19-v2-0-ai-assist-roadmap/research/startup-gate-assessment.md", "reason": "服务边界设计与隐私红线（§3.2 合同、§3.3 风险）是本切片的实现依据"}
+{"file": "docs/empty-states-and-permissions.md", "reason": "AI 未配置/探活失败降级文案语气标准"}
