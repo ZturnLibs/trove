@@ -75,3 +75,24 @@
 ### Next Steps
 
 - 如需让 main 也没有活跃任务，把 feat-improve 上的 spec/archive/journal 提交合入 main
+
+
+## Session 3: v2.0 启动评估与路线图规划
+
+**Date**: 2026-08-19
+**Task**: v2.0 启动评估与路线图规划
+**Branch**: `feat-improve`
+
+### Summary
+
+对齐 main 的 v1.4.0 后，完成 §9.1 启动门槛评估（门槛1/2 满足、3 冻结数据边界、4 转为切片1 AC），创建父任务 v2-0-ai-assist-roadmap 与切片 1 v2-0-ai-service-boundary 的 PRD，发布 docs/v2-ai-assist-roadmap.md
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `3476f53` | (see git log) |
+
+### Status
+
+[OK] **Completed**
