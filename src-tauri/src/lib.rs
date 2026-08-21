@@ -718,6 +718,13 @@ pub fn run() {
             commands::automation_set_enabled,
             commands::automation_runs_list,
             commands::automation_dry_run,
+            commands::ai_provider_key_status,
+            commands::ai_provider_key_set,
+            commands::ai_provider_key_clear,
+            commands::ai_provider_probe,
+            commands::ai_suggestion_list,
+            commands::ai_suggestion_decide,
+            commands::ai_suggestion_clear,
             commands::app_quit,
         ])
         .run(tauri::generate_context!())

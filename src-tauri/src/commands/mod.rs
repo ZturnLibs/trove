@@ -16,6 +16,7 @@ use crate::application::templates::{
 };
 use crate::domain::{
     parse_capture,     AppError, AutomationDryRunResult, AutomationEvent, AutomationRule,
+    AIFeature, AISuggestionRecord, ProbeReport, SuggestionStatus,
     AutomationRun, ClipboardItem, ClipboardKind, ClipboardQuery,
     ConvertMemoryToTaskResult, CreateAutomationRuleInput, CreateMemoryInput, CreateReminderInput,
     CreateTaskInput, EntityId, EntityLink, LinkInput, Memory, MemoryQuery, PagedResult,
@@ -28,7 +29,7 @@ use crate::infrastructure::db::DbHealth;
 use crate::infrastructure::settings::{AppSettings, ShortcutSettings};
 use crate::platform::{detect_capabilities, PlatformCapabilities};
 use serde::Serialize;
-use tauri::{image::Image, AppHandle, Emitter, State};
+use tauri::{image::Image, AppHandle, Emitter, Manager, State};
 use tauri_plugin_autostart::ManagerExt;
 use tauri_plugin_clipboard_manager::ClipboardExt;
 
@@ -1748,4 +1749,93 @@ pub fn automation_dry_run(
 #[tauri::command]
 pub fn app_quit(app: tauri::AppHandle) {
     app.exit(0);
+}
+
+// ---------------------------------------------------------------------------
+// v2.0 slice 1: AI service boundary
+// ---------------------------------------------------------------------------
+
+#[derive(Debug, serde::Deserialize, Clone, Copy, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub enum SuggestionDecision {
+    Accept,
+    Reject,
+    Dismiss,
+}
+
+#[derive(Debug, Serialize, Clone)]
+#[serde(rename_all = "camelCase")]
+pub struct AIProviderKeyStatus {
+    pub exists: bool,
+}
+
+#[tauri::command]
+pub fn ai_provider_key_status(
+    app: AppHandle,
+) -> Result<AIProviderKeyStatus, AppError> {
+    let data_dir = app.path().app_data_dir().map_err(|e| AppError::new("path", e.to_string()))?;
+    Ok(AIProviderKeyStatus {
+        exists: crate::infrastructure::ai::provider_key_exists(&data_dir),
+    })
+}
+
+/// The key content is write-only from the UI's perspective: we accept it,
+/// store it outside the database, and never echo it back.
+#[tauri::command]
+pub fn ai_provider_key_set(app: AppHandle, key: String) -> Result<AIProviderKeyStatus, AppError> {
+    let data_dir = app.path().app_data_dir().map_err(|e| AppError::new("path", e.to_string()))?;
+    crate::infrastructure::ai::write_provider_key(&data_dir, &key)?;
+    Ok(AIProviderKeyStatus {
+        exists: true,
+    })
+}
+
+#[tauri::command]
+pub fn ai_provider_key_clear(app: AppHandle) -> Result<AIProviderKeyStatus, AppError> {
+    let data_dir = app.path().app_data_dir().map_err(|e| AppError::new("path", e.to_string()))?;
+    crate::infrastructure::ai::clear_provider_key(&data_dir)?;
+    Ok(AIProviderKeyStatus {
+        exists: false,
+    })
+}
+
+/// Probe with the *current* settings (not the provider captured at launch),
+/// so users can flip modes and test connectivity without restarting.
+#[tauri::command]
+pub fn ai_provider_probe(state: State<'_, AppState>, app: AppHandle) -> Result<ProbeReport, AppError> {
+    let settings = state.settings.get()?;
+    let data_dir = app.path().app_data_dir().map_err(|e| AppError::new("path", e.to_string()))?;
+    let provider = crate::infrastructure::ai::build_provider(&settings.ai, &data_dir);
+    Ok(provider.probe())
+}
+
+#[tauri::command]
+pub fn ai_suggestion_list(
+    state: State<'_, AppState>,
+    feature: Option<AIFeature>,
+    status: Option<SuggestionStatus>,
+) -> Result<Vec<AISuggestionRecord>, AppError> {
+    state
+        .ai_suggestions
+        .list(feature, status)
+        .map_err(Into::into)
+}
+
+#[tauri::command]
+pub fn ai_suggestion_decide(
+    state: State<'_, AppState>,
+    id: String,
+    decision: SuggestionDecision,
+) -> Result<AISuggestionRecord, AppError> {
+    let status = match decision {
+        SuggestionDecision::Accept => SuggestionStatus::Accepted,
+        SuggestionDecision::Reject => SuggestionStatus::Rejected,
+        SuggestionDecision::Dismiss => SuggestionStatus::Dismissed,
+    };
+    state.ai_suggestions.decide(&id, status).map_err(Into::into)
+}
+
+#[tauri::command]
+pub fn ai_suggestion_clear(state: State<'_, AppState>) -> Result<usize, AppError> {
+    state.ai_suggestions.clear_history().map_err(Into::into)
 }
