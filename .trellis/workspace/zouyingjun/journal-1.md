@@ -96,3 +96,24 @@
 ### Status
 
 [OK] **Completed**
+
+
+## Session 4: v2.0 切片 1：AI 服务边界实现交付
+
+**Date**: 2026-08-21
+**Task**: v2.0 切片 1：AI 服务边界实现交付
+**Branch**: `feat-improve`
+
+### Summary
+
+实现 0019 迁移、AIConfig/domain 校验、Off+Http provider（key 库外文件隔离）、AISuggestionService 管线（sanitize 红线/结构化校验/审计台账）、7 个 IPC 命令、设置页智能辅助区块与记忆敏感标记、ai-eval 固定样本与离线回归 runner；docs/ai-assist.md 与 privacy 增补。133 lib + 8 eval + 42 前端测试全绿（1 个已知无关 flaky）
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `4075ae2` | (see git log) |
+
+### Status
+
+[OK] **Completed**
