@@ -33,6 +33,59 @@ export type AppSettings = {
   onboardingCompleted: boolean;
   lastFocusCarryDismissedDate?: string | null;
   automationEnabled: boolean;
+  ai: AIConfig;
+};
+
+export type AIMode = "off" | "ollama" | "custom";
+
+export type AIFeature = "extract" | "related" | "summary" | "suggest" | "split";
+
+export type AIFeatureToggles = {
+  extract: boolean;
+  related: boolean;
+  summary: boolean;
+  suggest: boolean;
+  split: boolean;
+};
+
+export type AIConfig = {
+  mode: AIMode;
+  ollamaUrl: string;
+  ollamaModel: string;
+  customEndpoint: string;
+  customModel: string;
+  features: AIFeatureToggles;
+};
+
+export type ProbeReport = {
+  mode: AIMode;
+  reachable: boolean;
+  model: string | null;
+  latencyMs: number | null;
+  hint: string | null;
+};
+
+export type SuggestedItem = {
+  title: string;
+  detail: string | null;
+  dueDate: string | null;
+  dueTime: string | null;
+  ambiguous: boolean;
+  sourceExcerpt: string;
+};
+
+export type AISuggestionRecord = {
+  id: string;
+  featureType: string;
+  sourceEntityType: string;
+  sourceEntityId: string;
+  payload: { items: SuggestedItem[]; summary: string | null };
+  sources: { entityType: string; entityId: string; textOffset: number; excerpt: string }[];
+  status: "pending" | "accepted" | "rejected" | "dismissed";
+  provider: string;
+  model: string;
+  createdAt: string;
+  decidedAt: string | null;
 };
 
 export type DbHealth = {
@@ -530,6 +583,7 @@ export type Memory = {
   archived: boolean;
   quickInsert: boolean;
   triggerWord: string | null;
+  sensitive: boolean;
   mentionUseCount: number;
   tagIds: string[];
   tagNames: string[];
@@ -555,6 +609,7 @@ export type UpdateMemoryInput = {
   archived: boolean;
   quickInsert: boolean;
   triggerWord: string | null;
+  sensitive: boolean;
   tagNames: string[];
 };
 
@@ -1119,5 +1174,26 @@ export const ipc = {
     }),
   automationDryRun: (ruleId: string, event: AutomationEvent) =>
     invoke<AutomationDryRunResult>("automation_dry_run", { ruleId, event }),
+  aiProviderKeyStatus: () =>
+    invoke<{ exists: boolean }>("ai_provider_key_status"),
+  aiProviderKeySet: (key: string) =>
+    invoke<{ exists: boolean }>("ai_provider_key_set", { key }),
+  aiProviderKeyClear: () =>
+    invoke<{ exists: boolean }>("ai_provider_key_clear"),
+  aiProviderProbe: () => invoke<ProbeReport>("ai_provider_probe"),
+  aiSuggestionList: (
+    feature?: AIFeature | null,
+    status?: AISuggestionRecord["status"] | null,
+  ) =>
+    invoke<AISuggestionRecord[]>("ai_suggestion_list", {
+      feature: feature ?? null,
+      status: status ?? null,
+    }),
+  aiSuggestionDecide: (
+    id: string,
+    decision: "accept" | "reject" | "dismiss",
+  ) =>
+    invoke<AISuggestionRecord>("ai_suggestion_decide", { id, decision }),
+  aiSuggestionClear: () => invoke<number>("ai_suggestion_clear"),
   appQuit: () => invoke<void>("app_quit"),
 };

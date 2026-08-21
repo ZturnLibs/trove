@@ -165,6 +165,7 @@ function MemoryDetail({
       archived: memory.archived,
       quickInsert: memory.quickInsert,
       triggerWord: memory.triggerWord,
+      sensitive: memory.sensitive,
       tagNames: [...memory.tagNames],
     });
     setTagText(memory.tagNames.join(", "));
@@ -317,6 +318,24 @@ function MemoryDetail({
             }}
           />
           可快速插入（文本片段）
+        </label>
+        <label className="flex items-center gap-2 text-[12px] text-foreground">
+          <input
+            type="checkbox"
+            checked={draft.sensitive}
+            onChange={(e) => {
+              const next = { ...draft, sensitive: e.target.checked };
+              setDraft(next);
+              saveMutation.mutate({
+                ...next,
+                tagNames: tagText
+                  .split(/[,，]/)
+                  .map((t) => t.trim())
+                  .filter(Boolean),
+              });
+            }}
+          />
+          敏感内容（不发送给任何 AI 服务）
         </label>
         {draft.quickInsert ? (
           <label className="block space-y-1 text-[11px] text-muted">
