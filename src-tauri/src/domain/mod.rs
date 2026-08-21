@@ -1,3 +1,4 @@
+mod ai_suggestion;
 mod automation;
 mod clipboard;
 mod clipboard_classify;
@@ -18,6 +19,7 @@ mod today_smart_sort;
 mod url_scheme;
 mod workbench_action;
 
+pub use ai_suggestion::*;
 pub use automation::*;
 pub use clipboard::*;
 pub use clipboard_classify::classify_clipboard_text;

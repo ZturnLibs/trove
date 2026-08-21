@@ -3,7 +3,7 @@
   "name": "v2-0-ai-service-boundary",
   "title": "v2.0 AI 服务边界（切片 1）",
   "description": "",
-  "status": "planning",
+  "status": "in_progress",
   "dev_type": null,
   "scope": null,
   "package": null,
@@ -12,7 +12,7 @@
   "assignee": "zouyingjun",
   "createdAt": "2026-08-19",
   "completedAt": null,
-  "branch": null,
+  "branch": "feat-improve",
   "base_branch": "main",
   "worktree_path": null,
   "commit": null,
@@ -21,6 +21,6 @@
   "children": [],
   "parent": "08-19-v2-0-ai-assist-roadmap",
   "relatedFiles": [],
-  "notes": "",
+  "notes": "已知无关失败：application::health_dashboard::tests::reminder_stats_respect_local_date_window 为预先存在的日期硬编码 flaky（真实时钟+写死 2026-08 日期，随日期漂移；git stash 验证无本任务改动也失败），不在本切片范围",
   "meta": {}
 }
