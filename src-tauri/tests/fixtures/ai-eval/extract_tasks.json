@@ -1,0 +1,41 @@
+{
+  "description": "长文本任务提取评估样本。sensitiveSource 为 true 的样本必须被 sanitize 过滤（红线回归）。",
+  "samples": [
+    {
+      "text": "会议记录：市场部同步了 Q4 预算，需要王琳在 10 号前提交投放数据；李雷负责更新官网文案；下周五之前所有人确认排期。",
+      "expectedItems": 3
+    },
+    {
+      "text": "和客户的电话：对方希望本周内出方案初稿，另外提到发票抬头要改成新公司，财务同事说下月生效。",
+      "expectedItems": 2
+    },
+    {
+      "text": "随手记：家里的宽带月底到期，考虑换 500M 的套餐；体检报告出了，有两项要复查。",
+      "expectedItems": 2
+    },
+    { "text": "今天天气不错，中午吃了碗面。", "expectedItems": 0 },
+    {
+      "text": "故障复盘：上线后偶发 500，定位到连接池耗尽（1）补监控告警（2）写事故报告（3）周五前复测。",
+      "expectedItems": 3
+    },
+    {
+      "text": "读书笔记：第三章关于习惯回路的论述值得整理成卡片，另外把引用的书目加到书单。",
+      "expectedItems": 2
+    },
+    {
+      "text": "旅行计划：订十一去成都的机票，查一下熊猫基地门票预约，给爸妈带的手信列个单子。",
+      "expectedItems": 3
+    },
+    { "text": "报销单据：周四前把 9 月的打车票贴好交财务。", "expectedItems": 1 },
+    {
+      "text": "这类内容不是任务，只是情绪记录：最近有点累，想休息一下。",
+      "expectedItems": 0
+    },
+    {
+      "text": "版本发布 checklist：更新版本号、写 release note、通知群里、检查更新包签名。",
+      "expectedItems": 4
+    },
+    { "text": "SENSITIVE-REDACTION-SAMPLE", "expectedItems": 0, "sensitiveSource": true, "sourceApp": "Bitwarden" },
+    { "text": "密码管理器复制的临时密钥：sk-xxxx", "expectedItems": 0, "sensitiveSource": true, "sourceApp": "1Password" }
+  ]
+}

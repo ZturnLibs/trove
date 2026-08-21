@@ -1,0 +1,15 @@
+{
+  "description": "语义检索评估样本：查询词与目标内容用不同说法表达同一件事，关键词搜索（FTS5）无法命中，语义检索应命中。切片 1 只固化样本；向量索引属后续切片。",
+  "pairs": [
+    { "query": "报销流程", "targetTitle": "差旅票据整理", "keywordHit": false },
+    { "query": "家里网络续约", "targetTitle": "宽带套餐到期处理", "keywordHit": false },
+    { "query": "体检复查", "targetTitle": "两项指标异常随访", "keywordHit": false },
+    { "query": "给客户出方案", "targetTitle": "提案初稿排期", "keywordHit": false },
+    { "query": "上线出问题了", "targetTitle": "连接池耗尽故障复盘", "keywordHit": false },
+    { "query": "十一去哪玩", "targetTitle": "成都行程规划", "keywordHit": false },
+    { "query": "记账", "targetTitle": "每月对账习惯", "keywordHit": false },
+    { "query": "老人手机课", "targetTitle": "教爸妈用智能手机", "keywordHit": false },
+    { "query": "换工作", "targetTitle": "简历更新与内推", "keywordHit": false },
+    { "query": "戒烟", "targetTitle": "戒断习惯打卡", "keywordHit": false }
+  ]
+}

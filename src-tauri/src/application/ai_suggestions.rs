@@ -39,8 +39,8 @@ impl AISuggestionService {
         })
     }
 
-    /// Test constructor with a provider fake.
-    #[cfg(test)]
+    /// Test/eval constructor with a provider fake (used by the offline
+    /// eval runner in tests/ai_eval_offline.rs).
     pub fn with_provider(
         db: Database,
         settings: Arc<SettingsService>,

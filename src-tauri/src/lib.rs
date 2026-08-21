@@ -1,11 +1,11 @@
 #![allow(dead_code)]
 
 mod app_state;
-mod application;
+pub mod application;
 pub mod cli_protocol;
 mod commands;
 pub mod domain;
-mod infrastructure;
+pub mod infrastructure;
 mod menu_bar;
 mod platform;
 mod shortcuts;
