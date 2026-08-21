@@ -107,6 +107,9 @@ impl AIMode {
 pub struct AIConfig {
     pub mode: AIMode,
     pub ollama_url: String,
+    /// Model name for the local Ollama endpoint. Empty = not selected yet;
+    /// the provider reports unreachable with a model-selection hint.
+    pub ollama_model: String,
     pub custom_endpoint: String,
     pub custom_model: String,
     pub features: AIFeatureToggles,
@@ -117,6 +120,7 @@ impl Default for AIConfig {
         Self {
             mode: AIMode::Off,
             ollama_url: "http://localhost:11434".into(),
+            ollama_model: String::new(),
             custom_endpoint: String::new(),
             custom_model: String::new(),
             features: AIFeatureToggles::default(),
