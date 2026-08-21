@@ -10,6 +10,7 @@
 - [本地 CLI（trove-cli）](./cli.md)：`v1.4` 命令行入口，复用统一动作层。
 - [macOS 快捷指令](./shortcuts.md)：用 `trove-cli --json` 查询今日/逾期/记忆/片段。
 - [规则自动化](./automation.md)：本地触发器/条件/动作引擎。
+- [智能辅助](./ai-assist.md)：v2.0 AI 服务边界、模式配置与数据边界说明。
 - [任务 CSV 导入导出](./csv-import.md)：任务迁移、预览映射与批次撤销。
 - [浏览器扩展（规划）](./browser-extension/README.md)：`v1.4+` 网页捕获扩展 follow-up。
 - [版本发布说明](./releases/v1.3.0.md)：`v1.3.0` 功能清单与升级说明。

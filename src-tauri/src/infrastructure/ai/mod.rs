@@ -284,10 +284,12 @@ mod tests {
     #[test]
     fn http_provider_unreachable_endpoint_returns_none_fast() {
         let dir = tempfile::tempdir().unwrap();
-        let mut config = AIConfig::default();
-        config.mode = AIMode::Custom;
-        config.custom_endpoint = "http://127.0.0.1:9/v1".into(); // closed port
-        config.custom_model = "test-model".into();
+        let config = AIConfig {
+            mode: AIMode::Custom,
+            custom_endpoint: "http://127.0.0.1:9/v1".into(), // closed port
+            custom_model: "test-model".into(),
+            ..Default::default()
+        };
         write_provider_key(dir.path(), "sk-test").unwrap();
 
         let provider = HttpProvider::new(&config, dir.path());
@@ -301,10 +303,12 @@ mod tests {
     #[test]
     fn custom_mode_without_key_is_not_configured() {
         let dir = tempfile::tempdir().unwrap();
-        let mut config = AIConfig::default();
-        config.mode = AIMode::Custom;
-        config.custom_endpoint = "https://api.example.com/v1".into();
-        config.custom_model = "m".into();
+        let config = AIConfig {
+            mode: AIMode::Custom,
+            custom_endpoint: "https://api.example.com/v1".into(),
+            custom_model: "m".into(),
+            ..Default::default()
+        };
 
         let provider = HttpProvider::new(&config, dir.path());
         assert!(!provider.configured());
@@ -321,8 +325,10 @@ mod tests {
     #[test]
     fn ollama_mode_without_model_hints_selection() {
         let dir = tempfile::tempdir().unwrap();
-        let mut config = AIConfig::default();
-        config.mode = AIMode::Ollama; // ollama_model left empty
+        let config = AIConfig {
+            mode: AIMode::Ollama, // ollama_model left empty
+            ..Default::default()
+        };
 
         let provider = HttpProvider::new(&config, dir.path());
         let report = provider.probe();
@@ -333,10 +339,12 @@ mod tests {
     #[test]
     fn ollama_base_url_normalizes_trailing_slash() {
         let dir = tempfile::tempdir().unwrap();
-        let mut config = AIConfig::default();
-        config.mode = AIMode::Ollama;
-        config.ollama_url = "http://localhost:11434/".into();
-        config.ollama_model = "qwen3:4b".into();
+        let config = AIConfig {
+            mode: AIMode::Ollama,
+            ollama_url: "http://localhost:11434/".into(),
+            ollama_model: "qwen3:4b".into(),
+            ..Default::default()
+        };
 
         let provider = HttpProvider::new(&config, dir.path());
         assert!(provider.configured());

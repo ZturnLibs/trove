@@ -25,13 +25,13 @@
 
 ## Acceptance Criteria
 
-- [ ] provider=off 时全部 v1.x 功能路径不经过 AI 分支；探活失败仅显示降级文案（门槛 4 实测）
-- [ ] 敏感内容经 `sanitize_context` 后绝不出现在 provider 请求中（单测用敏感样本验证）
-- [ ] schema 校验失败的模型输出被丢弃且审计可见，业务数据零污染
-- [ ] key 不出现在备份导出、日志、`ai_suggestions` 表
-- [ ] 建议历史可一键清空；清空不影响任何原始数据
-- [ ] `cargo test` 全绿（新增：sanitize 边界、schema 校验、OffProvider 零调用、配置导出排除 key）
-- [ ] docs：`docs/ai-assist.md`（配置指引 + 数据边界说明）+ privacy-and-data.md 增补 AI 小节
+- [x] provider=off 时全部 v1.x 功能路径不经过 AI 分支；探活失败仅显示降级文案（门槛 4 实测）
+- [x] 敏感内容经 `sanitize_context` 后绝不出现在 provider 请求中（单测用敏感样本验证）
+- [x] schema 校验失败的模型输出被丢弃且审计可见，业务数据零污染
+- [x] key 不出现在备份导出、日志、`ai_suggestions` 表（key 存库外文件，eval 断言不入 settings JSON）
+- [x] 建议历史可一键清空；清空不影响任何原始数据
+- [x] `cargo test` 全绿（新增：sanitize 边界、schema 校验、OffProvider 零调用、key 隔离；已知无关 flaky 见任务 notes）
+- [x] docs：`docs/ai-assist.md`（配置指引 + 数据边界说明）+ privacy-and-data.md 增补 AI 小节
 
 ## 明确不做（本切片）
 

@@ -432,30 +432,33 @@ mod tests {
         }
     }
 
-    fn setup() -> (tempfile::TempDir, AISuggestionService, Arc<SettingsService>) {
+    fn setup() -> (tempfile::TempDir, AISuggestionService, Arc<SettingsService>, Arc<FakeProvider>) {
         let dir = tempdir().unwrap();
         let db = Database::open(dir.path().join("workbench.db")).unwrap();
         let settings = Arc::new(SettingsService::new(db.clone()));
-        let service = AISuggestionService::with_provider(
-            db,
-            settings.clone(),
-            Arc::new(FakeProvider {
-                output: None,
-                calls: std::sync::atomic::AtomicUsize::new(0),
-            }),
-        );
-        (dir, service, settings)
+        let provider = Arc::new(FakeProvider {
+            output: None,
+            calls: std::sync::atomic::AtomicUsize::new(0),
+        });
+        let service = AISuggestionService::with_provider(db, settings.clone(), provider.clone());
+        (dir, service, settings, provider)
     }
 
     fn enable_extract(settings: &SettingsService) {
-        let mut s = settings.get().unwrap();
-        s.ai.mode = AIMode::Ollama;
-        s.ai.ollama_model = "fake".into();
-        s.ai.features = AIFeatureToggles {
-            extract: true,
-            ..Default::default()
+        let base = settings.get().unwrap();
+        let next = crate::infrastructure::settings::AppSettings {
+            ai: crate::domain::AIConfig {
+                mode: AIMode::Ollama,
+                ollama_model: "fake".into(),
+                features: AIFeatureToggles {
+                    extract: true,
+                    ..Default::default()
+                },
+                ..Default::default()
+            },
+            ..base
         };
-        settings.save(&s).unwrap();
+        settings.save(&next).unwrap();
     }
 
     fn service_with_provider(
@@ -495,7 +498,7 @@ mod tests {
 
     #[test]
     fn disabled_feature_never_calls_provider() {
-        let (_dir, service, _settings) = setup(); // features all default off
+        let (_dir, service, _settings, _provider) = setup(); // features all default off
         let result = service
             .request(AIFeature::Extract, "memory", "m1", &[ctx("memory", "m1", "开会记录", None)])
             .unwrap();
@@ -504,7 +507,7 @@ mod tests {
 
     #[test]
     fn sensitive_memory_is_sanitized_out() {
-        let (dir, service, settings) = setup();
+        let (_dir, service, settings, _provider) = setup();
         let conn = service.db.connect().unwrap();
         insert_memory(&conn, "m-s", "密码备份流程", true);
         insert_memory(&conn, "m-ok", "周会记录", false);
@@ -527,7 +530,7 @@ mod tests {
 
     #[test]
     fn password_manager_source_is_sanitized_out() {
-        let (_dir, service, _settings) = setup();
+        let (_dir, service, _settings, _provider) = setup();
         let kept = service.sanitize_context(&[
             ctx("clipboard", "c1", "复制的密码", Some("1Password")),
             ctx("clipboard", "c2", "普通文本", Some("Safari")),
@@ -538,10 +541,10 @@ mod tests {
 
     #[test]
     fn user_excluded_apps_are_sanitized_out() {
-        let (_dir, service, settings) = setup();
-        let mut s = settings.get().unwrap();
-        s.clipboard_excluded_apps.push("微信".into());
-        settings.save(&s).unwrap();
+        let (_dir, service, settings, _provider) = setup();
+        let mut base = settings.get().unwrap();
+        base.clipboard_excluded_apps.push("微信".into());
+        settings.save(&base).unwrap();
 
         let kept = service.sanitize_context(&[ctx("clipboard", "c1", "x", Some("微信"))]);
         assert!(kept.is_empty());
@@ -549,7 +552,7 @@ mod tests {
 
     #[test]
     fn valid_output_lands_as_pending_with_sources() {
-        let (dir, service, settings) = setup();
+        let (dir, _service, settings, _provider) = setup();
         enable_extract(&settings);
         let conn = Database::open(dir.path().join("workbench.db")).unwrap().connect().unwrap();
         insert_memory(&conn, "m-ok", "找老张确认合同", false);
@@ -574,7 +577,7 @@ mod tests {
 
     #[test]
     fn invalid_output_is_discarded_with_audit_row() {
-        let (dir, service, settings) = setup();
+        let (dir, _service, settings, _provider) = setup();
         enable_extract(&settings);
         let conn = Database::open(dir.path().join("workbench.db")).unwrap().connect().unwrap();
         insert_memory(&conn, "m1", "x", false);
@@ -594,7 +597,7 @@ mod tests {
 
     #[test]
     fn decide_transitions_once_and_clear_history() {
-        let (dir, service, settings) = setup();
+        let (dir, _service, settings, _provider) = setup();
         enable_extract(&settings);
         let conn = Database::open(dir.path().join("workbench.db")).unwrap().connect().unwrap();
         insert_memory(&conn, "m1", "a", false);
@@ -630,11 +633,17 @@ mod tests {
     fn off_mode_provider_returns_none_end_to_end() {
         // Even with the feature toggle accidentally on, OffProvider yields
         // no suggestion and no ledger row (gate 4 double lock).
-        let (dir, _service, settings) = setup();
+        let (dir, _service, settings, _provider) = setup();
         enable_extract(&settings);
-        let mut s = settings.get().unwrap();
-        s.ai.mode = AIMode::Off;
-        settings.save(&s).unwrap();
+        let current = settings.get().unwrap();
+        let off = crate::infrastructure::settings::AppSettings {
+            ai: crate::domain::AIConfig {
+                mode: AIMode::Off,
+                ..current.ai.clone()
+            },
+            ..current
+        };
+        settings.save(&off).unwrap();
         let conn = Database::open(dir.path().join("workbench.db")).unwrap().connect().unwrap();
         insert_memory(&conn, "m1", "x", false);
         drop(conn);

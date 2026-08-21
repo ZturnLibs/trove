@@ -361,10 +361,12 @@ fn online_extract_pipeline_against_ollama() {
     let model = std::env::var("OLLAMA_MODEL").expect("OLLAMA_MODEL (e.g. qwen3:4b)");
 
     let dir = tempdir().unwrap();
-    let mut config = trove_lib::domain::AIConfig::default();
-    config.mode = AIMode::Ollama;
-    config.ollama_url = url;
-    config.ollama_model = model;
+    let config = trove_lib::domain::AIConfig {
+        mode: AIMode::Ollama,
+        ollama_url: url,
+        ollama_model: model,
+        ..Default::default()
+    };
 
     let provider = build_provider(&config, dir.path());
     let probe = provider.probe();
