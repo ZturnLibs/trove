@@ -1,3 +1,4 @@
+pub mod ai_suggestions;
 pub mod csv_tasks;
 pub mod automation;
 pub mod assets;

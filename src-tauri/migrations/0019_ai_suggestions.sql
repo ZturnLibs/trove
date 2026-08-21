@@ -7,6 +7,7 @@ CREATE TABLE IF NOT EXISTS ai_suggestions (
   source_entity_type TEXT NOT NULL,
   source_entity_id TEXT NOT NULL,
   payload TEXT NOT NULL,
+  sources_json TEXT NOT NULL DEFAULT '[]',
   status TEXT NOT NULL DEFAULT 'pending',
   provider TEXT NOT NULL,
   model TEXT NOT NULL,

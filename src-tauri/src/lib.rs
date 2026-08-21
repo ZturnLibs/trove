@@ -481,10 +481,15 @@ pub fn run() {
             let db_path = resolve_db_path(app.handle())?;
             let backup_dir = resolve_backup_dir(app.handle())?;
             let assets_dir = resolve_assets_dir(app.handle())?;
+            let data_dir = app
+                .path()
+                .app_data_dir()
+                .map_err(|e| e.to_string())?;
+            std::fs::create_dir_all(&data_dir).map_err(|e| e.to_string())?;
             tracing::info!(path = %db_path.display(), "opening database");
             let db = Database::open_with_backup_dir(db_path, Some(backup_dir.clone()))
                 .map_err(|e| e.to_string())?;
-            let state = AppState::new(db, backup_dir, assets_dir)?;
+            let state = AppState::new(db, backup_dir, assets_dir, data_dir)?;
             let settings = state.settings.get().unwrap_or_default();
             let scheduler_state = state.clone();
             let clipboard = state.clipboard.clone();
