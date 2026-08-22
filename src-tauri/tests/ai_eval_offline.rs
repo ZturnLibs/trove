@@ -388,3 +388,76 @@ fn online_extract_pipeline_against_ollama() {
         "model returned usable content"
     );
 }
+
+// Slice 2: extract → apply contract on top of the offline pipeline.
+
+#[test]
+#[ignore = "requires local Ollama (OLLAMA_URL/OLLAMA_MODEL); run before releases"]
+fn online_extract_then_apply_full_chain() {
+    use trove_lib::application::links::EntityLinkService;
+    use trove_lib::application::memories::MemoryService;
+    use trove_lib::application::tasks::TaskService;
+    use trove_lib::domain::{CreateMemoryInput, ExtractApplyInput};
+
+    let url = std::env::var("OLLAMA_URL").unwrap_or_else(|_| "http://localhost:11434".into());
+    let model = std::env::var("OLLAMA_MODEL").expect("OLLAMA_MODEL (e.g. qwen3:4b)");
+
+    let dir = tempdir().unwrap();
+    let db = Database::open(dir.path().join("workbench.db")).unwrap();
+    let settings = Arc::new(SettingsService::new(db.clone()));
+    let mut base = settings.get().unwrap();
+    base.ai = trove_lib::domain::AIConfig {
+        mode: AIMode::Ollama,
+        ollama_url: url,
+        ollama_model: model,
+        features: AIFeatureToggles {
+            extract: true,
+            ..Default::default()
+        },
+        ..Default::default()
+    };
+    settings.save(&base).unwrap();
+
+    let tasks = TaskService::new(db.clone());
+    tasks.ensure_seed_data().unwrap();
+    let links = EntityLinkService::new(db.clone());
+    let search = trove_lib::application::search::SearchService::new(db.clone());
+    let memories = MemoryService::new(db.clone());
+    let memory = memories
+        .create(CreateMemoryInput {
+            title: "周会记录".into(),
+            body: Some(
+                "会议记录：王琳在 10 号前提交投放数据；找老张确认合同；下周五复测上线。".into(),
+            ),
+            pinned: None,
+            quick_insert: None,
+            trigger_word: None,
+            tag_names: None,
+        })
+        .unwrap();
+
+    let service = AISuggestionService::new(db.clone(), settings.clone(), dir.path().into())
+        .expect("service");
+    let record = service
+        .request_extract(&memory.id.to_string(), &memories)
+        .expect("request")
+        .expect("provider reachable and produced a record");
+    assert!(!record.payload.items.is_empty(), "at least one draft item");
+
+    let result = service
+        .apply_extract(
+            ExtractApplyInput {
+                suggestion_id: record.id.clone(),
+                selected_indices: (0..record.payload.items.len()).collect(),
+            },
+            &tasks,
+            &links,
+            &search,
+        )
+        .expect("apply");
+    assert_eq!(result.tasks.len(), record.payload.items.len());
+    // No guessed dates on ambiguous items.
+    for (task, item) in result.tasks.iter().zip(record.payload.items.iter()) {
+        assert_eq!(task.due_date.is_some(), !item.ambiguous && item.due_date.is_some());
+    }
+}

@@ -15,7 +15,7 @@ const HINT_COPY: Record<string, string> = {
 };
 
 const FEATURES: { key: keyof AIConfig["features"]; label: string }[] = [
-  { key: "extract", label: "长文本提取任务草稿" },
+  { key: "extract", label: "长文本提取任务草稿（已开放）" },
   { key: "related", label: "相关内容建议" },
   { key: "summary", label: "回顾摘要组织文字" },
   { key: "suggest", label: "每日工作建议" },
@@ -228,7 +228,7 @@ export function AIAssistSection({ settings }: { settings: AppSettings }) {
             </div>
 
             <fieldset className="space-y-1">
-              <legend className="text-muted">功能开关（逐项可关，默认全部关闭；各功能随后续版本开放）</legend>
+              <legend className="text-muted">功能开关（逐项可关，默认全部关闭）</legend>
               {FEATURES.map((f) => (
                 <label key={f.key} className="flex items-center gap-2">
                   <input

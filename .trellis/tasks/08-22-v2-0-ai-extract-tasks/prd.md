@@ -30,14 +30,14 @@
 
 ## Acceptance Criteria
 
-- [ ] 记忆详情 3 步完成提取→勾选→创建（提取 1 次 + 创建 1 次点击 + 可选勾选）
-- [ ] 每条草稿显示原文摘录；点击建议来源可对应到记忆正文（excerpt 即引用）
-- [ ] ambiguous/非法日期不写入任务（单测断言 due_date 为空）
-- [ ] 只创建勾选项；重复 apply 同一建议被拒绝（幂等门禁单测）
-- [ ] AI 关闭或功能开关关闭时入口不出现；provider 失败仅显示降级文案
-- [ ] 创建的任务带来源 notes + EntityLink；撤销删除任务不影响建议状态（审计留存）
-- [ ] cargo test 全绿（新增：apply 事务/越界/重复/ambiguous/链路）+ pnpm test/build 通过
-- [ ] docs/ai-assist.md 更新「长文本提取」使用说明；设置页文案更新
+- [x] 记忆详情 3 步完成提取→勾选→创建（提取 1 次 + 创建 1 次点击 + 可选勾选）
+- [x] 每条草稿显示原文摘录；点击建议来源可对应到记忆正文（excerpt 即引用）
+- [x] ambiguous/非法日期不写入任务（单测断言 due_date 为空）
+- [x] 只创建勾选项；重复 apply 同一建议被拒绝（幂等门禁单测）
+- [x] AI 关闭或功能开关关闭时入口不出现；provider 失败仅显示降级文案
+- [x] 创建的任务带来源 notes + EntityLink；撤销删除任务不影响建议状态（审计留存）
+- [x] cargo test 全绿（新增：apply 事务/越界/重复/ambiguous/链路）+ pnpm test/build 通过
+- [x] docs/ai-assist.md 更新「长文本提取」使用说明；设置页文案更新
 
 ## 明确不做（本切片）
 
