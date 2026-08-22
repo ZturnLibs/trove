@@ -117,3 +117,24 @@
 ### Status
 
 [OK] **Completed**
+
+
+## Session 5: v2.0 切片 2：长文本提取任务草稿
+
+**Date**: 2026-08-22
+**Task**: v2.0 切片 2：长文本提取任务草稿
+**Branch**: `feat-improve`
+
+### Summary
+
+交付记忆详情→AI 提取→草稿勾选→批量创建全链路：pending 幂等（不重复打 provider）、apply 门禁与来源引用/EntityLink、ambiguous 日期不猜测写入；ExtractSuggestionsPanel UI；新增 6 服务单测 + 在线评估用例；139 lib + 8 eval + 42 前端测试全绿
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `55b177b` | (see git log) |
+
+### Status
+
+[OK] **Completed**
