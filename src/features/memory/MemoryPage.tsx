@@ -7,6 +7,7 @@ import { AttachmentsSection } from "@/design-system/patterns/AttachmentsSection"
 import { FileRefsSection } from "@/design-system/patterns/FileRefsSection";
 import { Button } from "@/design-system/primitives/Button";
 import { ConfirmButton } from "@/design-system/patterns/ConfirmButton";
+import { ExtractSuggestionsPanel } from "@/features/memory/ExtractSuggestionsPanel";
 import { Input } from "@/design-system/primitives/Input";
 import {
   NewTaskButton,
@@ -254,6 +255,26 @@ function MemoryDetail({
     },
   });
 
+  // v2.0 slice 2: AI task extraction from this memory's text.
+  const settingsQuery = useQuery({
+    queryKey: ["settings"],
+    queryFn: () => ipc.settingsGet(),
+  });
+  const aiAvailable =
+    !!settingsQuery.data?.ai &&
+    settingsQuery.data.ai.mode !== "off" &&
+    settingsQuery.data.ai.features.extract &&
+    !draft?.sensitive;
+  const [showExtract, setShowExtract] = useState(false);
+  const extractMutation = useMutation({
+    mutationFn: () => ipc.aiExtractRequest(memory!.id),
+    onSuccess: () => {
+      setShowExtract(true);
+      void queryClient.invalidateQueries({ queryKey: ["ai", "suggestions"] });
+    },
+    onError: (e) => alert(`提取失败：${String(e)}`),
+  });
+
   const linksQuery = useQuery({
     queryKey: ["links", "memory", memory?.id],
     queryFn: () => ipc.entityLinkList("memory", memory!.id),
@@ -487,7 +508,23 @@ function MemoryDetail({
         >
           转为任务
         </Button>
+        {aiAvailable ? (
+          <Button
+            size="sm"
+            variant="secondary"
+            onClick={() => extractMutation.mutate()}
+            disabled={extractMutation.isPending}
+            title="用 AI 从这条记忆中识别候选任务，逐条确认后创建"
+          >
+            {extractMutation.isPending ? "提取中…" : "提取任务（AI）"}
+          </Button>
+        ) : null}
       </div>
+      {showExtract && aiAvailable ? (
+        <div className="mt-2">
+          <ExtractSuggestionsPanel memoryId={memory.id} />
+        </div>
+      ) : null}
     </div>
   );
 }

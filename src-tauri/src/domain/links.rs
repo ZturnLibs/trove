@@ -44,10 +44,16 @@ pub const LINK_KIND_ATTACHMENT: &str = "attachment";
 pub const LINK_KIND_CONVERTED_TO: &str = "converted_to";
 pub const LINK_KIND_RELATED: &str = "related";
 pub const LINK_KIND_MENTION: &str = "mention";
+/// v2.0 slice 2: task created from an AI extract suggestion (provenance).
+pub const LINK_KIND_AI_EXTRACT: &str = "ai_extract";
 
 pub fn validate_link_kind(value: &str) -> Result<(), DomainError> {
     match value {
-        LINK_KIND_ATTACHMENT | LINK_KIND_CONVERTED_TO | LINK_KIND_RELATED | LINK_KIND_MENTION => {
+        LINK_KIND_ATTACHMENT
+            | LINK_KIND_CONVERTED_TO
+            | LINK_KIND_RELATED
+            | LINK_KIND_MENTION
+            | LINK_KIND_AI_EXTRACT => {
             Ok(())
         }
         _ => Err(DomainError::Validation(format!(

@@ -1195,5 +1195,11 @@ export const ipc = {
   ) =>
     invoke<AISuggestionRecord>("ai_suggestion_decide", { id, decision }),
   aiSuggestionClear: () => invoke<number>("ai_suggestion_clear"),
+  aiExtractRequest: (memoryId: string) =>
+    invoke<AISuggestionRecord | null>("ai_extract_request", { memoryId }),
+  aiSuggestionApply: (suggestionId: string, selectedIndices: number[]) =>
+    invoke<{ tasks: Task[]; suggestion: AISuggestionRecord }>("ai_suggestion_apply", {
+      input: { suggestionId, selectedIndices },
+    }),
   appQuit: () => invoke<void>("app_quit"),
 };

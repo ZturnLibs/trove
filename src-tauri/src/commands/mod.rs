@@ -16,7 +16,8 @@ use crate::application::templates::{
 };
 use crate::domain::{
     parse_capture,     AppError, AutomationDryRunResult, AutomationEvent, AutomationRule,
-    AIFeature, AISuggestionRecord, ProbeReport, SuggestionStatus,
+    AIFeature, AISuggestionRecord, ExtractApplyInput, ExtractApplyResult, ProbeReport,
+    SuggestionStatus,
     AutomationRun, ClipboardItem, ClipboardKind, ClipboardQuery,
     ConvertMemoryToTaskResult, CreateAutomationRuleInput, CreateMemoryInput, CreateReminderInput,
     CreateTaskInput, EntityId, EntityLink, LinkInput, Memory, MemoryQuery, PagedResult,
@@ -1838,4 +1839,28 @@ pub fn ai_suggestion_decide(
 #[tauri::command]
 pub fn ai_suggestion_clear(state: State<'_, AppState>) -> Result<usize, AppError> {
     state.ai_suggestions.clear_history().map_err(Into::into)
+}
+
+// v2.0 slice 2: long-text task extraction.
+
+#[tauri::command]
+pub fn ai_extract_request(
+    state: State<'_, AppState>,
+    memory_id: EntityId,
+) -> Result<Option<AISuggestionRecord>, AppError> {
+    state
+        .ai_suggestions
+        .request_extract(&memory_id.to_string(), &state.memories)
+        .map_err(Into::into)
+}
+
+#[tauri::command]
+pub fn ai_suggestion_apply(
+    state: State<'_, AppState>,
+    input: ExtractApplyInput,
+) -> Result<ExtractApplyResult, AppError> {
+    state
+        .ai_suggestions
+        .apply_extract(input, &state.tasks, &state.links, &state.search)
+        .map_err(Into::into)
 }

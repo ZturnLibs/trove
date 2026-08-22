@@ -316,6 +316,49 @@ pub fn parse_suggestion_content(raw: &str) -> Result<SuggestionContent, DomainEr
     Ok(parsed)
 }
 
+/// Apply selected items of an extract suggestion (slice 2).
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ExtractApplyInput {
+    pub suggestion_id: String,
+    /// Indices into `payload.items`; deduplicated, must be in range.
+    pub selected_indices: Vec<usize>,
+}
+
+impl ExtractApplyInput {
+    /// Sorted + deduplicated indices; errors on empty or out-of-range.
+    pub fn normalize(&self, items_len: usize) -> Result<Vec<usize>, DomainError> {
+        if self.selected_indices.is_empty() {
+            return Err(DomainError::Validation("至少选择一条建议".into()));
+        }
+        let mut unique: Vec<usize> = self
+            .selected_indices
+            .iter()
+            .copied()
+            .collect::<std::collections::BTreeSet<_>>()
+            .into_iter()
+            .collect();
+        if let Some(&max) = unique.last() {
+            if max >= items_len {
+                return Err(DomainError::Validation("选择超出建议范围".into()));
+            }
+        }
+        if unique.is_empty() {
+            return Err(DomainError::Validation("至少选择一条建议".into()));
+        }
+        Ok(unique)
+    }
+}
+
+/// What the user needs after applying: created tasks (jumpable) + the
+/// finalized suggestion record (audit state).
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ExtractApplyResult {
+    pub tasks: Vec<super::Task>,
+    pub suggestion: AISuggestionRecord,
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -388,6 +431,21 @@ mod tests {
         assert!(parse_suggestion_content(r#"{"items":[],"summary":""}"#).is_err());
         assert!(parse_suggestion_content(r#"{"items":[],"summary":null}"#).is_err());
         assert!(parse_suggestion_content("not json").is_err());
+    }
+
+    #[test]
+    fn apply_input_normalizes_indices() {
+        let input = ExtractApplyInput {
+            suggestion_id: "s1".into(),
+            selected_indices: vec![2, 0, 2],
+        };
+        assert_eq!(input.normalize(3).unwrap(), vec![0, 2]);
+        assert!(input.normalize(2).is_err(), "index 2 out of range");
+        let empty = ExtractApplyInput {
+            suggestion_id: "s1".into(),
+            selected_indices: vec![],
+        };
+        assert!(empty.normalize(3).is_err());
     }
 
     #[test]
