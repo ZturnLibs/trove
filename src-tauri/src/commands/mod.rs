@@ -16,8 +16,8 @@ use crate::application::templates::{
 };
 use crate::domain::{
     parse_capture,     AppError, AutomationDryRunResult, AutomationEvent, AutomationRule,
-    AIFeature, AISuggestionRecord, ExtractApplyInput, ExtractApplyResult, ProbeReport,
-    SuggestionStatus,
+    AIFeature, AISuggestionRecord, ChecklistItem, ChecklistUpdateInput, ExtractApplyInput,
+    ExtractApplyResult, ProbeReport, SuggestionStatus, TaskChecklist,
     AutomationRun, ClipboardItem, ClipboardKind, ClipboardQuery,
     ConvertMemoryToTaskResult, CreateAutomationRuleInput, CreateMemoryInput, CreateReminderInput,
     CreateTaskInput, EntityId, EntityLink, LinkInput, Memory, MemoryQuery, PagedResult,
@@ -1975,4 +1975,59 @@ pub fn ai_daily_suggest_accept(
         .ai_suggestions
         .remove_daily_suggest_item(&suggestion_id, index, true)
         .map_err(Into::into)
+}
+
+// v2.0 slice 6: task checklist.
+
+#[tauri::command]
+pub fn task_checklist_list(
+    state: State<'_, AppState>,
+    task_id: EntityId,
+) -> Result<TaskChecklist, AppError> {
+    state.tasks.checklist_list(task_id).map_err(Into::into)
+}
+
+#[tauri::command]
+pub fn task_checklist_add(
+    app: AppHandle,
+    state: State<'_, AppState>,
+    task_id: EntityId,
+    content: String,
+) -> Result<ChecklistItem, AppError> {
+    let item = state.tasks.checklist_add(task_id, &content)?;
+    emit_task_change(&app, &state.tasks.get_task(task_id)?, "updated");
+    Ok(item)
+}
+
+#[tauri::command]
+pub fn task_checklist_update(
+    app: AppHandle,
+    state: State<'_, AppState>,
+    input: ChecklistUpdateInput,
+) -> Result<ChecklistItem, AppError> {
+    let item = state.tasks.checklist_update(input.clone())?;
+    emit_task_change(&app, &state.tasks.get_task(item.task_id)?, "updated");
+    Ok(item)
+}
+
+#[tauri::command]
+pub fn task_checklist_delete(
+    app: AppHandle,
+    state: State<'_, AppState>,
+    id: EntityId,
+) -> Result<(), AppError> {
+    state.tasks.checklist_delete(id)?;
+    Ok(())
+}
+
+#[tauri::command]
+pub fn task_checklist_reorder(
+    app: AppHandle,
+    state: State<'_, AppState>,
+    task_id: EntityId,
+    ordered_ids: Vec<EntityId>,
+) -> Result<(), AppError> {
+    state.tasks.checklist_reorder(task_id, ordered_ids)?;
+    emit_task_change(&app, &state.tasks.get_task(task_id)?, "updated");
+    Ok(())
 }

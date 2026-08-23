@@ -1,3 +1,4 @@
+import { ChecklistBadge } from "@/design-system/patterns/ChecklistSection";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { Check } from "lucide-react";
@@ -330,6 +331,7 @@ export function TaskRow({
             {task.title}
           </div>
         )}
+        {!editing ? <ChecklistBadge taskId={task.id} /> : null}
         {sortHint && !editing ? (
           <div className="truncate text-[11px] text-muted">{sortHint}</div>
         ) : null}

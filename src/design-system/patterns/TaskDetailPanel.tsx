@@ -2,6 +2,7 @@ import { useEffect, useRef, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { AttachmentsSection } from "@/design-system/patterns/AttachmentsSection";
 import { RelatedSuggestionsSection } from "@/design-system/patterns/RelatedSuggestionsSection";
+import { ChecklistSection } from "@/design-system/patterns/ChecklistSection";
 import { FileRefsSection } from "@/design-system/patterns/FileRefsSection";
 import { DeferPicker } from "@/design-system/patterns/DeferPicker";
 import { WaitingSection } from "@/design-system/patterns/WaitingSection";
@@ -388,6 +389,7 @@ export function TaskDetailPanel({
 
         <TaskRemindersSection taskId={task.id} />
 
+        <ChecklistSection task={task} />
         <RelatedSuggestionsSection taskId={task.id} />
         <AttachmentsSection entityType="task" entityId={task.id} />
         <FileRefsSection entityType="task" entityId={task.id} />

@@ -734,6 +734,11 @@ pub fn run() {
             commands::ai_daily_suggest_request,
             commands::ai_daily_suggest_skip,
             commands::ai_daily_suggest_accept,
+            commands::task_checklist_list,
+            commands::task_checklist_add,
+            commands::task_checklist_update,
+            commands::task_checklist_delete,
+            commands::task_checklist_reorder,
             commands::app_quit,
         ])
         .run(tauri::generate_context!())

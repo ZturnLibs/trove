@@ -36,6 +36,29 @@ export type AppSettings = {
   ai: AIConfig;
 };
 
+export type ChecklistItem = {
+  id: string;
+  taskId: string;
+  content: string;
+  checked: boolean;
+  sortOrder: number;
+  createdAt: string;
+  updatedAt: string;
+  revision: number;
+};
+
+export type TaskChecklist = {
+  items: ChecklistItem[];
+  total: number;
+  checkedCount: number;
+};
+
+export type ChecklistUpdateInput = {
+  id: string;
+  content?: string | null;
+  checked?: boolean | null;
+};
+
 export type AIMode = "off" | "ollama" | "custom";
 
 export type AIFeature = "extract" | "related" | "summary" | "suggest" | "split";
@@ -1219,5 +1242,15 @@ export const ipc = {
     invoke<AISuggestionRecord>("ai_daily_suggest_skip", { suggestionId, index }),
   aiDailySuggestAccept: (suggestionId: string, index: number) =>
     invoke<AISuggestionRecord>("ai_daily_suggest_accept", { suggestionId, index }),
+  taskChecklistList: (taskId: string) =>
+    invoke<TaskChecklist>("task_checklist_list", { taskId }),
+  taskChecklistAdd: (taskId: string, content: string) =>
+    invoke<ChecklistItem>("task_checklist_add", { taskId, content }),
+  taskChecklistUpdate: (input: ChecklistUpdateInput) =>
+    invoke<ChecklistItem>("task_checklist_update", { input }),
+  taskChecklistDelete: (id: string) =>
+    invoke<void>("task_checklist_delete", { id }),
+  taskChecklistReorder: (taskId: string, orderedIds: string[]) =>
+    invoke<void>("task_checklist_reorder", { taskId, orderedIds }),
   appQuit: () => invoke<void>("app_quit"),
 };

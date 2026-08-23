@@ -3,7 +3,9 @@ use crate::domain::{
     validate_due_time, CreateTaskInput, DeleteListResult, DomainError, EntityId,
     ListDeleteDisposition, ListKind, PagedResult, should_apply_active_list_filter, SmartListKind,
     SystemClock, Tag, Task, TaskList, TaskPriority, TaskQuery, TaskStatus, TaskWorkflowState,
-    TodaySortSuggestions, TodayTasks, UpdateTaskInput, validate_due_vs_available,
+    ChecklistItem, ChecklistUpdateInput, TaskChecklist, CHECKLIST_MAX_ITEMS,
+    TodaySortSuggestions, TodayTasks, UpdateTaskInput, validate_checklist_content,
+    validate_due_vs_available,
 };
 use crate::domain::{page_limit, page_offset};
 use crate::infrastructure::db::Database;
@@ -687,6 +689,13 @@ impl TaskService {
         conn.execute(
             "UPDATE tasks SET deleted_at = ?1, updated_at = ?1, revision = revision + 1
              WHERE id = ?2 AND deleted_at IS NULL",
+            params![now, id.to_string()],
+        )
+        .map_err(internal)?;
+        // Checklist items follow their task into the tombstone (no orphans).
+        conn.execute(
+            "UPDATE task_checklist_items SET deleted_at = ?1, updated_at = ?1
+             WHERE task_id = ?2 AND deleted_at IS NULL",
             params![now, id.to_string()],
         )
         .map_err(internal)?;
@@ -1756,6 +1765,312 @@ where
     Ok(out)
 }
 
+//
+// v2.0 slice 6: checklist (impl methods were appended below; move the brace)
+//
+impl TaskService {
+    // -----------------------------------------------------------------
+    // v2.0 slice 6: checklist
+    // -----------------------------------------------------------------
+
+    fn checklist_freeze_check(&self, task_id: EntityId) -> Result<Task, DomainError> {
+        let task = self.get_task(task_id)?;
+        if task.status == TaskStatus::Completed {
+            return Err(DomainError::Validation("任务已完成，检查项不可修改".into()));
+        }
+        Ok(task)
+    }
+
+    /// Rewrite the task's search-index row with checklist text appended, so
+    /// sub-items stay findable via task search.
+    fn reindex_task_with_checklist(
+        &self,
+        conn: &Connection,
+        task_id: EntityId,
+    ) -> Result<(), DomainError> {
+        let task = self.get_task(task_id)?;
+        let items = active_checklist_rows(conn, task_id)?;
+        let checklist_text = items
+            .iter()
+            .map(|i| i.content.as_str())
+            .collect::<Vec<_>>()
+            .join("\n");
+        let body = if checklist_text.is_empty() {
+            task.notes.clone()
+        } else {
+            format!("{}\n{}", task.notes, checklist_text)
+        };
+        crate::application::search::SearchService::reindex_one(
+            conn,
+            crate::domain::SearchEntityType::Task,
+            task_id,
+            &task.title,
+            &body,
+        )
+    }
+
+    pub fn checklist_list(&self, task_id: EntityId) -> Result<TaskChecklist, DomainError> {
+        let conn = self.connect()?;
+        let items = active_checklist_rows(&conn, task_id)?;
+        let checked_count = items.iter().filter(|i| i.checked).count() as i64;
+        Ok(TaskChecklist {
+            total: items.len() as i64,
+            checked_count,
+            items,
+        })
+    }
+
+    pub fn checklist_add(
+        &self,
+        task_id: EntityId,
+        content: &str,
+    ) -> Result<ChecklistItem, DomainError> {
+        self.checklist_freeze_check(task_id)?;
+        let content = validate_checklist_content(content)?;
+        let conn = self.connect()?;
+        let now = stamp(&self.clock);
+        let count: i64 = conn
+            .query_row(
+                "SELECT COUNT(*) FROM task_checklist_items
+                 WHERE task_id = ?1 AND deleted_at IS NULL",
+                [task_id.to_string()],
+                |row| row.get(0),
+            )
+            .map_err(internal)?;
+        if count as usize >= CHECKLIST_MAX_ITEMS {
+            return Err(DomainError::Validation(
+                "检查项最多 50 条，考虑把任务拆分得更聚焦".into(),
+            ));
+        }
+        let next_order: i64 = conn
+            .query_row(
+                "SELECT COALESCE(MAX(sort_order), -1) + 1 FROM task_checklist_items
+                 WHERE task_id = ?1 AND deleted_at IS NULL",
+                [task_id.to_string()],
+                |row| row.get(0),
+            )
+            .map_err(internal)?;
+        let id = new_id();
+        conn.execute(
+            "INSERT INTO task_checklist_items
+                (id, task_id, content, checked, sort_order, created_at, updated_at, revision)
+             VALUES (?1, ?2, ?3, 0, ?4, ?5, ?5, 1)",
+            params![id.to_string(), task_id.to_string(), content, next_order, now],
+        )
+        .map_err(internal)?;
+        conn.execute(
+            "UPDATE tasks SET updated_at = ?1 WHERE id = ?2 AND deleted_at IS NULL",
+            params![now, task_id.to_string()],
+        )
+        .map_err(internal)?;
+        self.reindex_task_with_checklist(&conn, task_id)?;
+        Ok(ChecklistItem {
+            id,
+            task_id,
+            content,
+            checked: false,
+            sort_order: next_order,
+            created_at: now.clone(),
+            updated_at: now,
+            revision: 1,
+        })
+    }
+
+    pub fn checklist_update(
+        &self,
+        input: ChecklistUpdateInput,
+    ) -> Result<ChecklistItem, DomainError> {
+        let conn = self.connect()?;
+        let existing: Option<(String, String)> = conn
+            .query_row(
+                "SELECT task_id, content FROM task_checklist_items
+                 WHERE id = ?1 AND deleted_at IS NULL",
+                [input.id.to_string()],
+                |row| Ok((row.get(0)?, row.get(1)?)),
+            )
+            .optional()
+            .map_err(internal)?;
+        let (task_id_str, _) =
+            existing.ok_or_else(|| DomainError::Validation("检查项不存在".into()))?;
+        let task_id: EntityId = task_id_str
+            .parse()
+            .map_err(|_| DomainError::Validation("任务 id 非法".into()))?;
+        self.checklist_freeze_check(task_id)?;
+
+        let content = match input.content.as_deref() {
+            None | Some("") => None,
+            Some(raw) => Some(validate_checklist_content(raw)?),
+        };
+        let now = stamp(&self.clock);
+        conn.execute(
+            "UPDATE task_checklist_items SET
+                content = COALESCE(?2, content),
+                checked = COALESCE(?3, checked),
+                updated_at = ?4,
+                revision = revision + 1
+             WHERE id = ?1 AND deleted_at IS NULL",
+            params![
+                input.id.to_string(),
+                content,
+                input.checked.map(|c| if c { 1 } else { 0 }),
+                now,
+            ],
+        )
+        .map_err(internal)?;
+        conn.execute(
+            "UPDATE tasks SET updated_at = ?1 WHERE id = ?2 AND deleted_at IS NULL",
+            params![now, task_id_str],
+        )
+        .map_err(internal)?;
+        self.reindex_task_with_checklist(&conn, task_id)?;
+
+        active_checklist_rows(&conn, task_id)?
+            .into_iter()
+            .find(|i| i.id == input.id)
+            .ok_or_else(|| DomainError::Internal("checklist row vanished".into()))
+    }
+
+    pub fn checklist_delete(&self, id: EntityId) -> Result<(), DomainError> {
+        let conn = self.connect()?;
+        let task_id_str: Option<String> = conn
+            .query_row(
+                "SELECT task_id FROM task_checklist_items WHERE id = ?1 AND deleted_at IS NULL",
+                [id.to_string()],
+                |row| row.get(0),
+            )
+            .optional()
+            .map_err(internal)?;
+        let task_id_str =
+            task_id_str.ok_or_else(|| DomainError::Validation("检查项不存在".into()))?;
+        let task_id: EntityId = task_id_str
+            .parse()
+            .map_err(|_| DomainError::Validation("任务 id 非法".into()))?;
+        self.checklist_freeze_check(task_id)?;
+
+        let now = stamp(&self.clock);
+        conn.execute(
+            "UPDATE task_checklist_items SET deleted_at = ?1, updated_at = ?1
+             WHERE id = ?2 AND deleted_at IS NULL",
+            params![now, id.to_string()],
+        )
+        .map_err(internal)?;
+        self.normalize_checklist_order(&conn, task_id)?;
+        conn.execute(
+            "UPDATE tasks SET updated_at = ?1 WHERE id = ?2 AND deleted_at IS NULL",
+            params![now, task_id_str],
+        )
+        .map_err(internal)?;
+        self.reindex_task_with_checklist(&conn, task_id)?;
+        Ok(())
+    }
+
+    pub fn checklist_reorder(
+        &self,
+        task_id: EntityId,
+        ordered_ids: Vec<EntityId>,
+    ) -> Result<(), DomainError> {
+        self.checklist_freeze_check(task_id)?;
+        let conn = self.connect()?;
+        let active = active_checklist_rows(&conn, task_id)?;
+        if ordered_ids.len() != active.len() {
+            return Err(DomainError::Validation(
+                "排序列表必须包含全部检查项".into(),
+            ));
+        }
+        let active_ids: std::collections::HashSet<EntityId> =
+            active.iter().map(|i| i.id).collect();
+        if !ordered_ids.iter().all(|id| active_ids.contains(id)) {
+            return Err(DomainError::Validation("排序列表包含未知检查项".into()));
+        }
+        let now = stamp(&self.clock);
+        for (index, id) in ordered_ids.iter().enumerate() {
+            conn.execute(
+                "UPDATE task_checklist_items SET sort_order = ?1, updated_at = ?2
+                 WHERE id = ?3 AND deleted_at IS NULL",
+                params![index as i64, now, id.to_string()],
+            )
+            .map_err(internal)?;
+        }
+        conn.execute(
+            "UPDATE tasks SET updated_at = ?1 WHERE id = ?2 AND deleted_at IS NULL",
+            params![now, task_id.to_string()],
+        )
+        .map_err(internal)?;
+        Ok(())
+    }
+
+    fn normalize_checklist_order(
+        &self,
+        conn: &Connection,
+        task_id: EntityId,
+    ) -> Result<(), DomainError> {
+        let now = stamp(&self.clock);
+        let rows = active_checklist_rows(conn, task_id)?;
+        for (index, item) in rows.iter().enumerate() {
+            if item.sort_order != index as i64 {
+                conn.execute(
+                    "UPDATE task_checklist_items SET sort_order = ?1, updated_at = ?2
+                     WHERE id = ?3 AND deleted_at IS NULL",
+                    params![index as i64, now, item.id.to_string()],
+                )
+                .map_err(internal)?;
+            }
+        }
+        Ok(())
+    }
+}
+
+fn active_checklist_rows(
+    conn: &Connection,
+    task_id: EntityId,
+) -> Result<Vec<ChecklistItem>, DomainError> {
+    let mut stmt = conn
+        .prepare(
+            "SELECT id, task_id, content, checked, sort_order, created_at, updated_at, revision
+             FROM task_checklist_items
+             WHERE task_id = ?1 AND deleted_at IS NULL
+             ORDER BY sort_order ASC",
+        )
+        .map_err(internal)?;
+    let rows = stmt
+        .query_map([task_id.to_string()], |row| {
+            Ok(ChecklistItem {
+                id: row
+                    .get::<_, String>(0)?
+                    .parse()
+                    .map_err(|e| {
+                        rusqlite::Error::FromSqlConversionFailure(
+                            0,
+                            rusqlite::types::Type::Text,
+                            Box::new(e),
+                        )
+                    })?,
+                task_id: row
+                    .get::<_, String>(1)?
+                    .parse()
+                    .map_err(|e| {
+                        rusqlite::Error::FromSqlConversionFailure(
+                            1,
+                            rusqlite::types::Type::Text,
+                            Box::new(e),
+                        )
+                    })?,
+                content: row.get(2)?,
+                checked: row.get::<_, i64>(3)? == 1,
+                sort_order: row.get(4)?,
+                created_at: row.get(5)?,
+                updated_at: row.get(6)?,
+                revision: row.get(7)?,
+            })
+        })
+        .map_err(internal)?;
+    let mut items = Vec::new();
+    for row in rows {
+        items.push(row.map_err(internal)?);
+    }
+    Ok(items)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -1770,6 +2085,14 @@ mod tests {
         svc.ensure_seed_data().unwrap();
         std::mem::forget(dir);
         svc
+    }
+
+    /// Shared temp db for tests that need two services over one database.
+    fn test_db() -> Database {
+        let dir = tempdir().unwrap();
+        let db = Database::open(dir.path().join("shared.db")).unwrap();
+        std::mem::forget(dir);
+        db
     }
 
     #[test]
@@ -2371,5 +2694,146 @@ mod tests {
         assert_eq!(suggestions.suggestions.len(), 2);
         assert_eq!(suggestions.suggestions[0].task_id, timed.id);
         assert_eq!(suggestions.suggestions[1].task_id, high.id);
+    }
+
+    // -----------------------------------------------------------------
+    // v2.0 slice 6: checklist
+    // -----------------------------------------------------------------
+
+    #[test]
+    fn checklist_crud_and_counts() {
+        let service = open_service();
+        let task = service
+            .create_task(CreateTaskInput {
+                title: "上线发布".into(),
+                notes: None,
+                priority: None,
+                list_id: None,
+                due_date: None,
+                due_time: None,
+                tag_names: None,
+            })
+            .unwrap();
+
+        let a = service.checklist_add(task.id, " 更新版本号 ").unwrap();
+        assert_eq!(a.content, "更新版本号", "content is trimmed");
+        let b = service.checklist_add(task.id, "写 release note").unwrap();
+        let c = service.checklist_add(task.id, "检查签名").unwrap();
+
+        let list = service.checklist_list(task.id).unwrap();
+        assert_eq!(list.total, 3);
+        assert_eq!(list.checked_count, 0);
+        assert_eq!(
+            list.items.iter().map(|i| i.sort_order).collect::<Vec<_>>(),
+            vec![0, 1, 2]
+        );
+
+        let updated = service
+            .checklist_update(ChecklistUpdateInput {
+                id: b.id,
+                content: Some("写 release note 并通知群".into()),
+                checked: Some(true),
+            })
+            .unwrap();
+        assert!(updated.checked);
+        assert_eq!(updated.content, "写 release note 并通知群");
+        assert_eq!(service.checklist_list(task.id).unwrap().checked_count, 1);
+
+        // Delete → order normalized.
+        service.checklist_delete(a.id).unwrap();
+        let list = service.checklist_list(task.id).unwrap();
+        assert_eq!(list.total, 2);
+        assert_eq!(
+            list.items.iter().map(|i| i.sort_order).collect::<Vec<_>>(),
+            vec![0, 1]
+        );
+
+        // Reorder full list.
+        service
+            .checklist_reorder(task.id, vec![c.id, b.id])
+            .unwrap();
+        let list = service.checklist_list(task.id).unwrap();
+        assert_eq!(list.items[0].id, c.id);
+
+        // Checking everything does NOT complete the task.
+        service
+            .checklist_update(ChecklistUpdateInput { id: c.id, content: None, checked: Some(true) })
+            .unwrap();
+        let reloaded = service.get_task(task.id).unwrap();
+        assert_eq!(reloaded.status, TaskStatus::Todo);
+    }
+
+    #[test]
+    fn checklist_freezes_on_completed_task_and_cascades_on_delete() {
+        let service = open_service();
+        let task = service
+            .create_task(CreateTaskInput {
+                title: "冻结测试".into(),
+                notes: None,
+                priority: None,
+                list_id: None,
+                due_date: None,
+                due_time: None,
+                tag_names: None,
+            })
+            .unwrap();
+        let item = service.checklist_add(task.id, "子项").unwrap();
+
+        service.complete_task(task.id).unwrap();
+        assert!(service.checklist_add(task.id, "新项").is_err());
+        assert!(service
+            .checklist_update(ChecklistUpdateInput { id: item.id, content: None, checked: Some(true) })
+            .is_err());
+        // Reads stay available (read-only display).
+        assert_eq!(service.checklist_list(task.id).unwrap().total, 1);
+
+        // Cascade: delete the task → no orphan checklist rows anywhere.
+        let conn = service.connect().unwrap();
+        conn.execute("UPDATE tasks SET deleted_at = NULL, status = 'todo' WHERE id = ?1", [task.id.to_string()])
+            .unwrap();
+        drop(conn);
+        service.delete_task(task.id).unwrap();
+        let conn = service.connect().unwrap();
+        let orphaned: i64 = conn
+            .query_row(
+                "SELECT COUNT(*) FROM task_checklist_items WHERE deleted_at IS NULL",
+                [],
+                |r| r.get(0),
+            )
+            .unwrap();
+        assert_eq!(orphaned, 0, "no active orphans after task deletion");
+    }
+
+    #[test]
+    fn checklist_caps_at_50_and_search_indexes_items() {
+        let db = test_db();
+        let service = TaskService::new(db.clone());
+        service.ensure_seed_data().unwrap();
+        let task = service
+            .create_task(CreateTaskInput {
+                title: "大批量".into(),
+                notes: None,
+                priority: None,
+                list_id: None,
+                due_date: None,
+                due_time: None,
+                tag_names: None,
+            })
+            .unwrap();
+        for i in 0..50 {
+            service.checklist_add(task.id, &format!("第{i}步")).unwrap();
+        }
+        assert!(service.checklist_add(task.id, "第51步").is_err());
+
+        // Sub-item text is searchable via the task index.
+        let search = crate::application::search::SearchService::new(db);
+        let hits = search
+            .query(crate::domain::SearchQuery {
+                query: "第42步".into(),
+                types: Some(vec![crate::domain::SearchEntityType::Task]),
+                limit: Some(10),
+            })
+            .unwrap();
+        assert!(hits.tasks.iter().any(|h| h.entity_id == task.id));
     }
 }

@@ -43,14 +43,14 @@
 
 ## Acceptance Criteria
 
-- [ ] 详详面板 3 步内完成 增/勾/删；上限 50 超出报错文案
-- [ ] 勾选全部不自动完成任务；完成任务后检查项冻结只读（单测）
-- [ ] 删除检查项后 sort_order 重排连续（单测）；reorder 语义与任务一致
-- [ ] 任务删除/归档后无孤儿检查项（单测：query 全表为空）
-- [ ] 检查项文本可被任务搜索命中（单测）
-- [ ] TaskRow 显示 n/m 进度；无检查项任务渲染零变化
-- [ ] cargo test / pnpm test / build 全绿；PRD/implement 勾选；父合同复核
-- [ ] docs：keyboard-shortcuts 无需改（无新全局键）；ui-layout-interaction.md 检查项一节
+- [x] 详详面板 3 步内完成 增/勾/删；上限 50 超出报错文案
+- [x] 勾选全部不自动完成任务；完成任务后检查项冻结只读（单测）
+- [x] 删除检查项后 sort_order 重排连续（单测）；reorder 语义与任务一致
+- [x] 任务删除/归档后无孤儿检查项（单测：query 全表为空）
+- [x] 检查项文本可被任务搜索命中（单测）
+- [x] TaskRow 显示 n/m 进度；无检查项任务渲染零变化
+- [x] cargo test / pnpm test / build 全绿；PRD/implement 勾选；父合同复核
+- [x] docs：keyboard-shortcuts 无需改（无新全局键）；ui-layout-interaction.md 检查项一节
 
 ## 明确不做（本切片）
 
