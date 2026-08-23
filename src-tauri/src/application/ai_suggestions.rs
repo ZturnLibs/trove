@@ -8,10 +8,13 @@ use std::sync::Arc;
 
 use rusqlite::{params, Connection, OptionalExtension};
 
+use crate::application::clipboard::ClipboardService;
 use crate::application::links::EntityLinkService;
+use crate::application::reminders::ReminderService;
 use crate::application::memories::MemoryService;
 use crate::application::search::SearchService;
 use crate::application::tasks::TaskService;
+use crate::application::weekly_review::WeeklyReviewService;
 use crate::domain::{
     new_id, parse_suggestion_content, stamp, AIFeature, AISuggestionRecord, CompletionRequest,
     ContextItem, DomainError, ExtractApplyInput, ExtractApplyResult, SearchEntityType,
@@ -20,6 +23,27 @@ use crate::domain::{
 use crate::infrastructure::ai::{build_provider, AIProvider};
 use crate::infrastructure::db::Database;
 use crate::infrastructure::settings::SettingsService;
+
+/// Stable source id for the weekly review summary ledger entries.
+pub const WEEKLY_SOURCE_ID: &str = "weekly";
+
+/// Bounded, content-free label for clipboard items in prompts (image kind
+/// never carries text; text kind shows a short prefix only).
+fn display_title(item: &crate::domain::ClipboardItem) -> String {
+    let base = item.ocr_text.as_deref().unwrap_or(&item.content);
+    let mut label: String = base.chars().take(20).collect();
+    if base.chars().count() > 20 {
+        label.push('…');
+    }
+    label
+}
+
+fn excluded_source(app: &str, user_excluded: Vec<String>) -> bool {
+    crate::domain::default_excluded_apps()
+        .iter()
+        .chain(user_excluded.iter())
+        .any(|ex| app.eq_ignore_ascii_case(ex) || app.contains(ex.as_str()))
+}
 
 pub struct AISuggestionService {
     db: Database,
@@ -316,6 +340,91 @@ impl AISuggestionService {
             tasks: created,
             suggestion,
         })
+    }
+
+    /// Dismiss still-pending suggestions for a feature+source (used when a
+    /// fresher generation supersedes them or the owning flow completes).
+    fn dismiss_pending(
+        &self,
+        feature: AIFeature,
+        source_entity_id: &str,
+    ) -> Result<(), DomainError> {
+        let conn = self.connect()?;
+        conn.execute(
+            "UPDATE ai_suggestions SET status = 'dismissed', decided_at = ?3
+             WHERE feature_type = ?1 AND source_entity_id = ?2 AND status = 'pending'",
+            params![feature.as_str(), source_entity_id, stamp(&self.clock)],
+        )
+        .map_err(|e| DomainError::Internal(e.to_string()))?;
+        Ok(())
+    }
+
+    /// Slice 3: organize the weekly review's deterministic numbers into a
+    /// short prose summary. Numbers come from `snapshot()`; the model only
+    /// writes prose and must echo no task bodies (titles only in context).
+    pub fn request_weekly_summary(
+        &self,
+        weekly: &WeeklyReviewService,
+        tasks: &TaskService,
+        reminders: &ReminderService,
+        clipboard: &ClipboardService,
+    ) -> Result<Option<AISuggestionRecord>, DomainError> {
+        // A fresh generation supersedes any pending one.
+        self.dismiss_pending(AIFeature::Summary, WEEKLY_SOURCE_ID)?;
+
+        let snap = weekly.snapshot(tasks, reminders, clipboard)?;
+        const TITLES: usize = 8;
+
+        let mut lines = vec![format!(
+            "本周统计：收件箱未处理 {}；逾期 {}；等待/跟进 {}；长期未动 {}；近7天完成 {}；周期提醒 {}；大体积剪贴板 {}。",
+            snap.inbox_count,
+            snap.overdue_count,
+            snap.waiting_follow_up_count,
+            snap.stale_active_count,
+            snap.completed_last_7_days_count,
+            snap.upcoming_recurring_count,
+            snap.large_clipboard_count,
+        )];
+
+        let section = |name: &str, titles: Vec<String>| {
+            if titles.is_empty() {
+                None
+            } else {
+                Some(format!("{}：{}", name, titles.join("、")))
+            }
+        };
+        let take_titles = |items: &[crate::domain::Task]| {
+            items.iter().take(TITLES).map(|t| t.title.clone()).collect::<Vec<_>>()
+        };
+        lines.extend(section("收件箱示例", take_titles(&snap.inbox_unprocessed)));
+        lines.extend(section("逾期示例", take_titles(&snap.overdue)));
+        lines.extend(section("等待示例", take_titles(&snap.waiting_follow_up)));
+        lines.extend(section("近7天完成示例", take_titles(&snap.completed_last_7_days)));
+        // Clipboard items: titles only; sanitize drops excluded sources.
+        let clipboard_titles = snap
+            .large_clipboard_items
+            .iter()
+            .filter(|c| match &c.source_app {
+                Some(app) => !excluded_source(app, self.settings.get().unwrap_or_default().clipboard_excluded_apps.clone()),
+                None => true,
+            })
+            .take(TITLES)
+            .map(|c| display_title(c))
+            .collect::<Vec<_>>();
+        lines.extend(section("大剪贴板示例", clipboard_titles));
+
+        let context = vec![ContextItem {
+            entity_type: "review".into(),
+            entity_id: WEEKLY_SOURCE_ID.into(),
+            text: lines.join("\n"),
+            source_app: None,
+        }];
+        self.request(AIFeature::Summary, "review", WEEKLY_SOURCE_ID, &context)
+    }
+
+    /// Called by `weekly_review_complete`: no dangling pending summary.
+    pub fn dismiss_pending_weekly_summary(&self) -> Result<(), DomainError> {
+        self.dismiss_pending(AIFeature::Summary, WEEKLY_SOURCE_ID)
     }
 
     pub fn list(
@@ -1030,5 +1139,67 @@ mod tests {
         assert!(result.is_err());
         assert_eq!(service.get(&suggestion_id).unwrap().status, SuggestionStatus::Pending);
     }
+
+    // ------------------------------------------------------------------
+    // Slice 3: weekly summary
+    // ------------------------------------------------------------------
+
+    const SUMMARY_OUTPUT: &str = r#"{"items":[],"summary":"本周完成 3 项，逾期 1 项，可先挑 1 项处理。"}"#;
+
+    #[test]
+    fn weekly_summary_regenerations_dismiss_pending() {
+        let (dir, _service, settings, _provider) = setup();
+        let base = settings.get().unwrap();
+        let next = crate::infrastructure::settings::AppSettings {
+            ai: crate::domain::AIConfig {
+                mode: AIMode::Ollama,
+                ollama_model: "fake".into(),
+                features: AIFeatureToggles {
+                    summary: true,
+                    ..Default::default()
+                },
+                ..Default::default()
+            },
+            ..base
+        };
+        settings.save(&next).unwrap();
+
+        let (tasks, _links, _search, _m) = support_services(dir.path());
+        let reminders = ReminderService::new(Database::open(dir.path().join("workbench.db")).unwrap());
+        let clipboard = ClipboardService::new(
+            Database::open(dir.path().join("workbench.db")).unwrap(),
+            std::path::PathBuf::from(dir.path().join("assets")),
+        );
+        let weekly = WeeklyReviewService::new(Database::open(dir.path().join("workbench.db")).unwrap());
+
+        let provider = Arc::new(FakeProvider {
+            output: Some(SUMMARY_OUTPUT),
+            calls: std::sync::atomic::AtomicUsize::new(0),
+        });
+        let db = Database::open(dir.path().join("workbench.db")).unwrap();
+        let service = AISuggestionService::with_provider(db, settings.clone(), provider);
+
+        let first = service
+            .request_weekly_summary(&weekly, &tasks, &reminders, &clipboard)
+            .unwrap()
+            .expect("record");
+        assert_eq!(first.feature_type, "summary");
+        assert_eq!(first.source_entity_id, WEEKLY_SOURCE_ID);
+        assert!(first.payload.summary.is_some());
+        assert!(first.payload.items.is_empty());
+
+        // Regenerate: old pending dismissed, new pending created.
+        let second = service
+            .request_weekly_summary(&weekly, &tasks, &reminders, &clipboard)
+            .unwrap()
+            .expect("record");
+        assert_ne!(first.id, second.id);
+        assert_eq!(service.get(&first.id.to_string()).unwrap().status, SuggestionStatus::Dismissed);
+
+        // Completing the review clears the remaining pending summary.
+        service.dismiss_pending_weekly_summary().unwrap();
+        assert_eq!(service.get(&second.id.to_string()).unwrap().status, SuggestionStatus::Dismissed);
+    }
+
 
 }

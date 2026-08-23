@@ -25,12 +25,12 @@
 
 ## Acceptance Criteria
 
-- [ ] 摘要中的所有数字均来自 snapshot 确定性查询；模型输出只含文字（schema items 必空，单测断言）
-- [ ] prompt 不含任务正文/剪贴板正文，仅标题（代码审查 + 单测构造 context 断言）
-- [ ] 重新生成会把上一条 pending 置 dismissed（单测）
-- [ ] AI 关闭/开关关闭时页面无 AI 痕迹；provider 失败显示降级文案不阻塞回顾流程
-- [ ] 完成回顾自动清理 pending 摘要（单测）
-- [ ] cargo test / pnpm test / build 全绿；docs/ai-assist.md 更新
+- [x] 摘要中的所有数字均来自 snapshot 确定性查询；模型输出只含文字（schema items 必空，单测断言）
+- [x] prompt 不含任务正文/剪贴板正文，仅标题（代码审查 + 单测构造 context 断言）
+- [x] 重新生成会把上一条 pending 置 dismissed（单测）
+- [x] AI 关闭/开关关闭时页面无 AI 痕迹；provider 失败显示降级文案不阻塞回顾流程
+- [x] 完成回顾自动清理 pending 摘要（单测）
+- [x] cargo test / pnpm test / build 全绿；docs/ai-assist.md 更新
 
 ## 明确不做（本切片）
 

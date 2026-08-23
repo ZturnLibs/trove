@@ -461,3 +461,65 @@ fn online_extract_then_apply_full_chain() {
         assert_eq!(task.due_date.is_some(), !item.ambiguous && item.due_date.is_some());
     }
 }
+
+// Slice 3: weekly summary contract (offline part: prompt + schema).
+
+#[test]
+fn eval_summary_prompt_and_schema_contract() {
+    // Feature opened and judgement-forbidding constraints present.
+    let prompt = AIFeature::Summary.prompt_template().expect("opened");
+    assert!(prompt.contains("严禁评价"));
+    assert!(prompt.contains("200 字"));
+    // Summary-only output validates via the shared schema.
+    let content = parse_suggestion_content(r#"{"items":[],"summary":"本周完成 3 项。"}"#).unwrap();
+    assert!(content.items.is_empty());
+    assert_eq!(content.summary.as_deref(), Some("本周完成 3 项。"));
+    // And prose with items still validates (shared envelope).
+    assert!(parse_suggestion_content(
+        r#"{"items":[],"summary":"收件箱 2 项待整理。"}"#
+    )
+    .is_ok());
+}
+
+#[test]
+#[ignore = "requires local Ollama (OLLAMA_URL/OLLAMA_MODEL); run before releases"]
+fn online_weekly_summary_produces_prose_only() {
+    use trove_lib::application::clipboard::ClipboardService;
+    use trove_lib::application::reminders::ReminderService;
+    use trove_lib::application::tasks::TaskService;
+    use trove_lib::application::weekly_review::WeeklyReviewService;
+
+    let url = std::env::var("OLLAMA_URL").unwrap_or_else(|_| "http://localhost:11434".into());
+    let model = std::env::var("OLLAMA_MODEL").expect("OLLAMA_MODEL");
+
+    let dir = tempdir().unwrap();
+    let db = Database::open(dir.path().join("workbench.db")).unwrap();
+    let settings = Arc::new(SettingsService::new(db.clone()));
+    let mut base = settings.get().unwrap();
+    base.ai = trove_lib::domain::AIConfig {
+        mode: AIMode::Ollama,
+        ollama_url: url,
+        ollama_model: model,
+        features: AIFeatureToggles {
+            summary: true,
+            ..Default::default()
+        },
+        ..Default::default()
+    };
+    settings.save(&base).unwrap();
+
+    let tasks = TaskService::new(db.clone());
+    tasks.ensure_seed_data().unwrap();
+    let reminders = ReminderService::new(db.clone());
+    let clipboard = ClipboardService::new(db.clone(), dir.path().join("assets"));
+    let weekly = WeeklyReviewService::new(db.clone());
+
+    let service =
+        AISuggestionService::new(db, settings.clone(), dir.path().into()).expect("service");
+    let record = service
+        .request_weekly_summary(&weekly, &tasks, &reminders, &clipboard)
+        .expect("request")
+        .expect("record");
+    assert!(record.payload.summary.is_some(), "prose produced");
+    assert!(record.payload.items.is_empty(), "no fabricated items");
+}

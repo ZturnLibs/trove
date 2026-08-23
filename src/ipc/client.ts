@@ -1201,5 +1201,7 @@ export const ipc = {
     invoke<{ tasks: Task[]; suggestion: AISuggestionRecord }>("ai_suggestion_apply", {
       input: { suggestionId, selectedIndices },
     }),
+  aiWeeklySummaryRequest: () =>
+    invoke<AISuggestionRecord | null>("ai_weekly_summary_request"),
   appQuit: () => invoke<void>("app_quit"),
 };

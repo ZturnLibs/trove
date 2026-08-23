@@ -808,10 +808,16 @@ pub fn weekly_review_complete(
     session_id: EntityId,
     input: crate::domain::ReviewCompleteInput,
 ) -> Result<crate::domain::ReviewSession, AppError> {
-    state
+    let session = state
         .weekly_review
         .complete(session_id, input)
-        .map_err(Into::into)
+        .map_err(AppError::from)?;
+    // Completing the review supersedes any pending AI summary; failure is
+    // non-blocking (the ledger is derived data).
+    if let Err(err) = state.ai_suggestions.dismiss_pending_weekly_summary() {
+        tracing::warn!(error = %err, "dismiss pending weekly summary failed");
+    }
+    Ok(session)
 }
 
 #[tauri::command]
@@ -1862,5 +1868,22 @@ pub fn ai_suggestion_apply(
     state
         .ai_suggestions
         .apply_extract(input, &state.tasks, &state.links, &state.search)
+        .map_err(Into::into)
+}
+
+// v2.0 slice 3: weekly review summary.
+
+#[tauri::command]
+pub fn ai_weekly_summary_request(
+    state: State<'_, AppState>,
+) -> Result<Option<AISuggestionRecord>, AppError> {
+    state
+        .ai_suggestions
+        .request_weekly_summary(
+            &state.weekly_review,
+            &state.tasks,
+            &state.reminders,
+            &state.clipboard,
+        )
         .map_err(Into::into)
 }

@@ -41,6 +41,7 @@ impl AIFeature {
     pub fn prompt_template(&self) -> Option<&'static str> {
         match self {
             AIFeature::Extract => Some(EXTRACT_SYSTEM_PROMPT),
+            AIFeature::Summary => Some(WEEKLY_SUMMARY_SYSTEM_PROMPT),
             _ => None,
         }
     }
@@ -54,6 +55,15 @@ pub const EXTRACT_SYSTEM_PROMPT: &str = r#"你是个人工作台的任务提取�
 2. dueDate 格式 YYYY-MM-DD，dueTime 格式 HH:MM；日期/时间不确定或需要上下文才能推断时置 null 并把 ambiguous 设为 true。
 3. 严禁编造原文没有的内容；sourceExcerpt 必须是原文中的连续片段。
 4. 不确定是否为任务的条目跳过，宁缺毋滥。"#;
+
+/// System prompt for the weekly review summary (slice 3). All numbers come
+/// from deterministic queries; the model only organizes prose (§9.3).
+pub const WEEKLY_SUMMARY_SYSTEM_PROMPT: &str = r#"你是个人工作台的回顾助手。把用户给定的本周统计数字组织成一段中文小结。
+规则：
+1. 只输出 JSON 对象：{"summary":string,"items":[]}
+2. summary 不超过 200 字；只陈述给定数字与事实，可给温和提示（如“逾期 3 项，可先挑 1 项处理”）。
+3. 严禁评价表现、打分、排名或使用“落后/失败/糟糕/拖延”等词；不得编造数字之外的信息。
+4. 可以提及给定的任务名，但不得改写任务名。"#;
 
 #[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase", default)]
@@ -385,10 +395,26 @@ mod tests {
     #[test]
     fn unopened_features_have_no_prompt() {
         assert!(AIFeature::Extract.prompt_template().is_some());
+        assert!(AIFeature::Summary.prompt_template().is_some());
         assert!(AIFeature::Related.prompt_template().is_none());
-        assert!(AIFeature::Summary.prompt_template().is_none());
         assert!(AIFeature::Suggest.prompt_template().is_none());
         assert!(AIFeature::Split.prompt_template().is_none());
+    }
+
+    #[test]
+    fn summary_prompt_forbids_judgement_words() {
+        let prompt = AIFeature::Summary.prompt_template().unwrap();
+        assert!(prompt.contains("严禁评价"));
+        assert!(prompt.contains("落后")); // banned-words list is explicit
+        assert!(prompt.contains("200 字"));
+    }
+
+    #[test]
+    fn summary_only_output_validates_via_existing_schema() {
+        let raw = r#"{"items":[],"summary":"本周完成 3 项，逾期 1 项。"}"#;
+        let content = parse_suggestion_content(raw).unwrap();
+        assert!(content.items.is_empty());
+        assert_eq!(content.summary.as_deref(), Some("本周完成 3 项，逾期 1 项。"));
     }
 
     #[test]

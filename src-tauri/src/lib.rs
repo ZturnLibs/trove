@@ -727,6 +727,7 @@ pub fn run() {
             commands::ai_suggestion_clear,
             commands::ai_extract_request,
             commands::ai_suggestion_apply,
+            commands::ai_weekly_summary_request,
             commands::app_quit,
         ])
         .run(tauri::generate_context!())
