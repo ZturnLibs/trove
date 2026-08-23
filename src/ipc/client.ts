@@ -1213,5 +1213,11 @@ export const ipc = {
     }),
   aiRelatedRejectItem: (suggestionId: string, index: number) =>
     invoke<AISuggestionRecord>("ai_related_reject_item", { suggestionId, index }),
+  aiDailySuggestRequest: () =>
+    invoke<AISuggestionRecord | null>("ai_daily_suggest_request"),
+  aiDailySuggestSkip: (suggestionId: string, index: number) =>
+    invoke<AISuggestionRecord>("ai_daily_suggest_skip", { suggestionId, index }),
+  aiDailySuggestAccept: (suggestionId: string, index: number) =>
+    invoke<AISuggestionRecord>("ai_daily_suggest_accept", { suggestionId, index }),
   appQuit: () => invoke<void>("app_quit"),
 };

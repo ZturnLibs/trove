@@ -24,13 +24,13 @@
 
 ## Acceptance Criteria
 
-- [ ] AI 不改任务任何字段、不自动加入重点（单测：仅 request 后 focus 列表不变）
-- [ ] 候选仅来自本地确定性池（排除 focus/waiting，单测）；AI 理由基于候选特征（prompt 固化）
-- [ ] 编造标题被回配丢弃（单测，同切片 4 机制）
-- [ ] [加入重点] 走既有 dailyFocusAdd + 撤销栈；[跳过] 后当日同项不再出现（单测）
-- [ ] 跨天自动收口旧 pending（单测：伪造昨日 created_at 后请求先 dismiss）
-- [ ] AI 关闭/开关关闭/无候选时今日页零 AI 痕迹；provider 失败不阻塞今日页
-- [ ] cargo test / pnpm test / build 全绿；docs/ai-assist.md 更新
+- [x] AI 不改任务任何字段、不自动加入重点（单测：仅 request 后 focus 列表不变）
+- [x] 候选仅来自本地确定性池（排除 focus/waiting，单测）；AI 理由基于候选特征（prompt 固化）
+- [x] 编造标题被回配丢弃（单测，同切片 4 机制）
+- [x] [加入重点] 走既有 dailyFocusAdd + 撤销栈；[跳过] 后当日同项不再出现（单测）
+- [x] 跨天自动收口旧 pending（单测：伪造昨日 created_at 后请求先 dismiss）
+- [x] AI 关闭/开关关闭/无候选时今日页零 AI 痕迹；provider 失败不阻塞今日页
+- [x] cargo test / pnpm test / build 全绿；docs/ai-assist.md 更新
 
 ## 明确不做（本切片）
 

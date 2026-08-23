@@ -18,7 +18,7 @@ const FEATURES: { key: keyof AIConfig["features"]; label: string }[] = [
   { key: "extract", label: "长文本提取任务草稿（已开放）" },
   { key: "related", label: "相关内容建议（已开放）" },
   { key: "summary", label: "回顾摘要组织文字（已开放）" },
-  { key: "suggest", label: "每日工作建议" },
+  { key: "suggest", label: "每日工作建议（已开放）" },
   { key: "split", label: "任务拆分检查项" },
 ];
 

@@ -43,6 +43,7 @@ impl AIFeature {
             AIFeature::Extract => Some(EXTRACT_SYSTEM_PROMPT),
             AIFeature::Summary => Some(WEEKLY_SUMMARY_SYSTEM_PROMPT),
             AIFeature::Related => Some(RELATED_SYSTEM_PROMPT),
+            AIFeature::Suggest => Some(SUGGEST_SYSTEM_PROMPT),
             _ => None,
         }
     }
@@ -75,6 +76,16 @@ pub const RELATED_SYSTEM_PROMPT: &str = r#"你是个人工作台的相关内容�
 2. title 必须与候选列表中的标题完全一致；sourceExcerpt 必须与候选摘要完全一致。不得编造候选列表之外的条目。
 3. detail 用一句话说明相关理由（如“都涉及 Q4 预算”）。
 4. 不确定相关的宁可不选。"#;
+
+/// System prompt for daily work suggestions (slice 5). The model picks 1–3
+/// candidates from a locally computed pool with deterministic feature lines;
+/// reasons must cite those features, never invent facts.
+pub const SUGGEST_SYSTEM_PROMPT: &str = r#"你是个人工作台的今日规划助手。给定今天的候选任务（含确定性特征），挑出最值得今天聚焦的 1–3 项。
+规则：
+1. 只输出 JSON 对象：{"items":[{"title":string,"detail":string|null,"dueDate":null,"dueTime":null,"ambiguous":true,"sourceExcerpt":string}],"summary":null}
+2. title 必须与候选列表完全一致；sourceExcerpt 必须与该项特征行完全一致。
+3. detail 用一句话说明为什么今天做，必须基于特征（如“今天 18:00 截止”“已延期 2 次”“高优先级”）。
+4. 严禁编造特征之外的信息；不确定的宁可不选。"#;
 
 #[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase", default)]
@@ -408,7 +419,7 @@ mod tests {
         assert!(AIFeature::Extract.prompt_template().is_some());
         assert!(AIFeature::Summary.prompt_template().is_some());
         assert!(AIFeature::Related.prompt_template().is_some());
-        assert!(AIFeature::Suggest.prompt_template().is_none());
+        assert!(AIFeature::Suggest.prompt_template().is_some());
         assert!(AIFeature::Split.prompt_template().is_none());
     }
 
@@ -425,6 +436,14 @@ mod tests {
         let prompt = AIFeature::Related.prompt_template().expect("opened");
         assert!(prompt.contains("完全一致"));
         assert!(prompt.contains("不得编造候选列表之外"));
+    }
+
+    #[test]
+    fn suggest_prompt_pins_feature_citation() {
+        let prompt = AIFeature::Suggest.prompt_template().expect("opened");
+        assert!(prompt.contains("必须基于特征"));
+        assert!(prompt.contains("严禁编造"));
+        assert!(prompt.contains("宁可不选"));
     }
 
     #[test]

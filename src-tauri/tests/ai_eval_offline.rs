@@ -608,3 +608,64 @@ fn online_related_backmapping_hits_candidates() {
         assert!(!record.sources.is_empty());
     }
 }
+
+// Slice 5: daily-suggest contract (offline part).
+
+#[test]
+fn eval_suggest_prompt_pins_feature_citation() {
+    let prompt = AIFeature::Suggest.prompt_template().expect("opened");
+    assert!(prompt.contains("必须基于特征"));
+    assert!(prompt.contains("完全一致"));
+    assert!(prompt.contains("宁可不选"));
+}
+
+#[test]
+#[ignore = "requires local Ollama (OLLAMA_URL/OLLAMA_MODEL); run before releases"]
+fn online_daily_suggest_backmaps_and_cites_features() {
+    use trove_lib::application::tasks::TaskService;
+    use trove_lib::domain::CreateTaskInput;
+
+    let url = std::env::var("OLLAMA_URL").unwrap_or_else(|_| "http://localhost:11434".into());
+    let model = std::env::var("OLLAMA_MODEL").expect("OLLAMA_MODEL");
+
+    let dir = tempdir().unwrap();
+    let db = Database::open(dir.path().join("workbench.db")).unwrap();
+    let settings = Arc::new(SettingsService::new(db.clone()));
+    let mut base = settings.get().unwrap();
+    let today = trove_lib::domain::local_today(&trove_lib::domain::SystemClock);
+    base.ai = trove_lib::domain::AIConfig {
+        mode: AIMode::Ollama,
+        ollama_url: url,
+        ollama_model: model,
+        features: AIFeatureToggles {
+            suggest: true,
+            ..Default::default()
+        },
+        ..Default::default()
+    };
+    settings.save(&base).unwrap();
+
+    let tasks = TaskService::new(db.clone());
+    tasks.ensure_seed_data().unwrap();
+    tasks
+        .create_task(CreateTaskInput {
+            title: "整理报销票据".into(),
+            notes: None,
+            priority: Some(trove_lib::domain::TaskPriority::High),
+            list_id: None,
+            due_date: Some(today),
+            due_time: Some("18:00".into()),
+            tag_names: None,
+        })
+        .unwrap();
+
+    let service =
+        AISuggestionService::new(db, settings.clone(), dir.path().into()).expect("service");
+    let record = service
+        .request_daily_suggest(&tasks)
+        .expect("request")
+        .expect("record");
+    assert!(!record.payload.items.is_empty());
+    // Every item maps to a real candidate task.
+    assert_eq!(record.payload.items.len(), record.sources.len());
+}

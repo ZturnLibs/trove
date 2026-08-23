@@ -1938,3 +1938,41 @@ pub fn ai_related_reject_item(
         .reject_related_item(&suggestion_id, index)
         .map_err(Into::into)
 }
+
+// v2.0 slice 5: daily work suggestions.
+
+#[tauri::command]
+pub fn ai_daily_suggest_request(
+    state: State<'_, AppState>,
+) -> Result<Option<AISuggestionRecord>, AppError> {
+    state
+        .ai_suggestions
+        .request_daily_suggest(&state.tasks)
+        .map_err(Into::into)
+}
+
+#[tauri::command]
+pub fn ai_daily_suggest_skip(
+    state: State<'_, AppState>,
+    suggestion_id: String,
+    index: usize,
+) -> Result<AISuggestionRecord, AppError> {
+    state
+        .ai_suggestions
+        .remove_daily_suggest_item(&suggestion_id, index, false)
+        .map_err(Into::into)
+}
+
+#[tauri::command]
+pub fn ai_daily_suggest_accept(
+    state: State<'_, AppState>,
+    suggestion_id: String,
+    index: usize,
+) -> Result<AISuggestionRecord, AppError> {
+    // Records acceptance; the actual focus membership is added by the UI via
+    // dailyFocusAdd so the existing undo stack keeps working.
+    state
+        .ai_suggestions
+        .remove_daily_suggest_item(&suggestion_id, index, true)
+        .map_err(Into::into)
+}

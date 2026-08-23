@@ -31,6 +31,26 @@ pub const WEEKLY_SOURCE_ID: &str = "weekly";
 const RELATED_CANDIDATES: i64 = 12;
 /// Max CJK bigrams probed per request (bounds LIKE sweeps).
 const RELATED_FRAGMENT_CAP: usize = 24;
+/// Stable source id for daily work suggestions.
+pub const DAILY_SOURCE_ID: &str = "daily";
+/// Daily candidate pool cap.
+const DAILY_CANDIDATE_CAP: i64 = 15;
+
+/// Deterministic feature line shown to the model and echoed as excerpt.
+fn daily_feature_line(task: &Task) -> String {
+    let due = match (&task.due_date, &task.due_time) {
+        (Some(d), Some(t)) => format!("截止:{} {}", d, t),
+        (Some(d), None) => format!("截止:{}", d),
+        _ => "截止:无".to_string(),
+    };
+    let priority = match task.priority {
+        crate::domain::TaskPriority::High => "高",
+        crate::domain::TaskPriority::Medium => "中",
+        crate::domain::TaskPriority::Low => "低",
+        crate::domain::TaskPriority::None => "无",
+    };
+    format!("{} 优先级:{} 状态:{}", due, priority, if task.status == crate::domain::TaskStatus::Todo { "未完成" } else { "已完成" })
+}
 
 /// CJK bigrams (plus ASCII words) used as deterministic retrieval fragments.
 fn bigrams(text: &str) -> Vec<String> {
@@ -491,7 +511,7 @@ impl AISuggestionService {
 
         // Deterministic candidate pool: CJK-bigram substring retrieval over
         // the search corpus (FTS tokenization misses Chinese paraphrases).
-        let rejected = self.rejected_pair_ids(task_id)?;
+        let rejected = self.rejected_pair_ids(AIFeature::Related, task_id)?;
         let sensitive_memories = self.sensitive_memory_ids()?;
         let mut pool: std::collections::HashMap<String, (crate::domain::SearchHit, i64)> =
             std::collections::HashMap::new();
@@ -655,17 +675,20 @@ impl AISuggestionService {
         Ok(created)
     }
 
-    /// Reject one item as irrelevant: persisted as a dismissed pair record so
-    /// future requests for this task filter it out. Closes the main record
-    /// when nothing remains.
-    pub fn reject_related_item(
+    /// Reject one item: persisted as a pair record with the given status so
+    /// future candidate filtering can honor it (dismissed = "skip again").
+    /// Closes the main record when nothing remains.
+    pub fn reject_suggestion_item(
         &self,
         suggestion_id: &str,
         index: usize,
+        pair_status: SuggestionStatus,
     ) -> Result<AISuggestionRecord, DomainError> {
         let record = self.get(suggestion_id)?;
-        if record.feature_type != AIFeature::Related.as_str()
-            || record.status != SuggestionStatus::Pending
+        if !matches!(
+            record.feature_type.as_str(),
+            feature if feature == AIFeature::Related.as_str() || feature == AIFeature::Suggest.as_str()
+        ) || record.status != SuggestionStatus::Pending
         {
             return Err(DomainError::Validation("建议不可用或已处理".into()));
         }
@@ -676,7 +699,7 @@ impl AISuggestionService {
         // Pair audit row (dismissed): future candidate filter reads these.
         let pair = AISuggestionRecord {
             id: new_id().to_string(),
-            feature_type: AIFeature::Related.as_str().to_string(),
+            feature_type: record.feature_type.clone(),
             source_entity_type: record.source_entity_type.clone(),
             source_entity_id: record.source_entity_id.clone(),
             payload: crate::domain::SuggestionContent {
@@ -684,7 +707,7 @@ impl AISuggestionService {
                 summary: None,
             },
             sources: vec![record.sources[index].clone()],
-            status: SuggestionStatus::Dismissed,
+            status: pair_status,
             provider: record.provider.clone(),
             model: record.model.clone(),
             created_at: stamp(&self.clock),
@@ -715,6 +738,140 @@ impl AISuggestionService {
         Ok(updated)
     }
 
+    /// Back-compat wrapper: related items reject as dismissed (skip again).
+    pub fn reject_related_item(
+        &self,
+        suggestion_id: &str,
+        index: usize,
+    ) -> Result<AISuggestionRecord, DomainError> {
+        self.reject_suggestion_item(suggestion_id, index, SuggestionStatus::Dismissed)
+    }
+
+    /// Slice 5: daily work suggestions. Candidates come from today's
+    /// deterministic pool; the model picks 1–3 with feature-cited reasons.
+    /// Nothing is ever written to tasks/focus here — joining the focus list
+    /// is the user's action in the UI.
+    pub fn request_daily_suggest(&self, tasks: &TaskService) -> Result<Option<AISuggestionRecord>, DomainError> {
+        self.dismiss_stale_daily_pending()?;
+        self.dismiss_pending(AIFeature::Suggest, DAILY_SOURCE_ID)?;
+
+        let today = tasks.today_tasks()?;
+        let excluded: std::collections::HashSet<String> = today
+            .focus
+            .iter()
+            .chain(today.waiting_follow_up.iter())
+            .map(|t| t.id.to_string())
+            .collect();
+        let skipped = self.daily_skipped_ids()?;
+
+        let mut candidates: Vec<(String, String, String)> = Vec::new(); // (title, feature_line, task_id)
+        for task in today.overdue.iter().chain(today.due_today.iter()) {
+            let id_str = task.id.to_string();
+            if excluded.contains(&id_str) || skipped.contains(&id_str) {
+                continue;
+            }
+            let feature = daily_feature_line(task);
+            candidates.push((task.title.clone(), feature, id_str));
+            if candidates.len() as i64 >= DAILY_CANDIDATE_CAP {
+                break;
+            }
+        }
+        if candidates.is_empty() {
+            return Ok(None);
+        }
+
+        let listing = candidates
+            .iter()
+            .map(|(title, feature, _)| format!("《{}》 {}", title, feature))
+            .collect::<Vec<_>>()
+            .join("\n");
+        let context = vec![ContextItem {
+            entity_type: "review".into(),
+            entity_id: DAILY_SOURCE_ID.into(),
+            text: format!("今日候选任务（含确定性特征）：\n{}", listing),
+            source_app: None,
+        }];
+
+        let record = match self.request(AIFeature::Suggest, "review", DAILY_SOURCE_ID, &context)? {
+            Some(record) => record,
+            None => return Ok(None),
+        };
+
+        // Back-mapping (same anti-fabrication contract as slice 4).
+        let by_title: std::collections::HashMap<&str, &(String, String, String)> =
+            candidates.iter().map(|c| (c.0.as_str(), c)).collect();
+        let matched: Vec<_> = record
+            .payload
+            .items
+            .iter()
+            .filter(|item| by_title.contains_key(item.title.as_str()))
+            .cloned()
+            .collect();
+        if matched.is_empty() {
+            self.decide(&record.id.to_string(), SuggestionStatus::Dismissed)?;
+            return Ok(None);
+        }
+        let sources: Vec<SuggestionSource> = matched
+            .iter()
+            .filter_map(|item| {
+                by_title.get(item.title.as_str()).map(|(_, _, tid)| SuggestionSource {
+                    entity_type: "task".into(),
+                    entity_id: tid.clone(),
+                    text_offset: 0,
+                    excerpt: item.source_excerpt.clone(),
+                })
+            })
+            .collect();
+        let updated = AISuggestionRecord {
+            payload: crate::domain::SuggestionContent {
+                items: matched,
+                summary: None,
+            },
+            sources,
+            ..record.clone()
+        };
+        self.replace_payload(&updated)?;
+        Ok(Some(updated))
+    }
+
+    /// Remove one daily-suggest item after the user acted on it:
+    /// `accepted=true` (joined focus) or `false` (skipped → filtered today).
+    pub fn remove_daily_suggest_item(
+        &self,
+        suggestion_id: &str,
+        index: usize,
+        accepted: bool,
+    ) -> Result<AISuggestionRecord, DomainError> {
+        self.reject_suggestion_item(
+            suggestion_id,
+            index,
+            if accepted { SuggestionStatus::Accepted } else { SuggestionStatus::Dismissed },
+        )
+    }
+
+    fn daily_skipped_ids(&self) -> Result<std::collections::HashSet<String>, DomainError> {
+        self.rejected_pair_ids(AIFeature::Suggest, DAILY_SOURCE_ID)
+    }
+
+    /// Close any pending daily suggestions from before today (day rollover).
+    fn dismiss_stale_daily_pending(&self) -> Result<(), DomainError> {
+        let today = {
+            use crate::domain::Clock;
+            use chrono::{Datelike, Local};
+            let local = self.clock.now().with_timezone(&Local);
+            format!("{:04}-{:02}-{:02}", local.year(), local.month(), local.day())
+        };
+        let conn = self.connect()?;
+        conn.execute(
+            "UPDATE ai_suggestions SET status = 'dismissed', decided_at = ?2
+             WHERE feature_type = 'suggest' AND source_entity_id = ?1
+               AND status = 'pending' AND substr(created_at, 1, 10) < ?3",
+            params![DAILY_SOURCE_ID, stamp(&self.clock), today],
+        )
+        .map_err(|e| DomainError::Internal(e.to_string()))?;
+        Ok(())
+    }
+
     fn replace_payload(&self, record: &AISuggestionRecord) -> Result<(), DomainError> {
         let payload_json = serde_json::to_string(&record.payload)
             .map_err(|e| DomainError::Internal(e.to_string()))?;
@@ -731,18 +888,19 @@ impl AISuggestionService {
 
     fn rejected_pair_ids(
         &self,
+        feature: AIFeature,
         source_entity_id: &str,
     ) -> Result<std::collections::HashSet<String>, DomainError> {
         let conn = self.connect()?;
         let mut stmt = conn
             .prepare(
                 "SELECT sources_json FROM ai_suggestions
-                 WHERE feature_type = 'related' AND source_entity_id = ?1
+                 WHERE feature_type = ?2 AND source_entity_id = ?1
                    AND status IN ('rejected','dismissed')",
             )
             .map_err(|e| DomainError::Internal(e.to_string()))?;
         let rows = stmt
-            .query_map([source_entity_id], |row| row.get::<_, String>(0))
+            .query_map(params![source_entity_id, feature.as_str()], |row| row.get::<_, String>(0))
             .map_err(|e| DomainError::Internal(e.to_string()))?;
         let mut ids = std::collections::HashSet::new();
         for row in rows {
@@ -837,6 +995,12 @@ impl AISuggestionService {
             return Err(DomainError::Validation("建议不存在或已处理".into()));
         }
         self.get(id)
+    }
+
+    /// Test-only: raw connection for seeding ledger rows.
+    #[cfg(test)]
+    pub fn connect_for_test(&self) -> Connection {
+        self.db.connect().unwrap()
     }
 
     pub fn get(&self, id: &str) -> Result<AISuggestionRecord, DomainError> {
@@ -1780,6 +1944,131 @@ mod tests {
             .request_related(&task.id.to_string(), &tasks, &search, &memories, &links)
             .unwrap();
         assert!(result.is_none(), "sensitive + already linked → no candidates");
+    }
+
+    // ------------------------------------------------------------------
+    // Slice 5: daily work suggestions
+    // ------------------------------------------------------------------
+
+    fn enable_suggest(settings: &SettingsService) {
+        let base = settings.get().unwrap();
+        let next = crate::infrastructure::settings::AppSettings {
+            ai: crate::domain::AIConfig {
+                mode: AIMode::Ollama,
+                ollama_model: "fake".into(),
+                features: AIFeatureToggles {
+                    suggest: true,
+                    ..Default::default()
+                },
+                ..Default::default()
+            },
+            ..base
+        };
+        settings.save(&next).unwrap();
+    }
+
+    const SUGGEST_OUTPUT: &str = r#"{"items":[
+        {"title":"整理报销票据","detail":"今天 18:00 截止，建议优先处理","dueDate":null,"dueTime":null,"ambiguous":true,"sourceExcerpt":"截止:2026-08-23 18:00 优先级:高"},
+        {"title":"编造的任务","detail":null,"dueDate":null,"dueTime":null,"ambiguous":true,"sourceExcerpt":"x"}
+    ],"summary":null}"#;
+
+    fn suggest_setup(output: Option<&'static str>) -> (
+        tempfile::TempDir,
+        Arc<SettingsService>,
+        TaskService,
+        AISuggestionService,
+    ) {
+        let dir = tempdir().unwrap();
+        let db = Database::open(dir.path().join("workbench.db")).unwrap();
+        let settings = Arc::new(SettingsService::new(db.clone()));
+        enable_suggest(&settings);
+        let tasks = TaskService::new(db.clone());
+        tasks.ensure_seed_data().unwrap();
+        let provider = Arc::new(FakeProvider {
+            output,
+            calls: std::sync::atomic::AtomicUsize::new(0),
+        });
+        let service = AISuggestionService::with_provider(db, settings.clone(), provider);
+        (dir, settings, tasks, service)
+    }
+
+    fn create_today_task(tasks: &TaskService, title: &str) -> crate::domain::Task {
+        let today = crate::domain::local_today(&SystemClock);
+        tasks
+            .create_task(crate::domain::CreateTaskInput {
+                title: title.into(),
+                notes: None,
+                priority: Some(crate::domain::TaskPriority::High),
+                list_id: None,
+                due_date: Some(today),
+                due_time: Some("18:00".into()),
+                tag_names: None,
+            })
+            .unwrap()
+    }
+
+    #[test]
+    fn daily_suggest_never_touches_focus_and_drops_fabrications() {
+        let (_dir, _settings, tasks, service) = suggest_setup(Some(SUGGEST_OUTPUT));
+        let task = create_today_task(&tasks, "整理报销票据");
+
+        let record = service.request_daily_suggest(&tasks).unwrap().expect("record");
+        // Fabricated item dropped; only the real candidate survives.
+        assert_eq!(record.payload.items.len(), 1);
+        assert_eq!(record.payload.items[0].title, "整理报销票据");
+        assert_eq!(record.sources[0].entity_type, "task");
+        assert_eq!(record.sources[0].entity_id, task.id.to_string());
+
+        // §9.3: no automatic focus membership — task stays outside focus.
+        let today = tasks.today_tasks().unwrap();
+        assert!(today.focus.iter().all(|t| t.id != task.id));
+        // And no task rows were modified (still Todo, untouched).
+        let reloaded = tasks.get_task(task.id).unwrap();
+        assert_eq!(reloaded.status, crate::domain::TaskStatus::Todo);
+    }
+
+    #[test]
+    fn daily_suggest_excludes_focus_waiting_and_skipped() {
+        let (_dir, _settings, tasks, service) = suggest_setup(Some(SUGGEST_OUTPUT));
+
+        // Focus member: excluded from candidates.
+        let focused = create_today_task(&tasks, "已在重点");
+        tasks.daily_focus_add(focused.id, None).unwrap();
+        let record = service.request_daily_suggest(&tasks).unwrap();
+        assert!(record.is_none(), "only candidate was in focus → none");
+        let _ = focused;
+
+        // Skipped pair: fresh candidate skipped → filtered from later requests.
+        let task_b = create_today_task(&tasks, "整理报销票据");
+        let _ = task_b;
+        let rec = service.request_daily_suggest(&tasks).unwrap().expect("record");
+        let after = service
+            .remove_daily_suggest_item(&rec.id.to_string(), 0, false)
+            .unwrap();
+        assert!(after.payload.items.is_empty());
+        // Next request: the skipped pair must not reappear → none.
+        assert!(service.request_daily_suggest(&tasks).unwrap().is_none());
+    }
+
+    #[test]
+    fn daily_suggest_closes_stale_pending_across_days() {
+        let (_dir, _settings, tasks, service) = suggest_setup(None);
+        // Insert a stale pending row dated yesterday.
+        let conn = service.connect_for_test();
+        conn.execute(
+            "INSERT INTO ai_suggestions (id, feature_type, source_entity_type, source_entity_id,
+                payload, sources_json, status, provider, model, created_at, decided_at)
+             VALUES ('stale', 'suggest', 'review', 'daily', ?, '[]',
+                     'pending', 'ollama', 'fake', '2000-01-01T00:00:00Z', NULL)",
+            rusqlite::params![r#"{"items":[],"summary":null}"#],
+        )
+        .unwrap();
+        drop(conn);
+
+        // A fresh request closes the stale row first.
+        service.request_daily_suggest(&tasks).unwrap();
+        let stale = service.get("stale").unwrap();
+        assert_eq!(stale.status, SuggestionStatus::Dismissed);
     }
 
 }

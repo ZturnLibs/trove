@@ -19,6 +19,7 @@ import { useNavigate } from "react-router-dom";
 import { Clock } from "lucide-react";
 import { RecurrencePicker } from "@/design-system/patterns/RecurrencePicker";
 import { FocusDropZone } from "@/design-system/patterns/FocusDropZone";
+import { DailySuggestionsCard } from "@/features/today/DailySuggestionsCard";
 import { TaskDetailPanel } from "@/design-system/patterns/TaskDetailPanel";
 import { SortableTaskRow, TaskRow } from "@/design-system/patterns/TaskRow";
 import { EmptyState } from "@/components/PageScaffold";
@@ -1156,6 +1157,7 @@ export function TodayPage() {
           />
         ) : (
           <div>
+            <DailySuggestionsCard />
             <DndContext
               sensors={sensors}
               collisionDetection={closestCenter}
