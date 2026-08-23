@@ -42,6 +42,7 @@ impl AIFeature {
         match self {
             AIFeature::Extract => Some(EXTRACT_SYSTEM_PROMPT),
             AIFeature::Summary => Some(WEEKLY_SUMMARY_SYSTEM_PROMPT),
+            AIFeature::Related => Some(RELATED_SYSTEM_PROMPT),
             _ => None,
         }
     }
@@ -64,6 +65,16 @@ pub const WEEKLY_SUMMARY_SYSTEM_PROMPT: &str = r#"你是个人工作台的回顾
 2. summary 不超过 200 字；只陈述给定数字与事实，可给温和提示（如“逾期 3 项，可先挑 1 项处理”）。
 3. 严禁评价表现、打分、排名或使用“落后/失败/糟糕/拖延”等词；不得编造数字之外的信息。
 4. 可以提及给定的任务名，但不得改写任务名。"#;
+
+/// System prompt for related-content suggestions (slice 4). The model only
+/// picks and motivates candidates retrieved locally; fabricated titles are
+/// dropped server-side by exact-match back-mapping.
+pub const RELATED_SYSTEM_PROMPT: &str = r#"你是个人工作台的相关内容推荐助手。给定一个任务和候选内容列表，选出真正相关的条目（最多 5 条）。
+规则：
+1. 只输出 JSON 对象：{"items":[{"title":string,"detail":string|null,"dueDate":null,"dueTime":null,"ambiguous":true,"sourceExcerpt":string}],"summary":null}
+2. title 必须与候选列表中的标题完全一致；sourceExcerpt 必须与候选摘要完全一致。不得编造候选列表之外的条目。
+3. detail 用一句话说明相关理由（如“都涉及 Q4 预算”）。
+4. 不确定相关的宁可不选。"#;
 
 #[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase", default)]
@@ -396,7 +407,7 @@ mod tests {
     fn unopened_features_have_no_prompt() {
         assert!(AIFeature::Extract.prompt_template().is_some());
         assert!(AIFeature::Summary.prompt_template().is_some());
-        assert!(AIFeature::Related.prompt_template().is_none());
+        assert!(AIFeature::Related.prompt_template().is_some());
         assert!(AIFeature::Suggest.prompt_template().is_none());
         assert!(AIFeature::Split.prompt_template().is_none());
     }
@@ -407,6 +418,13 @@ mod tests {
         assert!(prompt.contains("严禁评价"));
         assert!(prompt.contains("落后")); // banned-words list is explicit
         assert!(prompt.contains("200 字"));
+    }
+
+    #[test]
+    fn related_prompt_pins_exact_title_copying() {
+        let prompt = AIFeature::Related.prompt_template().expect("opened");
+        assert!(prompt.contains("完全一致"));
+        assert!(prompt.contains("不得编造候选列表之外"));
     }
 
     #[test]

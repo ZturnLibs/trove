@@ -2,27 +2,27 @@
 
 ## 1. 领域层
 
-- [ ] `RELATED_SYSTEM_PROMPT` 开放 + 单测（标题一致约束/防编造条款固化）
+- [x] `RELATED_SYSTEM_PROMPT` 开放 + 单测（标题一致约束/防编造条款固化）
 - 验证：`cargo test --lib domain::ai_suggestion`
 
 ## 2. 服务层
 
-- [ ] `rejected_pair_ids`、`request_related`（FTS 候选 + 三重过滤 + 标题回配）
-- [ ] `confirm_related`（幂等 link → accepted）、`reject_related_item`（dismissed 配对 + 自动收口）
-- [ ] 单测：敏感/已链接/已拒绝过滤、编造标题丢弃、仅 request 无 link、confirm 幂等、reject 后不再出现
+- [x] `rejected_pair_ids`、`request_related`（FTS 候选 + 三重过滤 + 标题回配）
+- [x] `confirm_related`（幂等 link → accepted）、`reject_related_item`（dismissed 配对 + 自动收口）
+- [x] 单测：敏感/已链接/已拒绝过滤、编造标题丢弃、仅 request 无 link、confirm 幂等、reject 后不再出现
 - 验证：`cargo test --lib application::ai_suggestions`
 
 ## 3. IPC + 前端
 
-- [ ] 命令 3 个 + lib 注册；client.ts 封装
-- [ ] `RelatedSuggestionsSection.tsx`；TaskDetailPanel 接入（附件区上方，条件渲染）
-- [ ] 设置页 related 开关文案「已开放」
+- [x] 命令 3 个 + lib 注册；client.ts 封装
+- [x] `RelatedSuggestionsSection.tsx`；TaskDetailPanel 接入（附件区上方，条件渲染）
+- [x] 设置页 related 开关文案「已开放」
 - 验证：`pnpm test:unit` + `pnpm build` + `tsc`
 
 ## 4. 文档与评估
 
-- [ ] ai-assist.md「相关内容建议」小节；PRD/implement 勾选
-- [ ] `#[ignore]` 在线档：真实模型回配率（输出标题全部命中候选）
+- [x] ai-assist.md「相关内容建议」小节；PRD/implement 勾选
+- [x] `#[ignore]` 在线档：真实模型回配率（输出标题全部命中候选）
 - 验证：`cargo test`
 
 ## Review gates

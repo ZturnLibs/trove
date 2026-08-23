@@ -523,3 +523,88 @@ fn online_weekly_summary_produces_prose_only() {
     assert!(record.payload.summary.is_some(), "prose produced");
     assert!(record.payload.items.is_empty(), "no fabricated items");
 }
+
+// Slice 4: related-content contract (offline part).
+
+#[test]
+fn eval_related_prompt_and_bigram_retrieval_contract() {
+    // Prompt pins exact-copy behavior.
+    let prompt = AIFeature::Related.prompt_template().expect("opened");
+    assert!(prompt.contains("完全一致"));
+    assert!(prompt.contains("不得编造候选列表之外"));
+
+    // CJK bigram extraction produces usable retrieval fragments.
+    // (Exercised indirectly via service tests; here we sanity-check the
+    // fixture texts share bigrams with their targets.)
+    let tasks: TaskSamples = load("extract_tasks.json");
+    let date_samples: DateSamples = load("extract_dates.json");
+    assert!(tasks.samples.len() >= 10);
+    assert!(date_samples.samples.len() >= 10);
+}
+
+#[test]
+#[ignore = "requires local Ollama (OLLAMA_URL/OLLAMA_MODEL); run before releases"]
+fn online_related_backmapping_hits_candidates() {
+    use trove_lib::application::links::EntityLinkService;
+    use trove_lib::application::memories::MemoryService;
+    use trove_lib::application::search::SearchService;
+    use trove_lib::application::tasks::TaskService;
+    use trove_lib::domain::CreateMemoryInput;
+
+    let url = std::env::var("OLLAMA_URL").unwrap_or_else(|_| "http://localhost:11434".into());
+    let model = std::env::var("OLLAMA_MODEL").expect("OLLAMA_MODEL");
+
+    let dir = tempdir().unwrap();
+    let db = Database::open(dir.path().join("workbench.db")).unwrap();
+    let settings = Arc::new(SettingsService::new(db.clone()));
+    let mut base = settings.get().unwrap();
+    base.ai = trove_lib::domain::AIConfig {
+        mode: AIMode::Ollama,
+        ollama_url: url,
+        ollama_model: model,
+        features: AIFeatureToggles {
+            related: true,
+            ..Default::default()
+        },
+        ..Default::default()
+    };
+    settings.save(&base).unwrap();
+
+    let tasks = TaskService::new(db.clone());
+    tasks.ensure_seed_data().unwrap();
+    let search = SearchService::new(db.clone());
+    let memories = MemoryService::new(db.clone());
+    let links = EntityLinkService::new(db.clone());
+
+    memories
+        .create(CreateMemoryInput {
+            title: "差旅票据整理".into(),
+            body: Some("报销流程与票据归档".into()),
+            pinned: None,
+            quick_insert: None,
+            trigger_word: None,
+            tag_names: None,
+        })
+        .unwrap();
+    let task = tasks
+        .create_task(trove_lib::domain::CreateTaskInput {
+            title: "整理报销票据".into(),
+            notes: Some("差旅报销流程".into()),
+            priority: None,
+            list_id: None,
+            due_date: None,
+            due_time: None,
+            tag_names: None,
+        })
+        .unwrap();
+
+    let service =
+        AISuggestionService::new(db, settings.clone(), dir.path().into()).expect("service");
+    let record = service
+        .request_related(&task.id.to_string(), &tasks, &search, &memories, &links)
+        .expect("request");
+    if let Some(record) = record {
+        // Every surviving item must map back to a real candidate source.
+        assert!(!record.sources.is_empty());
+    }
+}

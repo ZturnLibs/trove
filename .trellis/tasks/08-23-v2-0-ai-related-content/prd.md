@@ -20,12 +20,12 @@
 
 ## Acceptance Criteria
 
-- [ ] 推荐仅展示为独立区；无任何自动写 EntityLink 行为（单测：仅 request 不产生 link）
-- [ ] 每条建议含理由与摘录（来源可核）；候选池仅来自本地 FTS + 过滤规则（单测：敏感/已关联/已拒绝均不进候选）
-- [ ] 模型编造的标题（不在候选内）被丢弃（单测）
-- [ ] [关联] 逐条写 related 链接且幂等；[不相关] 后同任务再请求不出现该配对（单测）
-- [ ] AI 关闭/开关关闭无该区；provider 失败降级文案不阻塞详情面板
-- [ ] cargo test / pnpm test / build 全绿；docs/ai-assist.md 更新
+- [x] 推荐仅展示为独立区；无任何自动写 EntityLink 行为（单测：仅 request 不产生 link）
+- [x] 每条建议含理由与摘录（来源可核）；候选池仅来自本地 FTS + 过滤规则（单测：敏感/已关联/已拒绝均不进候选）
+- [x] 模型编造的标题（不在候选内）被丢弃（单测）
+- [x] [关联] 逐条写 related 链接且幂等；[不相关] 后同任务再请求不出现该配对（单测）
+- [x] AI 关闭/开关关闭无该区；provider 失败降级文案不阻塞详情面板
+- [x] cargo test / pnpm test / build 全绿；docs/ai-assist.md 更新
 
 ## 明确不做（本切片）
 

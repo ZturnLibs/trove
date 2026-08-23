@@ -176,6 +176,46 @@ impl SearchService {
         })
     }
 
+    /// Substring (LIKE) search across the same corpus — deterministic
+    /// candidate retrieval for CJK text where FTS tokenization misses
+    /// paraphrases. Same result shape/filters as `query`.
+    pub fn query_substring(&self, input: SearchQuery) -> Result<SearchResults, DomainError> {
+        let q = input.query.trim();
+        if q.is_empty() {
+            return Ok(SearchResults {
+                tasks: Vec::new(),
+                reminders: Vec::new(),
+                memories: Vec::new(),
+                clipboard: Vec::new(),
+            });
+        }
+        let limit = input.limit.unwrap_or(40).clamp(1, 100);
+        let conn = self.connect()?;
+        let hits = self.like_search(&conn, q, limit)?;
+
+        let allowed = input.types.unwrap_or_else(|| {
+            vec![
+                SearchEntityType::Task,
+                SearchEntityType::Reminder,
+                SearchEntityType::Memory,
+                SearchEntityType::Clipboard,
+            ]
+        });
+        let mut results = SearchResults::default();
+        for hit in hits {
+            if !allowed.contains(&hit.entity_type) {
+                continue;
+            }
+            match hit.entity_type {
+                SearchEntityType::Task => results.tasks.push(hit),
+                SearchEntityType::Reminder => results.reminders.push(hit),
+                SearchEntityType::Memory => results.memories.push(hit),
+                SearchEntityType::Clipboard => results.clipboard.push(hit),
+            }
+        }
+        Ok(results)
+    }
+
     pub fn rebuild_all(&self) -> Result<usize, DomainError> {
         let conn = self.connect()?;
         conn.execute_batch(

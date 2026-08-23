@@ -17,8 +17,8 @@ use crate::application::tasks::TaskService;
 use crate::application::weekly_review::WeeklyReviewService;
 use crate::domain::{
     new_id, parse_suggestion_content, stamp, AIFeature, AISuggestionRecord, CompletionRequest,
-    ContextItem, DomainError, ExtractApplyInput, ExtractApplyResult, SearchEntityType,
-    SuggestionSource, SuggestionStatus, SystemClock, Task,
+    ContextItem, DomainError, EntityLink, ExtractApplyInput, ExtractApplyResult, SearchEntityType,
+    SearchQuery, SuggestionSource, SuggestionStatus, SystemClock, Task, LINK_KIND_RELATED,
 };
 use crate::infrastructure::ai::{build_provider, AIProvider};
 use crate::infrastructure::db::Database;
@@ -26,6 +26,50 @@ use crate::infrastructure::settings::SettingsService;
 
 /// Stable source id for the weekly review summary ledger entries.
 pub const WEEKLY_SOURCE_ID: &str = "weekly";
+
+/// Substring candidate pool size for related-content suggestions (slice 4).
+const RELATED_CANDIDATES: i64 = 12;
+/// Max CJK bigrams probed per request (bounds LIKE sweeps).
+const RELATED_FRAGMENT_CAP: usize = 24;
+
+/// CJK bigrams (plus ASCII words) used as deterministic retrieval fragments.
+fn bigrams(text: &str) -> Vec<String> {
+    let mut frags: Vec<String> = Vec::new();
+    let mut ascii_word = String::new();
+    let flush_ascii = |acc: &mut String, out: &mut Vec<String>| {
+        if acc.chars().count() >= 2 {
+            out.push(acc.clone());
+        }
+        acc.clear();
+    };
+    for ch in text.chars() {
+        if ch.is_ascii_alphanumeric() {
+            ascii_word.push(ch);
+        } else {
+            flush_ascii(&mut ascii_word, &mut frags);
+            if is_cjk(ch) {
+                frags.push(ch.to_string());
+            }
+        }
+    }
+    flush_ascii(&mut ascii_word, &mut frags);
+
+    // Build bigrams over consecutive CJK single chars.
+    let cjk: Vec<char> = text.chars().filter(|c| is_cjk(*c)).collect();
+    let mut out: Vec<String> = Vec::new();
+    for pair in cjk.windows(2) {
+        out.push(pair.iter().collect());
+    }
+    out.extend(frags);
+    out.sort();
+    out.dedup();
+    out
+}
+
+fn is_cjk(ch: char) -> bool {
+    matches!(ch as u32,
+        0x4E00..=0x9FFF | 0x3400..=0x4DBF | 0xF900..=0xFAFF | 0x20000..=0x2FA1F)
+}
 
 /// Bounded, content-free label for clipboard items in prompts (image kind
 /// never carries text; text kind shows a short prefix only).
@@ -425,6 +469,304 @@ impl AISuggestionService {
     /// Called by `weekly_review_complete`: no dangling pending summary.
     pub fn dismiss_pending_weekly_summary(&self) -> Result<(), DomainError> {
         self.dismiss_pending(AIFeature::Summary, WEEKLY_SOURCE_ID)
+    }
+
+    /// Slice 4: suggest related memories/clipboard items for a task.
+    /// Candidates come from local FTS only; the model picks and motivates.
+    /// Fabricated titles are dropped by exact-match back-mapping.
+    pub fn request_related(
+        &self,
+        task_id: &str,
+        tasks: &TaskService,
+        search: &crate::application::search::SearchService,
+        memories: &MemoryService,
+        links: &EntityLinkService,
+    ) -> Result<Option<AISuggestionRecord>, DomainError> {
+        self.dismiss_pending(AIFeature::Related, task_id)?;
+
+        let entity_id: crate::domain::EntityId = task_id
+            .parse()
+            .map_err(|_| DomainError::Validation("任务 id 非法".into()))?;
+        let task = tasks.get_task(entity_id)?;
+
+        // Deterministic candidate pool: CJK-bigram substring retrieval over
+        // the search corpus (FTS tokenization misses Chinese paraphrases).
+        let rejected = self.rejected_pair_ids(task_id)?;
+        let sensitive_memories = self.sensitive_memory_ids()?;
+        let mut pool: std::collections::HashMap<String, (crate::domain::SearchHit, i64)> =
+            std::collections::HashMap::new();
+        for fragment in bigrams(&format!("{} {}", task.title, task.notes))
+            .into_iter()
+            .take(RELATED_FRAGMENT_CAP)
+        {
+            let hits = search.query_substring(SearchQuery {
+                query: fragment,
+                types: Some(vec![SearchEntityType::Memory, SearchEntityType::Clipboard]),
+                limit: Some(RELATED_CANDIDATES),
+            })?;
+            for hit in hits.memories.into_iter().chain(hits.clipboard) {
+                let id_str = hit.entity_id.to_string();
+                let entry = pool.entry(id_str).or_insert((hit, 0));
+                entry.1 += 1;
+            }
+        }
+
+        // list_for_entity matches both directions; collect the other side's id.
+        let linked_both: std::collections::HashSet<String> = links
+            .list_for_entity("task", entity_id)?
+            .into_iter()
+            .flat_map(|l| {
+                if l.source_id == entity_id {
+                    vec![l.target_id.to_string()]
+                } else {
+                    vec![l.source_id.to_string()]
+                }
+            })
+            .collect();
+
+        let mut ranked: Vec<(crate::domain::SearchHit, i64)> = pool
+            .into_values()
+            .filter(|(hit, _)| {
+                let id_str = hit.entity_id.to_string();
+                !linked_both.contains(&id_str)
+                    && !rejected.contains(&id_str)
+                    && !(hit.entity_type == SearchEntityType::Memory
+                        && sensitive_memories.contains(&id_str))
+            })
+            .collect();
+        ranked.sort_by(|a, b| b.1.cmp(&a.1).then(a.0.updated_at.cmp(&b.0.updated_at)));
+        ranked.truncate(RELATED_CANDIDATES as usize);
+
+        let mut candidates: Vec<(String, String, String, String)> = Vec::new(); // (title, excerpt, entity_type, entity_id)
+        for (hit, _) in ranked {
+            let id_str = hit.entity_id.to_string();
+            let excerpt: String = hit.snippet.chars().take(20).collect();
+            candidates.push((hit.title.clone(), excerpt, hit.entity_type.as_str().to_string(), id_str));
+        }
+        if candidates.is_empty() {
+            return Ok(None);
+        }
+        let _ = memories; // reserved for future body-level filtering
+
+        let listing = candidates
+            .iter()
+            .enumerate()
+            .map(|(i, (title, excerpt, _, _))| format!("{}. 《{}》 摘要：{}", i + 1, title, excerpt))
+            .collect::<Vec<_>>()
+            .join("\n");
+
+        let context = vec![
+            ContextItem {
+                entity_type: "task".into(),
+                entity_id: task_id.to_string(),
+                text: format!("任务：《{}》\n说明：{}", task.title, task.notes),
+                source_app: None,
+            },
+            ContextItem {
+                entity_type: "task".into(),
+                entity_id: task_id.to_string(),
+                text: format!("候选列表：\n{}", listing),
+                source_app: None,
+            },
+        ];
+
+        let record = match self.request(AIFeature::Related, "task", task_id, &context)? {
+            Some(record) => record,
+            None => return Ok(None),
+        };
+
+        // Back-mapping: drop any item whose title is not an exact candidate.
+        let by_title: std::collections::HashMap<&str, &(String, String, String, String)> =
+            candidates.iter().map(|c| (c.0.as_str(), c)).collect();
+        let matched: Vec<_> = record
+            .payload
+            .items
+            .iter()
+            .filter(|item| by_title.contains_key(item.title.as_str()))
+            .cloned()
+            .collect();
+        if matched.is_empty() {
+            // Everything fabricated: drop the record as invalid (audit row).
+            self.decide(&record.id.to_string(), SuggestionStatus::Dismissed)?;
+            return Ok(None);
+        }
+        let sources: Vec<SuggestionSource> = matched
+            .iter()
+            .filter_map(|item| {
+                by_title.get(item.title.as_str()).map(|(_, _, etype, eid)| SuggestionSource {
+                    entity_type: etype.clone(),
+                    entity_id: eid.clone(),
+                    text_offset: 0,
+                    excerpt: item.source_excerpt.clone(),
+                })
+            })
+            .collect();
+        // Rewrite the ledger row with only matched items + provenance.
+        let updated = AISuggestionRecord {
+            payload: crate::domain::SuggestionContent {
+                items: matched,
+                summary: None,
+            },
+            sources,
+            ..record.clone()
+        };
+        self.replace_payload(&updated)?;
+        Ok(Some(updated))
+    }
+
+    /// Confirm selected related items: idempotent related links, then accept.
+    pub fn confirm_related(
+        &self,
+        input: ExtractApplyInput,
+        task_id: &str,
+        links: &EntityLinkService,
+    ) -> Result<Vec<EntityLink>, DomainError> {
+        let record = self.get(&input.suggestion_id)?;
+        if record.feature_type != AIFeature::Related.as_str() {
+            return Err(DomainError::Validation("该建议不是相关内容类型".into()));
+        }
+        if record.status != SuggestionStatus::Pending {
+            return Err(DomainError::Validation("建议已处理，不能重复应用".into()));
+        }
+        let selected = input.normalize(record.payload.items.len())?;
+        let source: crate::domain::EntityId = task_id
+            .parse()
+            .map_err(|_| DomainError::Validation("任务 id 非法".into()))?;
+
+        let existing: std::collections::HashSet<String> = links
+            .list_for_entity("task", source)?
+            .into_iter()
+            .map(|l| l.target_id.to_string())
+            .collect();
+
+        let mut created = Vec::new();
+        for idx in selected {
+            let Some(src) = record.sources.get(idx) else { continue };
+            if existing.contains(&src.entity_id) {
+                continue; // idempotent: never duplicate a user-visible link
+            }
+            let target: crate::domain::EntityId = src
+                .entity_id
+                .parse()
+                .map_err(|_| DomainError::Validation("候选 id 非法".into()))?;
+            created.push(links.link("task", source, &src.entity_type, target, LINK_KIND_RELATED)?);
+        }
+        self.decide(&input.suggestion_id, SuggestionStatus::Accepted)?;
+        Ok(created)
+    }
+
+    /// Reject one item as irrelevant: persisted as a dismissed pair record so
+    /// future requests for this task filter it out. Closes the main record
+    /// when nothing remains.
+    pub fn reject_related_item(
+        &self,
+        suggestion_id: &str,
+        index: usize,
+    ) -> Result<AISuggestionRecord, DomainError> {
+        let record = self.get(suggestion_id)?;
+        if record.feature_type != AIFeature::Related.as_str()
+            || record.status != SuggestionStatus::Pending
+        {
+            return Err(DomainError::Validation("建议不可用或已处理".into()));
+        }
+        if index >= record.payload.items.len() || index >= record.sources.len() {
+            return Err(DomainError::Validation("条目不存在".into()));
+        }
+
+        // Pair audit row (dismissed): future candidate filter reads these.
+        let pair = AISuggestionRecord {
+            id: new_id().to_string(),
+            feature_type: AIFeature::Related.as_str().to_string(),
+            source_entity_type: record.source_entity_type.clone(),
+            source_entity_id: record.source_entity_id.clone(),
+            payload: crate::domain::SuggestionContent {
+                items: vec![record.payload.items[index].clone()],
+                summary: None,
+            },
+            sources: vec![record.sources[index].clone()],
+            status: SuggestionStatus::Dismissed,
+            provider: record.provider.clone(),
+            model: record.model.clone(),
+            created_at: stamp(&self.clock),
+            decided_at: Some(stamp(&self.clock)),
+        };
+        self.insert(&pair)?;
+
+        // Remove the item from the pending record.
+        let mut items = record.payload.items.clone();
+        let mut sources = record.sources.clone();
+        items.remove(index);
+        sources.remove(index);
+        if items.is_empty() {
+            let closed = AISuggestionRecord {
+                payload: crate::domain::SuggestionContent { items, summary: None },
+                sources,
+                ..record.clone()
+            };
+            self.replace_payload(&closed)?;
+            return self.decide(suggestion_id, SuggestionStatus::Rejected);
+        }
+        let updated = AISuggestionRecord {
+            payload: crate::domain::SuggestionContent { items, summary: None },
+            sources,
+            ..record.clone()
+        };
+        self.replace_payload(&updated)?;
+        Ok(updated)
+    }
+
+    fn replace_payload(&self, record: &AISuggestionRecord) -> Result<(), DomainError> {
+        let payload_json = serde_json::to_string(&record.payload)
+            .map_err(|e| DomainError::Internal(e.to_string()))?;
+        let sources_json = serde_json::to_string(&record.sources)
+            .map_err(|e| DomainError::Internal(e.to_string()))?;
+        let conn = self.connect()?;
+        conn.execute(
+            "UPDATE ai_suggestions SET payload = ?2, sources_json = ?3 WHERE id = ?1",
+            params![record.id, payload_json, sources_json],
+        )
+        .map_err(|e| DomainError::Internal(e.to_string()))?;
+        Ok(())
+    }
+
+    fn rejected_pair_ids(
+        &self,
+        source_entity_id: &str,
+    ) -> Result<std::collections::HashSet<String>, DomainError> {
+        let conn = self.connect()?;
+        let mut stmt = conn
+            .prepare(
+                "SELECT sources_json FROM ai_suggestions
+                 WHERE feature_type = 'related' AND source_entity_id = ?1
+                   AND status IN ('rejected','dismissed')",
+            )
+            .map_err(|e| DomainError::Internal(e.to_string()))?;
+        let rows = stmt
+            .query_map([source_entity_id], |row| row.get::<_, String>(0))
+            .map_err(|e| DomainError::Internal(e.to_string()))?;
+        let mut ids = std::collections::HashSet::new();
+        for row in rows {
+            let json = row.map_err(|e| DomainError::Internal(e.to_string()))?;
+            if let Ok(sources) = serde_json::from_str::<Vec<SuggestionSource>>(&json) {
+                ids.extend(sources.into_iter().map(|s| s.entity_id));
+            }
+        }
+        Ok(ids)
+    }
+
+    fn sensitive_memory_ids(&self) -> Result<std::collections::HashSet<String>, DomainError> {
+        let conn = self.connect()?;
+        let mut stmt = conn
+            .prepare("SELECT id FROM memories WHERE sensitive = 1 AND deleted_at IS NULL")
+            .map_err(|e| DomainError::Internal(e.to_string()))?;
+        let rows = stmt
+            .query_map([], |row| row.get::<_, String>(0))
+            .map_err(|e| DomainError::Internal(e.to_string()))?;
+        let mut ids = std::collections::HashSet::new();
+        for row in rows {
+            ids.insert(row.map_err(|e| DomainError::Internal(e.to_string()))?);
+        }
+        Ok(ids)
     }
 
     pub fn list(
@@ -1201,5 +1543,243 @@ mod tests {
         assert_eq!(service.get(&second.id.to_string()).unwrap().status, SuggestionStatus::Dismissed);
     }
 
+
+    // ------------------------------------------------------------------
+    // Slice 4: related content
+    // ------------------------------------------------------------------
+
+    fn enable_related(settings: &SettingsService) {
+        let base = settings.get().unwrap();
+        let next = crate::infrastructure::settings::AppSettings {
+            ai: crate::domain::AIConfig {
+                mode: AIMode::Ollama,
+                ollama_model: "fake".into(),
+                features: AIFeatureToggles {
+                    related: true,
+                    ..Default::default()
+                },
+                ..Default::default()
+            },
+            ..base
+        };
+        settings.save(&next).unwrap();
+    }
+
+    const RELATED_OUTPUT: &str = r#"{"items":[
+        {"title":"差旅票据整理","detail":"都涉及报销","dueDate":null,"dueTime":null,"ambiguous":true,"sourceExcerpt":"差旅票据"},
+        {"title":"我编造的条目","detail":null,"dueDate":null,"dueTime":null,"ambiguous":true,"sourceExcerpt":"x"}
+    ],"summary":null}"#;
+
+    fn related_setup() -> (
+        tempfile::TempDir,
+        Arc<SettingsService>,
+        TaskService,
+        crate::application::search::SearchService,
+        MemoryService,
+        EntityLinkService,
+    ) {
+        let dir = tempdir().unwrap();
+        let db = Database::open(dir.path().join("workbench.db")).unwrap();
+        let settings = Arc::new(SettingsService::new(db.clone()));
+        enable_related(&settings);
+        let tasks = TaskService::new(db.clone());
+        tasks.ensure_seed_data().unwrap();
+        let search = crate::application::search::SearchService::new(db.clone());
+        let memories = MemoryService::new(db.clone());
+        let links = EntityLinkService::new(db.clone());
+        (dir, settings, tasks, search, memories, links)
+    }
+
+    fn related_service(
+        dir: &std::path::Path,
+        settings: &Arc<SettingsService>,
+        output: Option<&'static str>,
+    ) -> AISuggestionService {
+        let provider = Arc::new(FakeProvider {
+            output,
+            calls: std::sync::atomic::AtomicUsize::new(0),
+        });
+        AISuggestionService::with_provider(
+            Database::open(dir.join("workbench.db")).unwrap(),
+            settings.clone(),
+            provider,
+        )
+    }
+
+    #[test]
+    fn related_drops_fabricated_titles_and_links_nothing_by_default() {
+        let (dir, settings, tasks, search, memories, links) = related_setup();
+        // Seed a memory that FTS can find from the task text.
+        memories
+            .create(CreateMemoryInput {
+                title: "差旅票据整理".into(),
+                body: Some("报销流程与票据".into()),
+                pinned: None,
+                quick_insert: None,
+                trigger_word: None,
+                tag_names: None,
+            })
+            .unwrap();
+        let task = tasks
+            .create_task(crate::domain::CreateTaskInput {
+                title: "整理报销票据".into(),
+                notes: Some("差旅报销".into()),
+                priority: None,
+                list_id: None,
+                due_date: None,
+                due_time: None,
+                tag_names: None,
+            })
+            .unwrap();
+
+        let service = related_service(dir.path(), &settings, Some(RELATED_OUTPUT));
+        let record = service
+            .request_related(&task.id.to_string(), &tasks, &search, &memories, &links)
+            .unwrap()
+            .expect("record");
+
+        // The fabricated title is gone; only the real candidate survives.
+        assert_eq!(record.payload.items.len(), 1);
+        assert_eq!(record.payload.items[0].title, "差旅票据整理");
+        assert_eq!(record.sources.len(), 1);
+        assert_eq!(record.sources[0].entity_type, "memory");
+
+        // Requesting alone must not create any link (§9.3 no auto-association).
+        assert!(links.list_for_entity("task", task.id).unwrap().is_empty());
+    }
+
+    #[test]
+    fn related_confirm_is_idempotent_and_reject_reduces_future() {
+        let (dir, settings, tasks, search, memories, links) = related_setup();
+        memories
+            .create(CreateMemoryInput {
+                title: "差旅票据整理".into(),
+                body: Some("报销流程与票据".into()),
+                pinned: None,
+                quick_insert: None,
+                trigger_word: None,
+                tag_names: None,
+            })
+            .unwrap();
+        let task = tasks
+            .create_task(crate::domain::CreateTaskInput {
+                title: "整理报销票据".into(),
+                notes: Some("差旅报销".into()),
+                priority: None,
+                list_id: None,
+                due_date: None,
+                due_time: None,
+                tag_names: None,
+            })
+            .unwrap();
+
+        let service = related_service(dir.path(), &settings, Some(RELATED_OUTPUT));
+        let record = service
+            .request_related(&task.id.to_string(), &tasks, &search, &memories, &links)
+            .unwrap()
+            .expect("record");
+
+        // Confirm the matched item → related link written, suggestion accepted.
+        let created = service
+            .confirm_related(
+                ExtractApplyInput {
+                    suggestion_id: record.id.to_string(),
+                    selected_indices: vec![0],
+                },
+                &task.id.to_string(),
+                &links,
+            )
+            .unwrap();
+        assert_eq!(created.len(), 1);
+        assert_eq!(created[0].link_kind, "related");
+        assert_eq!(
+            service.get(&record.id.to_string()).unwrap().status,
+            SuggestionStatus::Accepted
+        );
+
+        // Reject flow on a fresh task: item rejected → pair filtered later.
+        let task2 = tasks
+            .create_task(crate::domain::CreateTaskInput {
+                title: "再整理一次报销".into(),
+                notes: Some("差旅报销".into()),
+                priority: None,
+                list_id: None,
+                due_date: None,
+                due_time: None,
+                tag_names: None,
+            })
+            .unwrap();
+        let record2 = service
+            .request_related(&task2.id.to_string(), &tasks, &search, &memories, &links)
+            .unwrap()
+            .expect("record");
+        let after_reject = service
+            .reject_related_item(&record2.id.to_string(), 0)
+            .unwrap();
+        assert!(after_reject.payload.items.is_empty(), "last item closes the record");
+        assert_eq!(
+            service.get(&record2.id.to_string()).unwrap().status,
+            SuggestionStatus::Rejected
+        );
+
+        // Next request for the same task: rejected pair must not reappear.
+        let again = related_service(dir.path(), &settings, Some(RELATED_OUTPUT));
+        let result = again
+            .request_related(&task2.id.to_string(), &tasks, &search, &memories, &links)
+            .unwrap();
+        assert!(
+            result.is_none(),
+            "rejected pair filtered out → no candidates left"
+        );
+    }
+
+    #[test]
+    fn related_skips_sensitive_and_linked_candidates() {
+        let (dir, settings, tasks, search, memories, links) = related_setup();
+        let sensitive = memories
+            .create(CreateMemoryInput {
+                title: "银行卡信息".into(),
+                body: Some("密码相关".into()),
+                pinned: None,
+                quick_insert: None,
+                trigger_word: None,
+                tag_names: None,
+            })
+            .unwrap();
+        memories
+            .update(UpdateMemoryInput {
+                id: sensitive.id,
+                title: "银行卡信息".into(),
+                body: "密码相关".into(),
+                pinned: false,
+                archived: false,
+                quick_insert: false,
+                trigger_word: None,
+                sensitive: true,
+                tag_names: vec![],
+            })
+            .unwrap();
+        let task = tasks
+            .create_task(crate::domain::CreateTaskInput {
+                title: "银行卡信息处理".into(),
+                notes: Some("密码相关".into()),
+                priority: None,
+                list_id: None,
+                due_date: None,
+                due_time: None,
+                tag_names: None,
+            })
+            .unwrap();
+        // Link the sensitive memory manually: it must be excluded twice over.
+        links
+            .link("task", task.id, "memory", sensitive.id, "related")
+            .unwrap();
+
+        let service = related_service(dir.path(), &settings, Some(RELATED_OUTPUT));
+        let result = service
+            .request_related(&task.id.to_string(), &tasks, &search, &memories, &links)
+            .unwrap();
+        assert!(result.is_none(), "sensitive + already linked → no candidates");
+    }
 
 }

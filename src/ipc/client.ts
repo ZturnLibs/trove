@@ -1203,5 +1203,15 @@ export const ipc = {
     }),
   aiWeeklySummaryRequest: () =>
     invoke<AISuggestionRecord | null>("ai_weekly_summary_request"),
+  aiRelatedRequest: (taskId: string) =>
+    invoke<AISuggestionRecord | null>("ai_related_request", { taskId }),
+  aiRelatedConfirm: (suggestionId: string, selectedIndices: number[], taskId: string) =>
+    invoke<EntityLink[]>("ai_related_confirm", {
+      suggestionId,
+      selectedIndices,
+      taskId,
+    }),
+  aiRelatedRejectItem: (suggestionId: string, index: number) =>
+    invoke<AISuggestionRecord>("ai_related_reject_item", { suggestionId, index }),
   appQuit: () => invoke<void>("app_quit"),
 };

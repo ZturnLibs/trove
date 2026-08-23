@@ -172,7 +172,7 @@ pub struct SearchQuery {
     pub limit: Option<i64>,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
 #[serde(rename_all = "camelCase")]
 pub struct SearchResults {
     pub tasks: Vec<SearchHit>,

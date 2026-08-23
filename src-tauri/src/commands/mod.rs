@@ -1887,3 +1887,54 @@ pub fn ai_weekly_summary_request(
         )
         .map_err(Into::into)
 }
+
+// v2.0 slice 4: related-content suggestions.
+
+#[tauri::command]
+pub fn ai_related_request(
+    state: State<'_, AppState>,
+    task_id: EntityId,
+) -> Result<Option<AISuggestionRecord>, AppError> {
+    state
+        .ai_suggestions
+        .request_related(
+            &task_id.to_string(),
+            &state.tasks,
+            &state.search,
+            &state.memories,
+            &state.links,
+        )
+        .map_err(Into::into)
+}
+
+#[tauri::command]
+pub fn ai_related_confirm(
+    state: State<'_, AppState>,
+    suggestion_id: String,
+    selected_indices: Vec<usize>,
+    task_id: EntityId,
+) -> Result<Vec<EntityLink>, AppError> {
+    state
+        .ai_suggestions
+        .confirm_related(
+            ExtractApplyInput {
+                suggestion_id,
+                selected_indices,
+            },
+            &task_id.to_string(),
+            &state.links,
+        )
+        .map_err(Into::into)
+}
+
+#[tauri::command]
+pub fn ai_related_reject_item(
+    state: State<'_, AppState>,
+    suggestion_id: String,
+    index: usize,
+) -> Result<AISuggestionRecord, AppError> {
+    state
+        .ai_suggestions
+        .reject_related_item(&suggestion_id, index)
+        .map_err(Into::into)
+}
