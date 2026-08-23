@@ -138,3 +138,24 @@
 ### Status
 
 [OK] **Completed**
+
+
+## Session 6: v2.0 切片 3：每周回顾 AI 摘要
+
+**Date**: 2026-08-23
+**Task**: v2.0 切片 3：每周回顾 AI 摘要
+**Branch**: `feat-improve`
+
+### Summary
+
+交付 weekly_review AI 摘要：Summary prompt 开放（禁评价约束固化）、request_weekly_summary（确定性数字+仅标题上下文、重新生成置 dismissed）、完成回顾清理 pending、WeeklySummaryCard 三态 UI + 数字徽标对照；142 lib + 9 eval 全绿
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `14ae648` | (see git log) |
+
+### Status
+
+[OK] **Completed**

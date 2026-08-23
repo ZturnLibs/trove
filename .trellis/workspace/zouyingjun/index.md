@@ -8,8 +8,8 @@
 
 <!-- @@@auto:current-status -->
 - **Active File**: `journal-1.md`
-- **Total Sessions**: 5
-- **Last Active**: 2026-08-22
+- **Total Sessions**: 6
+- **Last Active**: 2026-08-23
 <!-- @@@/auto:current-status -->
 
 ---
@@ -19,7 +19,7 @@
 <!-- @@@auto:active-documents -->
 | File | Lines | Status |
 |------|-------|--------|
-| `journal-1.md` | ~140 | Active |
+| `journal-1.md` | ~161 | Active |
 <!-- @@@/auto:active-documents -->
 
 ---
@@ -29,6 +29,7 @@
 <!-- @@@auto:session-history -->
 | # | Date | Title | Commits | Branch |
 |---|------|-------|---------|--------|
+| 6 | 2026-08-23 | v2.0 切片 3：每周回顾 AI 摘要 | `14ae648` | `feat-improve` |
 | 5 | 2026-08-22 | v2.0 切片 2：长文本提取任务草稿 | `55b177b` | `feat-improve` |
 | 4 | 2026-08-21 | v2.0 切片 1：AI 服务边界实现交付 | `4075ae2` | `feat-improve` |
 | 3 | 2026-08-19 | v2.0 启动评估与路线图规划 | `3476f53` | `feat-improve` |
