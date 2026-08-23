@@ -201,3 +201,24 @@
 ### Status
 
 [OK] **Completed**
+
+
+## Session 9: v2.0 切片 6：任务检查项数据模型
+
+**Date**: 2026-08-23
+**Task**: v2.0 切片 6：任务检查项数据模型
+**Branch**: `feat-improve`
+
+### Summary
+
+交付一层检查项模型：0020 迁移、TaskService 五方法（冻结/级联/归一化/上限）、检查项并入任务搜索索引、ChecklistSection UI + TaskRow 进度徽标；为切片 7 AI 任务拆分铺路；153 lib + 11 eval + 42 前端全绿
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `af39963` | (see git log) |
+
+### Status
+
+[OK] **Completed**
