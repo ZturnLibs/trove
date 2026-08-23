@@ -222,3 +222,24 @@
 ### Status
 
 [OK] **Completed**
+
+
+## Session 10: v2.0 切片 7：AI 任务拆分
+
+**Date**: 2026-08-23
+**Task**: v2.0 切片 7：AI 任务拆分
+**Branch**: `feat-improve`
+
+### Summary
+
+交付任务→检查项 AI 拆分：依据子串防编造校验、薄任务/完成冻结短路、apply 零任务字段写入；复用切片 6 检查项模型；156 lib + 12 eval + 42 前端全绿
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `c55581e` | (see git log) |
+
+### Status
+
+[OK] **Completed**
