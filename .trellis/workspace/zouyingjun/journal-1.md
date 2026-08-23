@@ -180,3 +180,24 @@
 ### Status
 
 [OK] **Completed**
+
+
+## Session 8: v2.0 切片 5：今日工作建议
+
+**Date**: 2026-08-23
+**Task**: v2.0 切片 5：今日工作建议
+**Branch**: `feat-improve`
+
+### Summary
+
+交付今日页 AI 工作建议：确定性候选池（排除重点/等待/跳过配对）+ 特征引用理由 + 回配防编造；加入重点走既有撤销链路；跨天自动收口；顺手修复 reject 配对 feature 硬编码 bug；150 lib + 11 eval + 42 前端全绿
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `18f7ba8` | (see git log) |
+
+### Status
+
+[OK] **Completed**
