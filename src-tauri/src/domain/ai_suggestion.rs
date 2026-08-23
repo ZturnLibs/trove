@@ -44,6 +44,7 @@ impl AIFeature {
             AIFeature::Summary => Some(WEEKLY_SUMMARY_SYSTEM_PROMPT),
             AIFeature::Related => Some(RELATED_SYSTEM_PROMPT),
             AIFeature::Suggest => Some(SUGGEST_SYSTEM_PROMPT),
+            AIFeature::Split => Some(SPLIT_SYSTEM_PROMPT),
             _ => None,
         }
     }
@@ -86,6 +87,16 @@ pub const SUGGEST_SYSTEM_PROMPT: &str = r#"你是个人工作台的今日规划�
 2. title 必须与候选列表完全一致；sourceExcerpt 必须与该项特征行完全一致。
 3. detail 用一句话说明为什么今天做，必须基于特征（如“今天 18:00 截止”“已延期 2 次”“高优先级”）。
 4. 严禁编造特征之外的信息；不确定的宁可不选。"#;
+
+/// System prompt for task splitting (slice 7). Generates one-level
+/// checklist candidates grounded in the task's own text; the server drops
+/// items whose excerpt is not a substring of the task source.
+pub const SPLIT_SYSTEM_PROMPT: &str = r#"你是个人工作台的任务拆分助手。根据给定任务生成可执行的检查项。
+规则：
+1. 只输出 JSON 对象：{"items":[{"title":string,"detail":null,"dueDate":null,"dueTime":null,"ambiguous":true,"sourceExcerpt":string}],"summary":null}
+2. title 是一条可勾选的检查项（动词开头，不超过 50 字），生成 3–8 条；不创建新任务、不带日期提醒。
+3. sourceExcerpt 必须是任务原文中的连续片段，说明该项的依据；无依据的项不要生成。
+4. 不得改写原任务内容；不确定的宁可不生成。"#;
 
 #[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase", default)]
@@ -420,7 +431,7 @@ mod tests {
         assert!(AIFeature::Summary.prompt_template().is_some());
         assert!(AIFeature::Related.prompt_template().is_some());
         assert!(AIFeature::Suggest.prompt_template().is_some());
-        assert!(AIFeature::Split.prompt_template().is_none());
+        assert!(AIFeature::Split.prompt_template().is_some());
     }
 
     #[test]
@@ -444,6 +455,14 @@ mod tests {
         assert!(prompt.contains("必须基于特征"));
         assert!(prompt.contains("严禁编造"));
         assert!(prompt.contains("宁可不选"));
+    }
+
+    #[test]
+    fn split_prompt_pins_grounded_checklist_generation() {
+        let prompt = AIFeature::Split.prompt_template().expect("opened");
+        assert!(prompt.contains("不创建新任务"));
+        assert!(prompt.contains("连续片段"));
+        assert!(prompt.contains("宁可不生成"));
     }
 
     #[test]

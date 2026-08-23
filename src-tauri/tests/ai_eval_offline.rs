@@ -669,3 +669,62 @@ fn online_daily_suggest_backmaps_and_cites_features() {
     // Every item maps to a real candidate task.
     assert_eq!(record.payload.items.len(), record.sources.len());
 }
+
+// Slice 7: task split contract (offline part).
+
+#[test]
+fn eval_split_prompt_pins_grounded_generation() {
+    let prompt = AIFeature::Split.prompt_template().expect("opened");
+    assert!(prompt.contains("不创建新任务"));
+    assert!(prompt.contains("连续片段"));
+}
+
+#[test]
+#[ignore = "requires local Ollama (OLLAMA_URL/OLLAMA_MODEL); run before releases"]
+fn online_split_grounds_excerpts_in_task_source() {
+    use trove_lib::application::tasks::TaskService;
+    use trove_lib::domain::CreateTaskInput;
+
+    let url = std::env::var("OLLAMA_URL").unwrap_or_else(|_| "http://localhost:11434".into());
+    let model = std::env::var("OLLAMA_MODEL").expect("OLLAMA_MODEL");
+
+    let dir = tempdir().unwrap();
+    let db = Database::open(dir.path().join("workbench.db")).unwrap();
+    let settings = Arc::new(SettingsService::new(db.clone()));
+    let mut base = settings.get().unwrap();
+    base.ai = trove_lib::domain::AIConfig {
+        mode: AIMode::Ollama,
+        ollama_url: url,
+        ollama_model: model,
+        features: AIFeatureToggles {
+            split: true,
+            ..Default::default()
+        },
+        ..Default::default()
+    };
+    settings.save(&base).unwrap();
+
+    let tasks = TaskService::new(db.clone());
+    tasks.ensure_seed_data().unwrap();
+    let task = tasks
+        .create_task(CreateTaskInput {
+            title: "发布 v2 版本".into(),
+            notes: Some("更新版本号，检查更新包签名，写发布说明，通知用户群".into()),
+            priority: None,
+            list_id: None,
+            due_date: None,
+            due_time: None,
+            tag_names: None,
+        })
+        .unwrap();
+
+    let service =
+        AISuggestionService::new(db, settings.clone(), dir.path().into()).expect("service");
+    let record = service
+        .request_split(&task.id.to_string(), &tasks)
+        .expect("request")
+        .expect("record");
+    assert!(!record.payload.items.is_empty());
+    // Surviving items are grounded by construction (server-side filter).
+    assert_eq!(record.payload.items.len(), record.sources.len());
+}

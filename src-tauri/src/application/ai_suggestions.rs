@@ -927,6 +927,113 @@ impl AISuggestionService {
         Ok(ids)
     }
 
+
+    /// Slice 7: generate checklist candidates from a task's own text.
+    /// Every candidate must ground its excerpt in the task source; the
+    /// server drops ungrounded items entirely (anti-fabrication).
+    pub fn request_split(
+        &self,
+        task_id: &str,
+        tasks: &TaskService,
+    ) -> Result<Option<AISuggestionRecord>, DomainError> {
+        self.dismiss_pending(AIFeature::Split, task_id)?;
+
+        let entity_id: crate::domain::EntityId = task_id
+            .parse()
+            .map_err(|_| DomainError::Validation("任务 id 非法".into()))?;
+        let task = tasks.get_task(entity_id)?;
+        if task.status == crate::domain::TaskStatus::Completed {
+            return Err(DomainError::Validation("任务已完成，不能生成拆分".into()));
+        }
+
+        let source_text = format!("{}\n{}", task.title, task.notes);
+        if source_text.trim().chars().count() < 4 {
+            // Nothing meaningful to split — honest empty state, no provider call.
+            return Ok(None);
+        }
+
+        let context = vec![ContextItem {
+            entity_type: "task".into(),
+            entity_id: task_id.to_string(),
+            text: source_text.clone(),
+            source_app: None,
+        }];
+        let record = match self.request(AIFeature::Split, "task", task_id, &context)? {
+            Some(record) => record,
+            None => return Ok(None),
+        };
+
+        // Grounding check: excerpt must be a substring of the task source.
+        let grounded: Vec<_> = record
+            .payload
+            .items
+            .iter()
+            .filter(|item| !item.source_excerpt.trim().is_empty()
+                && source_text.contains(item.source_excerpt.trim()))
+            .cloned()
+            .collect();
+        if grounded.is_empty() {
+            self.decide(&record.id.to_string(), SuggestionStatus::Dismissed)?;
+            return Ok(None);
+        }
+        let sources: Vec<SuggestionSource> = grounded
+            .iter()
+            .map(|item| SuggestionSource {
+                entity_type: "task".into(),
+                entity_id: task_id.to_string(),
+                text_offset: 0,
+                excerpt: item.source_excerpt.trim().to_string(),
+            })
+            .collect();
+        let updated = AISuggestionRecord {
+            payload: crate::domain::SuggestionContent {
+                items: grounded,
+                summary: None,
+            },
+            sources,
+            ..record.clone()
+        };
+        self.replace_payload(&updated)?;
+        Ok(Some(updated))
+    }
+
+    /// Apply selected split items as checklist rows. Never creates tasks
+    /// and never touches the task's own fields (§9.3).
+    pub fn apply_split(
+        &self,
+        input: ExtractApplyInput,
+        tasks: &TaskService,
+    ) -> Result<Vec<crate::domain::ChecklistItem>, DomainError> {
+        let record = self.get(&input.suggestion_id)?;
+        if record.feature_type != AIFeature::Split.as_str() {
+            return Err(DomainError::Validation("该建议不是任务拆分类型".into()));
+        }
+        if record.status != SuggestionStatus::Pending {
+            return Err(DomainError::Validation("建议已处理，不能重复应用".into()));
+        }
+        let selected = input.normalize(record.payload.items.len())?;
+        let task_id: crate::domain::EntityId = record
+            .source_entity_id
+            .parse()
+            .map_err(|_| DomainError::Validation("任务 id 非法".into()))?;
+
+        // Pre-check freeze so we fail before writing anything.
+        if tasks.get_task(task_id)?.status == crate::domain::TaskStatus::Completed {
+            return Err(DomainError::Validation("任务已完成，检查项不可修改".into()));
+        }
+
+        let mut created = Vec::with_capacity(selected.len());
+        for idx in selected {
+            let item = &record.payload.items[idx];
+            // checklist_add enforces content length + 50-item cap; on
+            // failure the already-added rows stay and the record remains
+            // pending so the user can retry the remainder.
+            created.push(tasks.checklist_add(task_id, &item.title)?);
+        }
+        self.decide(&input.suggestion_id, SuggestionStatus::Accepted)?;
+        Ok(created)
+    }
+
     pub fn list(
         &self,
         feature: Option<AIFeature>,
@@ -2071,4 +2178,145 @@ mod tests {
         assert_eq!(stale.status, SuggestionStatus::Dismissed);
     }
 
+
+    // ------------------------------------------------------------------
+    // Slice 7: task split
+    // ------------------------------------------------------------------
+
+    fn enable_split(settings: &SettingsService) {
+        let base = settings.get().unwrap();
+        let next = crate::infrastructure::settings::AppSettings {
+            ai: crate::domain::AIConfig {
+                mode: AIMode::Ollama,
+                ollama_model: "fake".into(),
+                features: AIFeatureToggles {
+                    split: true,
+                    ..Default::default()
+                },
+                ..Default::default()
+            },
+            ..base
+        };
+        settings.save(&next).unwrap();
+    }
+
+    const SPLIT_OUTPUT: &str = r#"{"items":[
+        {"title":"更新 package.json 版本号","detail":null,"dueDate":null,"dueTime":null,"ambiguous":true,"sourceExcerpt":"版本号"},
+        {"title":"无中生有的检查项","detail":null,"dueDate":null,"dueTime":null,"ambiguous":true,"sourceExcerpt":"原文里根本没有这句话"}
+    ],"summary":null}"#;
+
+    #[test]
+    fn split_filters_ungrounded_and_never_touches_task_fields() {
+        let (dir, _service, settings, _provider) = setup();
+        enable_split(&settings);
+        let (tasks, _links, _search, _m) = support_services(dir.path());
+        let task = tasks
+            .create_task(crate::domain::CreateTaskInput {
+                title: "发布新版本".into(),
+                notes: Some("更新版本号，检查签名，写发布说明".into()),
+                priority: Some(crate::domain::TaskPriority::High),
+                list_id: None,
+                due_date: None,
+                due_time: None,
+                tag_names: None,
+            })
+            .unwrap();
+        let before = tasks.get_task(task.id).unwrap();
+
+        let provider = Arc::new(FakeProvider {
+            output: Some(SPLIT_OUTPUT),
+            calls: std::sync::atomic::AtomicUsize::new(0),
+        });
+        let service = AISuggestionService::with_provider(
+            Database::open(dir.path().join("workbench.db")).unwrap(),
+            settings.clone(),
+            provider,
+        );
+
+        let record = service
+            .request_split(&task.id.to_string(), &tasks)
+            .unwrap()
+            .expect("record");
+        // Ungrounded item dropped; only the grounded one survives.
+        assert_eq!(record.payload.items.len(), 1);
+        assert_eq!(record.payload.items[0].title, "更新 package.json 版本号");
+
+        let created = service
+            .apply_split(
+                ExtractApplyInput {
+                    suggestion_id: record.id.to_string(),
+                    selected_indices: vec![0],
+                },
+                &tasks,
+            )
+            .unwrap();
+        assert_eq!(created.len(), 1);
+
+        // §9.3: task fields untouched; only checklist rows added.
+        let after = tasks.get_task(task.id).unwrap();
+        assert_eq!(after.title, before.title);
+        assert_eq!(after.notes, before.notes);
+        assert_eq!(after.priority, before.priority);
+        assert_eq!(after.status, before.status);
+        let checklist = tasks.checklist_list(task.id).unwrap();
+        assert_eq!(checklist.total, 1);
+        assert_eq!(checklist.items[0].content, "更新 package.json 版本号");
+
+        // Repeat apply rejected.
+        assert!(service
+            .apply_split(
+                ExtractApplyInput {
+                    suggestion_id: record.id.to_string(),
+                    selected_indices: vec![0],
+                },
+                &tasks,
+            )
+            .is_err());
+    }
+
+    #[test]
+    fn split_skips_thin_tasks_and_completed_tasks() {
+        let (dir, _service, settings, provider) = setup();
+        enable_split(&settings);
+        let (tasks, _links, _search, _m) = support_services(dir.path());
+
+        // Thin task (short title, no notes): no provider call, honest None.
+        let thin = tasks
+            .create_task(crate::domain::CreateTaskInput {
+                title: "买".into(),
+                notes: None,
+                priority: None,
+                list_id: None,
+                due_date: None,
+                due_time: None,
+                tag_names: None,
+            })
+            .unwrap();
+        let service = AISuggestionService::with_provider(
+            Database::open(dir.path().join("workbench.db")).unwrap(),
+            settings.clone(),
+            provider.clone(),
+        );
+        assert!(service.request_split(&thin.id.to_string(), &tasks).unwrap().is_none());
+        assert_eq!(
+            provider.calls.load(std::sync::atomic::Ordering::SeqCst),
+            0,
+            "thin task must short-circuit before the provider"
+        );
+
+        // Completed task: hard freeze error.
+        let done = tasks
+            .create_task(crate::domain::CreateTaskInput {
+                title: "已完成的发布任务".into(),
+                notes: Some("更新版本号等等".into()),
+                priority: None,
+                list_id: None,
+                due_date: None,
+                due_time: None,
+                tag_names: None,
+            })
+            .unwrap();
+        tasks.complete_task(done.id).unwrap();
+        assert!(service.request_split(&done.id.to_string(), &tasks).is_err());
+    }
 }

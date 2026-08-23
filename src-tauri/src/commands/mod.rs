@@ -2031,3 +2031,27 @@ pub fn task_checklist_reorder(
     emit_task_change(&app, &state.tasks.get_task(task_id)?, "updated");
     Ok(())
 }
+
+// v2.0 slice 7: AI task split into checklist candidates.
+
+#[tauri::command]
+pub fn ai_split_request(
+    state: State<'_, AppState>,
+    task_id: EntityId,
+) -> Result<Option<AISuggestionRecord>, AppError> {
+    state
+        .ai_suggestions
+        .request_split(&task_id.to_string(), &state.tasks)
+        .map_err(Into::into)
+}
+
+#[tauri::command]
+pub fn ai_split_apply(
+    state: State<'_, AppState>,
+    input: ExtractApplyInput,
+) -> Result<Vec<ChecklistItem>, AppError> {
+    state
+        .ai_suggestions
+        .apply_split(input, &state.tasks)
+        .map_err(Into::into)
+}

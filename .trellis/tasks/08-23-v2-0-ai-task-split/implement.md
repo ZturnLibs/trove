@@ -2,26 +2,26 @@
 
 ## 1. 领域层
 
-- [ ] `SPLIT_SYSTEM_PROMPT` 开放 + 单测（不建任务/依据子串/宁缺毋滥固化）
+- [x] `SPLIT_SYSTEM_PROMPT` 开放 + 单测（不建任务/依据子串/宁缺毋滥固化）
 - 验证：`cargo test --lib domain::ai_suggestion`
 
 ## 2. 服务层
 
-- [ ] `request_split`（冻结/空内容短路/子串校验丢条、全丢作废）
-- [ ] `apply_split`（门禁 → checklist_add 逐项 → accepted；部分失败保持 pending）
-- [ ] 单测：零任务字段变化、依据过滤、空内容零 provider 调用、重复 apply 拒绝
+- [x] `request_split`（冻结/空内容短路/子串校验丢条、全丢作废）
+- [x] `apply_split`（门禁 → checklist_add 逐项 → accepted；部分失败保持 pending）
+- [x] 单测：零任务字段变化、依据过滤、空内容零 provider 调用、重复 apply 拒绝
 - 验证：`cargo test --lib application::ai_suggestions`
 
 ## 3. IPC + 前端
 
-- [ ] 命令 `ai_split_request` / `ai_split_apply` + lib 注册；client.ts 封装
-- [ ] ChecklistSection：AI 拆分按钮 + 草稿区（勾选/依据/都不合适）+ 设置页文案
+- [x] 命令 `ai_split_request` / `ai_split_apply` + lib 注册；client.ts 封装
+- [x] ChecklistSection：AI 拆分按钮 + 草稿区（勾选/依据/都不合适）+ 设置页文案
 - 验证：`pnpm test:unit` + `pnpm build` + `tsc`
 
 ## 4. 文档与评估
 
-- [ ] ai-assist.md「任务拆分」小节；PRD/implement 勾选
-- [ ] `#[ignore]` 在线档（依据子串命中率断言）
+- [x] ai-assist.md「任务拆分」小节；PRD/implement 勾选
+- [x] `#[ignore]` 在线档（依据子串命中率断言）
 - 验证：`cargo test`
 
 ## Review gates

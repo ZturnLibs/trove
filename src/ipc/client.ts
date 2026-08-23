@@ -1252,5 +1252,11 @@ export const ipc = {
     invoke<void>("task_checklist_delete", { id }),
   taskChecklistReorder: (taskId: string, orderedIds: string[]) =>
     invoke<void>("task_checklist_reorder", { taskId, orderedIds }),
+  aiSplitRequest: (taskId: string) =>
+    invoke<AISuggestionRecord | null>("ai_split_request", { taskId }),
+  aiSplitApply: (suggestionId: string, selectedIndices: number[]) =>
+    invoke<ChecklistItem[]>("ai_split_apply", {
+      input: { suggestionId, selectedIndices },
+    }),
   appQuit: () => invoke<void>("app_quit"),
 };

@@ -25,13 +25,13 @@
 
 ## Acceptance Criteria
 
-- [ ] 只生成检查项：不建任务、不改原任务 title/notes（单测：request+apply 前后任务字段零变化）
-- [ ] 每条草稿显示原文依据；依据不是任务原文子串的条目被丢弃（单测）
-- [ ] 空说明/短标题不调用 provider（单测零调用）
-- [ ] completed 任务入口冻结（单测）
-- [ ] apply 后写入检查项且可撤销（删除）；重复 apply 拒绝（单测）
-- [ ] AI 关闭/开关关闭时无入口；provider 失败降级文案
-- [ ] cargo test / pnpm test / build 全绿；docs/ai-assist.md 更新
+- [x] 只生成检查项：不建任务、不改原任务 title/notes（单测：request+apply 前后任务字段零变化）
+- [x] 每条草稿显示原文依据；依据不是任务原文子串的条目被丢弃（单测）
+- [x] 空说明/短标题不调用 provider（单测零调用）
+- [x] completed 任务入口冻结（单测）
+- [x] apply 后写入检查项且可撤销（删除）；重复 apply 拒绝（单测）
+- [x] AI 关闭/开关关闭时无入口；provider 失败降级文案
+- [x] cargo test / pnpm test / build 全绿；docs/ai-assist.md 更新
 
 ## 明确不做（本切片）
 

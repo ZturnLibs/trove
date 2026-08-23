@@ -1,6 +1,6 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { ipc, type Task } from "@/ipc/client";
+import { ipc, type AISuggestionRecord, type Task } from "@/ipc/client";
 import { Button } from "@/design-system/primitives/Button";
 import { ConfirmButton } from "@/design-system/patterns/ConfirmButton";
 
@@ -15,6 +15,50 @@ export function ChecklistSection({ task }: { task: Task }) {
   const [editingText, setEditingText] = useState("");
 
   const frozen = task.status === "completed";
+
+  // v2.0 slice 7: AI split into checklist candidates.
+  const settingsQuery = useQuery({
+    queryKey: ["settings"],
+    queryFn: () => ipc.settingsGet(),
+  });
+  const aiAvailable =
+    !!settingsQuery.data?.ai &&
+    settingsQuery.data.ai.mode !== "off" &&
+    settingsQuery.data.ai.features.split &&
+    !frozen;
+
+  const splitPendingQuery = useQuery({
+    queryKey: ["ai", "suggestions", "split", task.id],
+    queryFn: () => ipc.aiSuggestionList("split", "pending"),
+    enabled: aiAvailable,
+  });
+  const splitRecord: AISuggestionRecord | undefined = splitPendingQuery.data?.find(
+    (r) => r.sourceEntityType === "task" && r.sourceEntityId === task.id,
+  );
+  const [splitSelected, setSplitSelected] = useState<Set<number>>(new Set());
+  useEffect(() => {
+    setSplitSelected(new Set());
+  }, [splitRecord?.id]);
+
+  const splitRequestMutation = useMutation({
+    mutationFn: () => ipc.aiSplitRequest(task.id),
+    onSuccess: () => {
+      void queryClient.invalidateQueries({ queryKey: ["ai", "suggestions"] });
+    },
+  });
+  const splitApplyMutation = useMutation({
+    mutationFn: (indices: number[]) => ipc.aiSplitApply(splitRecord!.id, indices),
+    onSuccess: () => {
+      invalidate();
+      void queryClient.invalidateQueries({ queryKey: ["ai", "suggestions"] });
+    },
+  });
+  const splitDismissMutation = useMutation({
+    mutationFn: () => ipc.aiSuggestionDecide(splitRecord!.id, "reject"),
+    onSuccess: () => {
+      void queryClient.invalidateQueries({ queryKey: ["ai", "suggestions"] });
+    },
+  });
 
   const checklistQuery = useQuery({
     queryKey: ["tasks", "checklist", task.id],
@@ -58,14 +102,97 @@ export function ChecklistSection({ task }: { task: Task }) {
 
   return (
     <section className="space-y-2">
-      <h3 className="text-[12px] font-semibold">
-        检查项
-        {items.length > 0 ? (
-          <span className="ml-1 text-muted">
-            {items.filter((i) => i.checked).length}/{items.length}
-          </span>
+      <div className="flex items-center justify-between">
+        <h3 className="text-[12px] font-semibold">
+          检查项
+          {items.length > 0 ? (
+            <span className="ml-1 text-muted">
+              {items.filter((i) => i.checked).length}/{items.length}
+            </span>
+          ) : null}
+        </h3>
+        {aiAvailable ? (
+          <Button
+            size="sm"
+            variant="ghost"
+            disabled={splitRequestMutation.isPending}
+            onClick={() => splitRequestMutation.mutate()}
+            title="用 AI 从任务说明生成候选检查项，勾选后写入"
+          >
+            {splitRequestMutation.isPending ? "拆分中…" : "AI 拆分"}
+          </Button>
         ) : null}
-      </h3>
+      </div>
+
+      {splitRecord ? (
+        <div className="rounded border border-border p-2">
+          <div className="flex items-center justify-between text-[11px] text-muted">
+            <span>
+              候选检查项（{splitRecord.payload.items.length} 条，{splitSelected.size} 已选）
+            </span>
+            <ConfirmButton
+              size="sm"
+              variant="ghost"
+              confirmLabel="确认忽略"
+              resetKey={splitRecord.id}
+              onConfirm={() => splitDismissMutation.mutate()}
+            >
+              都不合适
+            </ConfirmButton>
+          </div>
+          <ul className="mt-1 space-y-1">
+            {splitRecord.payload.items.map((item, idx) => (
+              <li key={`${splitRecord.id}-${idx}`}>
+                <label className="flex items-start gap-2">
+                  <input
+                    type="checkbox"
+                    className="mt-0.5"
+                    checked={splitSelected.has(idx)}
+                    onChange={() =>
+                      setSplitSelected((prev) => {
+                        const next = new Set(prev);
+                        if (next.has(idx)) next.delete(idx);
+                        else next.add(idx);
+                        return next;
+                      })
+                    }
+                  />
+                  <span className="min-w-0 flex-1">
+                    <span className="block">{item.title}</span>
+                    {item.sourceExcerpt ? (
+                      <span className="block truncate font-mono text-[10px] text-muted">
+                        依据：「{item.sourceExcerpt}」
+                      </span>
+                    ) : null}
+                  </span>
+                </label>
+              </li>
+            ))}
+          </ul>
+          <div className="mt-1.5">
+            <Button
+              size="sm"
+              variant="secondary"
+              disabled={splitSelected.size === 0 || splitApplyMutation.isPending}
+              onClick={() =>
+                splitApplyMutation.mutate([...splitSelected].sort((a, b) => a - b))
+              }
+            >
+              {splitApplyMutation.isPending
+                ? "添加中…"
+                : `添加选中（${splitSelected.size}）`}
+            </Button>
+            {splitApplyMutation.isError ? (
+              <span className="ml-2 text-warning">{String(splitApplyMutation.error)}</span>
+            ) : null}
+            {splitRequestMutation.isError && !splitRecord ? (
+              <span className="ml-2 text-warning">AI 拆分暂不可用。</span>
+            ) : null}
+          </div>
+        </div>
+      ) : splitRequestMutation.isError ? (
+        <p className="text-[11px] text-warning">AI 拆分暂不可用，可继续手动添加。</p>
+      ) : null}
 
       {items.length === 0 && frozen ? (
         <p className="text-[11px] text-muted">无检查项。</p>

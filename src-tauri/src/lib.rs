@@ -739,6 +739,8 @@ pub fn run() {
             commands::task_checklist_update,
             commands::task_checklist_delete,
             commands::task_checklist_reorder,
+            commands::ai_split_request,
+            commands::ai_split_apply,
             commands::app_quit,
         ])
         .run(tauri::generate_context!())
