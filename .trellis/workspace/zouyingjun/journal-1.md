@@ -159,3 +159,24 @@
 ### Status
 
 [OK] **Completed**
+
+
+## Session 7: v2.0 切片 4：任务相关内容建议
+
+**Date**: 2026-08-23
+**Task**: v2.0 切片 4：任务相关内容建议
+**Branch**: `feat-improve`
+
+### Summary
+
+交付任务→记忆/剪贴板相关推荐：CJK bigram 候选检索 + 三重过滤 + 模型标题精确回配防编造；逐条 关联（幂等 related 链接）/不相关（拒绝降频）UI；146 lib + 10 eval + 42 前端测试全绿
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `7f3627f` | (see git log) |
+
+### Status
+
+[OK] **Completed**
