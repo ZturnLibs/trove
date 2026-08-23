@@ -21,7 +21,8 @@
   "children": [
     "08-19-v2-0-ai-service-boundary",
     "08-22-v2-0-ai-extract-tasks",
-    "08-23-v2-0-ai-weekly-summary"
+    "08-23-v2-0-ai-weekly-summary",
+    "08-23-v2-0-ai-related-content"
   ],
   "parent": null,
   "relatedFiles": [],
