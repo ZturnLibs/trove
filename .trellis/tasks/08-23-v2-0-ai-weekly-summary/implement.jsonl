@@ -1,0 +1,3 @@
+{"file": ".trellis/spec/tauri/index.md", "reason": "Tauri 后端分层合同"}
+{"file": ".trellis/tasks/archive/2026-08/08-19-v2-0-ai-service-boundary/design.md", "reason": "切片 1 管线合同（request/decide/list；summary 输出通道）"}
+{"file": ".trellis/tasks/08-23-v2-0-ai-weekly-summary/design.md", "reason": "本切片数据流/prompt 契约/UI 三态"}
