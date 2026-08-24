@@ -392,27 +392,16 @@ mod tests {
         )
         .unwrap();
 
-        insert_occurrence(
-            &conn,
-            reminder_id,
-            "2026-08-15T09:00:00",
-            OccurrenceStatus::Actioned,
-            None,
-        );
-        insert_occurrence(
-            &conn,
-            reminder_id,
-            "2026-08-14T09:00:00",
-            OccurrenceStatus::InferredMissed,
-            None,
-        );
-        insert_occurrence(
-            &conn,
-            reminder_id,
-            "2026-08-01T09:00:00",
-            OccurrenceStatus::Actioned,
-            None,
-        );
+        // Dates are relative to "today" so the 7/30-day windows hold on any
+        // run date (this test previously hardcoded 2026-08 dates and flaked).
+        let fmt_day = |offset: i64| {
+            use chrono::{Datelike, Duration, Local};
+            let day = (Local::now().date_naive() - Duration::days(offset)).format("%Y-%m-%d");
+            format!("{day}T09:00:00")
+        };
+        insert_occurrence(&conn, reminder_id, &fmt_day(1), OccurrenceStatus::Actioned, None);
+        insert_occurrence(&conn, reminder_id, &fmt_day(3), OccurrenceStatus::InferredMissed, None);
+        insert_occurrence(&conn, reminder_id, &fmt_day(12), OccurrenceStatus::Actioned, None);
 
         let snap = health.snapshot(&backups, &tasks, &settings).unwrap();
         assert_eq!(snap.reminders_7d.on_time, 1);
