@@ -8,8 +8,8 @@
 
 <!-- @@@auto:current-status -->
 - **Active File**: `journal-1.md`
-- **Total Sessions**: 10
-- **Last Active**: 2026-08-23
+- **Total Sessions**: 11
+- **Last Active**: 2026-08-24
 <!-- @@@/auto:current-status -->
 
 ---
@@ -19,7 +19,7 @@
 <!-- @@@auto:active-documents -->
 | File | Lines | Status |
 |------|-------|--------|
-| `journal-1.md` | ~245 | Active |
+| `journal-1.md` | ~266 | Active |
 <!-- @@@/auto:active-documents -->
 
 ---
@@ -29,6 +29,7 @@
 <!-- @@@auto:session-history -->
 | # | Date | Title | Commits | Branch |
 |---|------|-------|---------|--------|
+| 11 | 2026-08-24 | v2.0 切片 8 语义检索 + 全路线图收官 | `83f75aa` | `feat-improve` |
 | 10 | 2026-08-23 | v2.0 切片 7：AI 任务拆分 | `c55581e` | `feat-improve` |
 | 9 | 2026-08-23 | v2.0 切片 6：任务检查项数据模型 | `af39963` | `feat-improve` |
 | 8 | 2026-08-23 | v2.0 切片 5：今日工作建议 | `18f7ba8` | `feat-improve` |

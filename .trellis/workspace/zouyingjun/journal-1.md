@@ -243,3 +243,24 @@
 ### Status
 
 [OK] **Completed**
+
+
+## Session 11: v2.0 切片 8 语义检索 + 全路线图收官
+
+**Date**: 2026-08-24
+**Task**: v2.0 切片 8 语义检索 + 全路线图收官
+**Branch**: `feat-improve`
+
+### Summary
+
+交付语义检索（0021 向量索引/embed 批量/排除范围与上限/双列展示/索引管理）并归档全部 8/8 切片与父任务；v2-ai-assist-roadmap 标记已全部交付；164 lib + 13 eval + 42 前端全绿
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `83f75aa` | (see git log) |
+
+### Status
+
+[OK] **Completed**
