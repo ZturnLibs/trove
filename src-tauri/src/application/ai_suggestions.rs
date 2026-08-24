@@ -27,6 +27,29 @@ use crate::infrastructure::settings::SettingsService;
 /// Stable source id for the weekly review summary ledger entries.
 pub const WEEKLY_SOURCE_ID: &str = "weekly";
 
+/// Normalize a title for exact back-matching: models sometimes wrap titles
+/// in 《》/「」/quotes despite the "copy exactly" prompt. Stripping wrapper
+/// punctuation keeps the anti-fabrication contract (the stripped title must
+/// still equal a real candidate) while tolerating cosmetic wrapping.
+fn normalize_title_for_match(value: &str) -> String {
+    let mut trimmed = value.trim();
+    loop {
+        let mut changed = false;
+        for (open, close) in [("《", "》"), ("「", "」"), ("“", "”"), ("‘", "’"), ("\"", "\""), ("'", "'")] {
+            if let Some(inner) = trimmed.strip_prefix(open).and_then(|s| s.strip_suffix(close)) {
+                if !inner.is_empty() {
+                    trimmed = inner.trim();
+                    changed = true;
+                }
+            }
+        }
+        if !changed {
+            break;
+        }
+    }
+    trimmed.split_whitespace().collect::<Vec<_>>().join(" ")
+}
+
 /// Substring candidate pool size for related-content suggestions (slice 4).
 const RELATED_CANDIDATES: i64 = 12;
 /// Max CJK bigrams probed per request (bounds LIKE sweeps).
@@ -596,13 +619,16 @@ impl AISuggestionService {
         };
 
         // Back-mapping: drop any item whose title is not an exact candidate.
-        let by_title: std::collections::HashMap<&str, &(String, String, String, String)> =
-            candidates.iter().map(|c| (c.0.as_str(), c)).collect();
+        let by_title: std::collections::HashMap<String, &(String, String, String, String)> =
+            candidates
+                .iter()
+                .map(|c| (normalize_title_for_match(&c.0), c))
+                .collect();
         let matched: Vec<_> = record
             .payload
             .items
             .iter()
-            .filter(|item| by_title.contains_key(item.title.as_str()))
+            .filter(|item| by_title.contains_key(&normalize_title_for_match(&item.title)))
             .cloned()
             .collect();
         if matched.is_empty() {
@@ -613,7 +639,9 @@ impl AISuggestionService {
         let sources: Vec<SuggestionSource> = matched
             .iter()
             .filter_map(|item| {
-                by_title.get(item.title.as_str()).map(|(_, _, etype, eid)| SuggestionSource {
+                by_title
+                    .get(&normalize_title_for_match(&item.title))
+                    .map(|(_, _, etype, eid)| SuggestionSource {
                     entity_type: etype.clone(),
                     entity_id: eid.clone(),
                     text_offset: 0,
@@ -794,17 +822,22 @@ impl AISuggestionService {
 
         let record = match self.request(AIFeature::Suggest, "review", DAILY_SOURCE_ID, &context)? {
             Some(record) => record,
-            None => return Ok(None),
+            None => {
+                return Ok(None);
+            }
         };
 
         // Back-mapping (same anti-fabrication contract as slice 4).
-        let by_title: std::collections::HashMap<&str, &(String, String, String)> =
-            candidates.iter().map(|c| (c.0.as_str(), c)).collect();
+        let by_title: std::collections::HashMap<String, &(String, String, String)> =
+            candidates
+                .iter()
+                .map(|c| (normalize_title_for_match(&c.0), c))
+                .collect();
         let matched: Vec<_> = record
             .payload
             .items
             .iter()
-            .filter(|item| by_title.contains_key(item.title.as_str()))
+            .filter(|item| by_title.contains_key(&normalize_title_for_match(&item.title)))
             .cloned()
             .collect();
         if matched.is_empty() {
@@ -814,7 +847,9 @@ impl AISuggestionService {
         let sources: Vec<SuggestionSource> = matched
             .iter()
             .filter_map(|item| {
-                by_title.get(item.title.as_str()).map(|(_, _, tid)| SuggestionSource {
+                by_title
+                    .get(&normalize_title_for_match(&item.title))
+                    .map(|(_, _, tid)| SuggestionSource {
                     entity_type: "task".into(),
                     entity_id: tid.clone(),
                     text_offset: 0,
@@ -2325,4 +2360,18 @@ mod tests {
         tasks.complete_task(done.id).unwrap();
         assert!(service.request_split(&done.id.to_string(), &tasks).is_err());
     }
+
+    #[test]
+    fn title_normalization_strips_wrapper_punctuation_only() {
+        assert_eq!(normalize_title_for_match("《整理报销票据》"), "整理报销票据");
+        assert_eq!(
+            normalize_title_for_match("  \u{201c}报销 流程\u{201d}  "),
+            "报销 流程"
+        );
+        assert_eq!(normalize_title_for_match("「周会」"), "周会");
+        assert_eq!(normalize_title_for_match("plain title"), "plain title");
+        // Empty inner content is NOT unwrapped (anti-fabrication).
+        assert_eq!(normalize_title_for_match("《》"), "《》");
+    }
+
 }

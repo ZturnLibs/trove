@@ -226,21 +226,35 @@ pub struct SuggestionSource {
 
 /// One structured suggestion item. Generic envelope shared by features;
 /// slice 2 (extract) is the first consumer.
+///
+/// serde defaults are deliberately conservative: a model that omits
+/// `ambiguous` is treated as "needs confirmation" (dates never guessed
+/// into business data), and omitted dates/detail stay empty. `title` and
+/// `sourceExcerpt` remain required — they are the anti-fabrication anchors.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct SuggestedItem {
     pub title: String,
+    #[serde(default)]
     pub detail: Option<String>,
+    #[serde(default)]
     pub due_date: Option<String>,
+    #[serde(default)]
     pub due_time: Option<String>,
+    #[serde(default = "default_true")]
     pub ambiguous: bool,
     pub source_excerpt: String,
+}
+
+fn default_true() -> bool {
+    true
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct SuggestionContent {
     pub items: Vec<SuggestedItem>,
+    #[serde(default)]
     pub summary: Option<String>,
 }
 
@@ -560,6 +574,17 @@ mod tests {
         assert!(parse_suggestion_content(r#"{"items":[],"summary":""}"#).is_err());
         assert!(parse_suggestion_content(r#"{"items":[],"summary":null}"#).is_err());
         assert!(parse_suggestion_content("not json").is_err());
+    }
+
+
+    #[test]
+    fn missing_ambiguous_defaults_to_needs_confirmation() {
+        // Models sometimes omit fields; the envelope must stay parseable and
+        // treat the date as unconfirmed (never guess it into a task).
+        let raw = r#"{"items":[{"title":"确认合同","sourceExcerpt":"找老张确认合同"}],"summary":null}"#;
+        let content = parse_suggestion_content(raw).unwrap();
+        assert!(content.items[0].ambiguous);
+        assert_eq!(content.items[0].due_date, None);
     }
 
     #[test]
