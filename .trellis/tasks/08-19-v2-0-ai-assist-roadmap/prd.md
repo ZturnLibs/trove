@@ -40,11 +40,11 @@
 
 ## 父级验收标准
 
-- [ ] 启动门槛评估完成且结论可追溯（本任务 research/）
-- [ ] `docs/v2-ai-assist-roadmap.md` 发布并列入 docs/README.md
-- [ ] 切片 1（`v2-0-ai-service-boundary`）PRD 就绪并通过审阅
-- [ ] Wave A 完成后复核门槛 4（关闭 AI 全功能可用）实测通过
-- [ ] 全部完成后对照 §9.6 验收标准逐条勾选
+- [x] 启动门槛评估完成且结论可追溯（本任务 research/）
+- [x] `docs/v2-ai-assist-roadmap.md` 发布并列入 docs/README.md
+- [x] 切片 1 PRD 就绪并通过审阅（已交付）
+- [x] Wave A 完成后复核门槛 4：off 模式端到端测试覆盖（切片 1 eval_off_provider_end_to_end_writes_nothing + 切片 2 off_mode 测试）
+- [x] 8/8 切片完成；§9.6 对照：AI 关闭全功能可用 ✅、建议经确认 ✅、可跳源 ✅、数字不由模型生成 ✅、样本回归（离线 + #[ignore] 在线档）✅、错误建议可拒绝 ✅
 
 ## 明确不做（父级边界，继承 §9.7 + v1.3 边界）
 
