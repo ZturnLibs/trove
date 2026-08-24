@@ -264,3 +264,24 @@
 ### Status
 
 [OK] **Completed**
+
+
+## Session 12: v2.0.0 发版：PR 合并、CI 修复与 Release 流水线
+
+**Date**: 2026-08-24
+**Task**: v2.0.0 发版：PR 合并、CI 修复与 Release 流水线
+**Branch**: `feat-improve`
+
+### Summary
+
+修复历史 reminder_stats flaky（相对日期化）后 PR #11/#12 CI 双绿合并；scripts/release.sh major 发布 v2.0.0（schema v21），macOS universal + Windows 安装包与更新器 latest.json 全部出齐，Release notes 已挂载
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `98c67df` | (see git log) |
+
+### Status
+
+[OK] **Completed**
