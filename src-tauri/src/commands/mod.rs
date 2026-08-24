@@ -16,6 +16,8 @@ use crate::application::templates::{
 };
 use crate::domain::{
     parse_capture,     AppError, AutomationDryRunResult, AutomationEvent, AutomationRule,
+    AIFeature, AISuggestionRecord, ChecklistItem, ChecklistUpdateInput, ExtractApplyInput,
+    ExtractApplyResult, ProbeReport, SuggestionStatus, TaskChecklist,
     AutomationRun, ClipboardItem, ClipboardKind, ClipboardQuery,
     ConvertMemoryToTaskResult, CreateAutomationRuleInput, CreateMemoryInput, CreateReminderInput,
     CreateTaskInput, EntityId, EntityLink, LinkInput, Memory, MemoryQuery, PagedResult,
@@ -28,7 +30,7 @@ use crate::infrastructure::db::DbHealth;
 use crate::infrastructure::settings::{AppSettings, ShortcutSettings};
 use crate::platform::{detect_capabilities, PlatformCapabilities};
 use serde::Serialize;
-use tauri::{image::Image, AppHandle, Emitter, State};
+use tauri::{image::Image, AppHandle, Emitter, Manager, State};
 use tauri_plugin_autostart::ManagerExt;
 use tauri_plugin_clipboard_manager::ClipboardExt;
 
@@ -806,10 +808,16 @@ pub fn weekly_review_complete(
     session_id: EntityId,
     input: crate::domain::ReviewCompleteInput,
 ) -> Result<crate::domain::ReviewSession, AppError> {
-    state
+    let session = state
         .weekly_review
         .complete(session_id, input)
-        .map_err(Into::into)
+        .map_err(AppError::from)?;
+    // Completing the review supersedes any pending AI summary; failure is
+    // non-blocking (the ledger is derived data).
+    if let Err(err) = state.ai_suggestions.dismiss_pending_weekly_summary() {
+        tracing::warn!(error = %err, "dismiss pending weekly summary failed");
+    }
+    Ok(session)
 }
 
 #[tauri::command]
@@ -1179,7 +1187,42 @@ pub fn search_query(
     state: State<'_, AppState>,
     query: SearchQuery,
 ) -> Result<SearchResults, AppError> {
-    state.search.query(query).map_err(Into::into)
+    let mut results = state.search.query(query.clone())?;
+    // v2.0 slice 8: semantic matches only when the feature is on and the
+    // index is usable; failures degrade to the keyword-only response.
+    let semantic_enabled = state
+        .settings
+        .get()
+        .map(|s| s.ai.features.semantic_search && s.ai.mode != crate::domain::AIMode::Off)
+        .unwrap_or(false);
+    if semantic_enabled {
+        let limit = query.limit.unwrap_or(5).clamp(1, 10) as usize;
+        if let Ok(hits) = state.semantic_index.search(&query.query, limit) {
+            results.semantic = hits;
+        }
+    }
+    Ok(results)
+}
+
+// v2.0 slice 8: semantic index management.
+
+#[tauri::command]
+pub fn semantic_index_status(
+    state: State<'_, AppState>,
+) -> Result<crate::domain::SemanticIndexStatus, AppError> {
+    state.semantic_index.status().map_err(Into::into)
+}
+
+#[tauri::command]
+pub fn semantic_index_rebuild(
+    state: State<'_, AppState>,
+) -> Result<crate::domain::SemanticIndexStatus, AppError> {
+    state.semantic_index.rebuild().map_err(Into::into)
+}
+
+#[tauri::command]
+pub fn semantic_index_clear(state: State<'_, AppState>) -> Result<(), AppError> {
+    state.semantic_index.clear().map_err(Into::into)
 }
 
 fn emit_clipboard_change(app: &AppHandle, item: &ClipboardItem, change: &str) {
@@ -1748,4 +1791,302 @@ pub fn automation_dry_run(
 #[tauri::command]
 pub fn app_quit(app: tauri::AppHandle) {
     app.exit(0);
+}
+
+// ---------------------------------------------------------------------------
+// v2.0 slice 1: AI service boundary
+// ---------------------------------------------------------------------------
+
+#[derive(Debug, serde::Deserialize, Clone, Copy, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub enum SuggestionDecision {
+    Accept,
+    Reject,
+    Dismiss,
+}
+
+#[derive(Debug, Serialize, Clone)]
+#[serde(rename_all = "camelCase")]
+pub struct AIProviderKeyStatus {
+    pub exists: bool,
+}
+
+#[tauri::command]
+pub fn ai_provider_key_status(
+    app: AppHandle,
+) -> Result<AIProviderKeyStatus, AppError> {
+    let data_dir = app.path().app_data_dir().map_err(|e| AppError::new("path", e.to_string()))?;
+    Ok(AIProviderKeyStatus {
+        exists: crate::infrastructure::ai::provider_key_exists(&data_dir),
+    })
+}
+
+/// The key content is write-only from the UI's perspective: we accept it,
+/// store it outside the database, and never echo it back.
+#[tauri::command]
+pub fn ai_provider_key_set(app: AppHandle, key: String) -> Result<AIProviderKeyStatus, AppError> {
+    let data_dir = app.path().app_data_dir().map_err(|e| AppError::new("path", e.to_string()))?;
+    crate::infrastructure::ai::write_provider_key(&data_dir, &key)?;
+    Ok(AIProviderKeyStatus {
+        exists: true,
+    })
+}
+
+#[tauri::command]
+pub fn ai_provider_key_clear(app: AppHandle) -> Result<AIProviderKeyStatus, AppError> {
+    let data_dir = app.path().app_data_dir().map_err(|e| AppError::new("path", e.to_string()))?;
+    crate::infrastructure::ai::clear_provider_key(&data_dir)?;
+    Ok(AIProviderKeyStatus {
+        exists: false,
+    })
+}
+
+/// Probe with the *current* settings (not the provider captured at launch),
+/// so users can flip modes and test connectivity without restarting.
+#[tauri::command]
+pub fn ai_provider_probe(state: State<'_, AppState>, app: AppHandle) -> Result<ProbeReport, AppError> {
+    let settings = state.settings.get()?;
+    let data_dir = app.path().app_data_dir().map_err(|e| AppError::new("path", e.to_string()))?;
+    let provider = crate::infrastructure::ai::build_provider(&settings.ai, &data_dir);
+    Ok(provider.probe())
+}
+
+#[tauri::command]
+pub fn ai_suggestion_list(
+    state: State<'_, AppState>,
+    feature: Option<AIFeature>,
+    status: Option<SuggestionStatus>,
+) -> Result<Vec<AISuggestionRecord>, AppError> {
+    state
+        .ai_suggestions
+        .list(feature, status)
+        .map_err(Into::into)
+}
+
+#[tauri::command]
+pub fn ai_suggestion_decide(
+    state: State<'_, AppState>,
+    id: String,
+    decision: SuggestionDecision,
+) -> Result<AISuggestionRecord, AppError> {
+    let status = match decision {
+        SuggestionDecision::Accept => SuggestionStatus::Accepted,
+        SuggestionDecision::Reject => SuggestionStatus::Rejected,
+        SuggestionDecision::Dismiss => SuggestionStatus::Dismissed,
+    };
+    state.ai_suggestions.decide(&id, status).map_err(Into::into)
+}
+
+#[tauri::command]
+pub fn ai_suggestion_clear(state: State<'_, AppState>) -> Result<usize, AppError> {
+    state.ai_suggestions.clear_history().map_err(Into::into)
+}
+
+// v2.0 slice 2: long-text task extraction.
+
+#[tauri::command]
+pub fn ai_extract_request(
+    state: State<'_, AppState>,
+    memory_id: EntityId,
+) -> Result<Option<AISuggestionRecord>, AppError> {
+    state
+        .ai_suggestions
+        .request_extract(&memory_id.to_string(), &state.memories)
+        .map_err(Into::into)
+}
+
+#[tauri::command]
+pub fn ai_suggestion_apply(
+    state: State<'_, AppState>,
+    input: ExtractApplyInput,
+) -> Result<ExtractApplyResult, AppError> {
+    state
+        .ai_suggestions
+        .apply_extract(input, &state.tasks, &state.links, &state.search)
+        .map_err(Into::into)
+}
+
+// v2.0 slice 3: weekly review summary.
+
+#[tauri::command]
+pub fn ai_weekly_summary_request(
+    state: State<'_, AppState>,
+) -> Result<Option<AISuggestionRecord>, AppError> {
+    state
+        .ai_suggestions
+        .request_weekly_summary(
+            &state.weekly_review,
+            &state.tasks,
+            &state.reminders,
+            &state.clipboard,
+        )
+        .map_err(Into::into)
+}
+
+// v2.0 slice 4: related-content suggestions.
+
+#[tauri::command]
+pub fn ai_related_request(
+    state: State<'_, AppState>,
+    task_id: EntityId,
+) -> Result<Option<AISuggestionRecord>, AppError> {
+    state
+        .ai_suggestions
+        .request_related(
+            &task_id.to_string(),
+            &state.tasks,
+            &state.search,
+            &state.memories,
+            &state.links,
+        )
+        .map_err(Into::into)
+}
+
+#[tauri::command]
+pub fn ai_related_confirm(
+    state: State<'_, AppState>,
+    suggestion_id: String,
+    selected_indices: Vec<usize>,
+    task_id: EntityId,
+) -> Result<Vec<EntityLink>, AppError> {
+    state
+        .ai_suggestions
+        .confirm_related(
+            ExtractApplyInput {
+                suggestion_id,
+                selected_indices,
+            },
+            &task_id.to_string(),
+            &state.links,
+        )
+        .map_err(Into::into)
+}
+
+#[tauri::command]
+pub fn ai_related_reject_item(
+    state: State<'_, AppState>,
+    suggestion_id: String,
+    index: usize,
+) -> Result<AISuggestionRecord, AppError> {
+    state
+        .ai_suggestions
+        .reject_related_item(&suggestion_id, index)
+        .map_err(Into::into)
+}
+
+// v2.0 slice 5: daily work suggestions.
+
+#[tauri::command]
+pub fn ai_daily_suggest_request(
+    state: State<'_, AppState>,
+) -> Result<Option<AISuggestionRecord>, AppError> {
+    state
+        .ai_suggestions
+        .request_daily_suggest(&state.tasks)
+        .map_err(Into::into)
+}
+
+#[tauri::command]
+pub fn ai_daily_suggest_skip(
+    state: State<'_, AppState>,
+    suggestion_id: String,
+    index: usize,
+) -> Result<AISuggestionRecord, AppError> {
+    state
+        .ai_suggestions
+        .remove_daily_suggest_item(&suggestion_id, index, false)
+        .map_err(Into::into)
+}
+
+#[tauri::command]
+pub fn ai_daily_suggest_accept(
+    state: State<'_, AppState>,
+    suggestion_id: String,
+    index: usize,
+) -> Result<AISuggestionRecord, AppError> {
+    // Records acceptance; the actual focus membership is added by the UI via
+    // dailyFocusAdd so the existing undo stack keeps working.
+    state
+        .ai_suggestions
+        .remove_daily_suggest_item(&suggestion_id, index, true)
+        .map_err(Into::into)
+}
+
+// v2.0 slice 6: task checklist.
+
+#[tauri::command]
+pub fn task_checklist_list(
+    state: State<'_, AppState>,
+    task_id: EntityId,
+) -> Result<TaskChecklist, AppError> {
+    state.tasks.checklist_list(task_id).map_err(Into::into)
+}
+
+#[tauri::command]
+pub fn task_checklist_add(
+    app: AppHandle,
+    state: State<'_, AppState>,
+    task_id: EntityId,
+    content: String,
+) -> Result<ChecklistItem, AppError> {
+    let item = state.tasks.checklist_add(task_id, &content)?;
+    emit_task_change(&app, &state.tasks.get_task(task_id)?, "updated");
+    Ok(item)
+}
+
+#[tauri::command]
+pub fn task_checklist_update(
+    app: AppHandle,
+    state: State<'_, AppState>,
+    input: ChecklistUpdateInput,
+) -> Result<ChecklistItem, AppError> {
+    let item = state.tasks.checklist_update(input.clone())?;
+    emit_task_change(&app, &state.tasks.get_task(item.task_id)?, "updated");
+    Ok(item)
+}
+
+#[tauri::command]
+pub fn task_checklist_delete(
+    app: AppHandle,
+    state: State<'_, AppState>,
+    id: EntityId,
+) -> Result<(), AppError> {
+    state.tasks.checklist_delete(id)?;
+    Ok(())
+}
+
+#[tauri::command]
+pub fn task_checklist_reorder(
+    app: AppHandle,
+    state: State<'_, AppState>,
+    task_id: EntityId,
+    ordered_ids: Vec<EntityId>,
+) -> Result<(), AppError> {
+    state.tasks.checklist_reorder(task_id, ordered_ids)?;
+    emit_task_change(&app, &state.tasks.get_task(task_id)?, "updated");
+    Ok(())
+}
+
+// v2.0 slice 7: AI task split into checklist candidates.
+
+#[tauri::command]
+pub fn ai_split_request(
+    state: State<'_, AppState>,
+    task_id: EntityId,
+) -> Result<Option<AISuggestionRecord>, AppError> {
+    state
+        .ai_suggestions
+        .request_split(&task_id.to_string(), &state.tasks)
+        .map_err(Into::into)
+}
+
+#[tauri::command]
+pub fn ai_split_apply(
+    state: State<'_, AppState>,
+    input: ExtractApplyInput,
+) -> Result<Vec<ChecklistItem>, AppError> {
+    state
+        .ai_suggestions
+        .apply_split(input, &state.tasks)
+        .map_err(Into::into)
 }

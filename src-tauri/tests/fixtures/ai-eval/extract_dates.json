@@ -1,0 +1,17 @@
+{
+  "description": "中文日期提取评估样本（切片 1 建立，切片 2+ 消费）。expect 字段供未来在线回归；离线 runner 只消费 sanitize/schema 路径。",
+  "samples": [
+    { "text": "下周一上午十点开评审会", "expectDueDate": "next-monday", "expectDueTime": "10:00", "ambiguous": false },
+    { "text": "周三之前找老张确认合同", "expectDueDate": "this-week", "expectDueTime": null, "ambiguous": true },
+    { "text": "每月 15 号交房租", "expectDueDate": "monthly-15", "expectDueTime": null, "ambiguous": false },
+    { "text": "工作日每天九点站会", "expectDueDate": "weekdays", "expectDueTime": "09:00", "ambiguous": false },
+    { "text": "过两天跟进一下发票", "expectDueDate": null, "expectDueTime": null, "ambiguous": true },
+    { "text": "月底前完成续保", "expectDueDate": "month-end", "expectDueTime": null, "ambiguous": true },
+    { "text": "下周三 14:30 牙医复诊", "expectDueDate": "next-wednesday", "expectDueTime": "14:30", "ambiguous": false },
+    { "text": "清明假期回来后安排体检", "expectDueDate": null, "expectDueTime": null, "ambiguous": true },
+    { "text": "2026-10-01 提交材料", "expectDueDate": "2026-10-01", "expectDueTime": null, "ambiguous": false },
+    { "text": "明天中午一起吃饭", "expectDueDate": "tomorrow", "expectDueTime": "12:00", "ambiguous": false },
+    { "text": "等老板回复再说", "expectDueDate": null, "expectDueTime": null, "ambiguous": true },
+    { "text": "每两周对一次账", "expectDueDate": "biweekly", "expectDueTime": null, "ambiguous": false }
+  ]
+}

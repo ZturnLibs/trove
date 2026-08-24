@@ -307,3 +307,52 @@ pub fn parse_uuid(value: &str) -> Result<Uuid, DomainError> {
         .parse()
         .map_err(|_| DomainError::Validation(format!("invalid id: {value}")))
 }
+
+// ---------------------------------------------------------------------------
+// v2.0 slice 6: one-level task checklist
+// ---------------------------------------------------------------------------
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct ChecklistItem {
+    pub id: EntityId,
+    pub task_id: EntityId,
+    pub content: String,
+    pub checked: bool,
+    pub sort_order: i64,
+    pub created_at: String,
+    pub updated_at: String,
+    pub revision: Revision,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct TaskChecklist {
+    pub items: Vec<ChecklistItem>,
+    pub total: i64,
+    pub checked_count: i64,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+#[serde(rename_all = "camelCase")]
+pub struct ChecklistUpdateInput {
+    pub id: EntityId,
+    pub content: Option<String>,
+    pub checked: Option<bool>,
+}
+
+pub const CHECKLIST_MAX_ITEMS: usize = 50;
+pub const CHECKLIST_CONTENT_MAX_CHARS: usize = 200;
+
+pub fn validate_checklist_content(content: &str) -> Result<String, DomainError> {
+    let trimmed = content.trim();
+    if trimmed.is_empty() {
+        return Err(DomainError::Validation("检查项内容不能为空".into()));
+    }
+    if trimmed.chars().count() > CHECKLIST_CONTENT_MAX_CHARS {
+        return Err(DomainError::Validation(
+            "检查项内容不能超过 200 字".into(),
+        ));
+    }
+    Ok(trimmed.to_string())
+}

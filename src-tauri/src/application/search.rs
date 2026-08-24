@@ -127,6 +127,7 @@ impl SearchService {
                 reminders: Vec::new(),
                 memories: Vec::new(),
                 clipboard: Vec::new(),
+                semantic: Vec::new(),
             });
         }
         if q.chars().count() > 200 {
@@ -173,7 +174,105 @@ impl SearchService {
             reminders,
             memories,
             clipboard,
+            semantic: Vec::new(),
         })
+    }
+
+    /// Substring (LIKE) search across the same corpus — deterministic
+    /// candidate retrieval for CJK text where FTS tokenization misses
+    /// paraphrases. Same result shape/filters as `query`.
+    pub fn query_substring(&self, input: SearchQuery) -> Result<SearchResults, DomainError> {
+        let q = input.query.trim();
+        if q.is_empty() {
+            return Ok(SearchResults {
+                tasks: Vec::new(),
+                reminders: Vec::new(),
+                memories: Vec::new(),
+                clipboard: Vec::new(),
+                semantic: Vec::new(),
+            });
+        }
+        let limit = input.limit.unwrap_or(40).clamp(1, 100);
+        let conn = self.connect()?;
+        let hits = self.like_search(&conn, q, limit)?;
+
+        let allowed = input.types.unwrap_or_else(|| {
+            vec![
+                SearchEntityType::Task,
+                SearchEntityType::Reminder,
+                SearchEntityType::Memory,
+                SearchEntityType::Clipboard,
+            ]
+        });
+        let mut results = SearchResults::default();
+        for hit in hits {
+            if !allowed.contains(&hit.entity_type) {
+                continue;
+            }
+            match hit.entity_type {
+                SearchEntityType::Task => results.tasks.push(hit),
+                SearchEntityType::Reminder => results.reminders.push(hit),
+                SearchEntityType::Memory => results.memories.push(hit),
+                SearchEntityType::Clipboard => results.clipboard.push(hit),
+            }
+        }
+        Ok(results)
+    }
+
+    /// Rewrite one entity's index row on an existing connection (used by
+    /// task checklist updates to keep sub-item text searchable).
+    pub fn reindex_one(
+        conn: &Connection,
+        entity_type: crate::domain::SearchEntityType,
+        entity_id: crate::domain::EntityId,
+        title: &str,
+        body: &str,
+    ) -> Result<(), DomainError> {
+        let now = stamp(&SystemClock);
+        let normalized = normalize_text(&format!("{title}\n{body}"));
+        let clipped_body = clip(body, 4000);
+        let existing: Option<i64> = conn
+            .query_row(
+                "SELECT id FROM search_documents WHERE entity_type = ?1 AND entity_id = ?2",
+                params![entity_type.as_str(), entity_id.to_string()],
+                |row| row.get(0),
+            )
+            .optional()
+            .map_err(internal)?;
+        match existing {
+            Some(rowid) => {
+                conn.execute(
+                    "UPDATE search_documents SET title = ?1, body = ?2, normalized = ?3, updated_at = ?4
+                     WHERE id = ?5",
+                    params![title, clipped_body, normalized, now, rowid],
+                )
+                .map_err(internal)?;
+                let _ = conn.execute(
+                    "INSERT INTO search_index(search_index, rowid) VALUES('delete', ?1)",
+                    [rowid],
+                );
+                conn.execute(
+                    "INSERT INTO search_index(rowid, title, body, normalized) VALUES(?1, ?2, ?3, ?4)",
+                    params![rowid, title, clipped_body, normalized],
+                )
+                .map_err(internal)?;
+            }
+            None => {
+                conn.execute(
+                    "INSERT INTO search_documents (entity_type, entity_id, title, body, normalized, updated_at)
+                     VALUES (?1, ?2, ?3, ?4, ?5, ?6)",
+                    params![entity_type.as_str(), entity_id.to_string(), title, clipped_body, normalized, now],
+                )
+                .map_err(internal)?;
+                let rowid = conn.last_insert_rowid();
+                conn.execute(
+                    "INSERT INTO search_index(rowid, title, body, normalized) VALUES(?1, ?2, ?3, ?4)",
+                    params![rowid, title, clipped_body, normalized],
+                )
+                .map_err(internal)?;
+            }
+        }
+        Ok(())
     }
 
     pub fn rebuild_all(&self) -> Result<usize, DomainError> {

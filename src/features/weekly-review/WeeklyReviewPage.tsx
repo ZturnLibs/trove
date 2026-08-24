@@ -2,6 +2,7 @@ import { useEffect, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useNavigate } from "react-router-dom";
 import { PageScaffold } from "@/components/PageScaffold";
+import { WeeklySummaryCard } from "@/features/weekly-review/WeeklySummaryCard";
 import { TaskDetailPanel } from "@/design-system/patterns/TaskDetailPanel";
 import { Button } from "@/design-system/primitives/Button";
 import {
@@ -226,6 +227,7 @@ export function WeeklyReviewPage() {
               <p className="text-[12px] text-muted">
                 以下信号由本地数据聚合，不含效率评分。逐项处理后计数会自动更新。
               </p>
+              <WeeklySummaryCard snap={snap} />
               <ReviewCards
                 snap={snap}
                 selectedTaskId={selectedTaskId}

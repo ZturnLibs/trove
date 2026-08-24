@@ -1,4 +1,4 @@
-use crate::domain::{format_utc, Clock, DomainError, SystemClock};
+use crate::domain::{format_utc, AIConfig, Clock, DomainError, SystemClock};
 use crate::infrastructure::db::Database;
 use rusqlite::OptionalExtension;
 use serde::{Deserialize, Serialize};
@@ -33,6 +33,8 @@ pub struct AppSettings {
     pub onboarding_completed: bool,
     #[serde(default)]
     pub last_focus_carry_dismissed_date: Option<String>,
+    #[serde(default)]
+    pub ai: AIConfig,
 }
 
 fn default_true() -> bool {
@@ -99,6 +101,7 @@ impl Default for AppSettings {
             backup_retention_count: 10,
             onboarding_completed: false,
             last_focus_carry_dismissed_date: None,
+            ai: AIConfig::default(),
         }
     }
 }
@@ -171,6 +174,7 @@ impl SettingsService {
         if settings.backup_retention_count == 0 || settings.backup_retention_count > 100 {
             return Err(DomainError::Validation("备份保留数量需在 1–100".into()));
         }
+        settings.ai.validate()?;
         let conn = self
             .db
             .connect()
@@ -225,11 +229,44 @@ mod tests {
         let service = SettingsService::new(db);
         let settings = service.get().unwrap();
         assert_eq!(settings.theme, ThemePreference::System);
+        assert_eq!(settings.ai, AIConfig::default());
 
         let mut updated = settings.clone();
         updated.theme = ThemePreference::Dark;
         service.save(&updated).unwrap();
         assert_eq!(service.get().unwrap().theme, ThemePreference::Dark);
+    }
+
+    #[test]
+    fn legacy_settings_json_defaults_ai_to_off() {
+        // v1.x exports carry no `ai` key; restored settings must keep AI off.
+        let dir = tempdir().unwrap();
+        let db = Database::open(dir.path().join("workbench.db")).unwrap();
+        let conn = db.connect().unwrap();
+        let legacy = serde_json::json!({
+            "theme": "system",
+            "launchAtLogin": false,
+            "shortcuts": {
+                "quickCapture": "Command+Shift+Space",
+                "search": "Command+Shift+F",
+                "clipboard": "Command+Shift+V",
+                "focusMain": "Command+Shift+A",
+                "screenshotRegion": "Command+Shift+6"
+            },
+            "clipboardCaptureEnabled": true,
+            "clipboardRetentionDays": 30,
+            "clipboardMaxItems": 500
+        });
+        conn.execute(
+            "INSERT INTO settings (key, value_json, updated_at) VALUES ('app.settings', ?1, '2026-01-01T00:00:00Z')",
+            rusqlite::params![legacy.to_string()],
+        )
+        .unwrap();
+        drop(conn);
+        let service = SettingsService::new(db);
+        let settings = service.get().unwrap();
+        assert_eq!(settings.ai.mode, crate::domain::AIMode::Off);
+        assert!(!settings.ai.features.extract);
     }
 
     #[test]

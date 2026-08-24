@@ -1,11 +1,11 @@
 #![allow(dead_code)]
 
 mod app_state;
-mod application;
+pub mod application;
 pub mod cli_protocol;
 mod commands;
 pub mod domain;
-mod infrastructure;
+pub mod infrastructure;
 mod menu_bar;
 mod platform;
 mod shortcuts;
@@ -481,10 +481,15 @@ pub fn run() {
             let db_path = resolve_db_path(app.handle())?;
             let backup_dir = resolve_backup_dir(app.handle())?;
             let assets_dir = resolve_assets_dir(app.handle())?;
+            let data_dir = app
+                .path()
+                .app_data_dir()
+                .map_err(|e| e.to_string())?;
+            std::fs::create_dir_all(&data_dir).map_err(|e| e.to_string())?;
             tracing::info!(path = %db_path.display(), "opening database");
             let db = Database::open_with_backup_dir(db_path, Some(backup_dir.clone()))
                 .map_err(|e| e.to_string())?;
-            let state = AppState::new(db, backup_dir, assets_dir)?;
+            let state = AppState::new(db, backup_dir, assets_dir, data_dir)?;
             let settings = state.settings.get().unwrap_or_default();
             let scheduler_state = state.clone();
             let clipboard = state.clipboard.clone();
@@ -713,6 +718,32 @@ pub fn run() {
             commands::automation_set_enabled,
             commands::automation_runs_list,
             commands::automation_dry_run,
+            commands::ai_provider_key_status,
+            commands::ai_provider_key_set,
+            commands::ai_provider_key_clear,
+            commands::ai_provider_probe,
+            commands::ai_suggestion_list,
+            commands::ai_suggestion_decide,
+            commands::ai_suggestion_clear,
+            commands::ai_extract_request,
+            commands::ai_suggestion_apply,
+            commands::ai_weekly_summary_request,
+            commands::ai_related_request,
+            commands::ai_related_confirm,
+            commands::ai_related_reject_item,
+            commands::ai_daily_suggest_request,
+            commands::ai_daily_suggest_skip,
+            commands::ai_daily_suggest_accept,
+            commands::task_checklist_list,
+            commands::task_checklist_add,
+            commands::task_checklist_update,
+            commands::task_checklist_delete,
+            commands::task_checklist_reorder,
+            commands::ai_split_request,
+            commands::ai_split_apply,
+            commands::semantic_index_status,
+            commands::semantic_index_rebuild,
+            commands::semantic_index_clear,
             commands::app_quit,
         ])
         .run(tauri::generate_context!())

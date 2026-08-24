@@ -33,6 +33,91 @@ export type AppSettings = {
   onboardingCompleted: boolean;
   lastFocusCarryDismissedDate?: string | null;
   automationEnabled: boolean;
+  ai: AIConfig;
+};
+
+export type ChecklistItem = {
+  id: string;
+  taskId: string;
+  content: string;
+  checked: boolean;
+  sortOrder: number;
+  createdAt: string;
+  updatedAt: string;
+  revision: number;
+};
+
+export type TaskChecklist = {
+  items: ChecklistItem[];
+  total: number;
+  checkedCount: number;
+};
+
+export type ChecklistUpdateInput = {
+  id: string;
+  content?: string | null;
+  checked?: boolean | null;
+};
+
+export type AIMode = "off" | "ollama" | "custom";
+
+export type AIFeature = "extract" | "related" | "summary" | "suggest" | "split";
+
+export type AIFeatureToggles = {
+  extract: boolean;
+  related: boolean;
+  summary: boolean;
+  suggest: boolean;
+  split: boolean;
+  semanticSearch: boolean;
+};
+
+export type SemanticExclusions = {
+  listIds: string[];
+  tagIds: string[];
+  clipboardTypes: string[];
+};
+
+export type AIConfig = {
+  mode: AIMode;
+  ollamaUrl: string;
+  ollamaModel: string;
+  customEndpoint: string;
+  customModel: string;
+  embeddingModel: string;
+  semanticExclusions: SemanticExclusions;
+  features: AIFeatureToggles;
+};
+
+export type ProbeReport = {
+  mode: AIMode;
+  reachable: boolean;
+  model: string | null;
+  latencyMs: number | null;
+  hint: string | null;
+};
+
+export type SuggestedItem = {
+  title: string;
+  detail: string | null;
+  dueDate: string | null;
+  dueTime: string | null;
+  ambiguous: boolean;
+  sourceExcerpt: string;
+};
+
+export type AISuggestionRecord = {
+  id: string;
+  featureType: string;
+  sourceEntityType: string;
+  sourceEntityId: string;
+  payload: { items: SuggestedItem[]; summary: string | null };
+  sources: { entityType: string; entityId: string; textOffset: number; excerpt: string }[];
+  status: "pending" | "accepted" | "rejected" | "dismissed";
+  provider: string;
+  model: string;
+  createdAt: string;
+  decidedAt: string | null;
 };
 
 export type DbHealth = {
@@ -530,6 +615,7 @@ export type Memory = {
   archived: boolean;
   quickInsert: boolean;
   triggerWord: string | null;
+  sensitive: boolean;
   mentionUseCount: number;
   tagIds: string[];
   tagNames: string[];
@@ -555,6 +641,7 @@ export type UpdateMemoryInput = {
   archived: boolean;
   quickInsert: boolean;
   triggerWord: string | null;
+  sensitive: boolean;
   tagNames: string[];
 };
 
@@ -671,11 +758,30 @@ export type SearchHit = {
   updatedAt: string;
 };
 
+export type SemanticHit = {
+  entityType: string;
+  entityId: string;
+  title: string;
+  score: number;
+  matchedType: string;
+};
+
+export type SemanticIndexStatus = {
+  rows: number;
+  model: string | null;
+  lastIndexedAt: string | null;
+  eligible: number;
+  capped: boolean;
+  configuredModel: string | null;
+  modelMismatch: boolean;
+};
+
 export type SearchResults = {
   tasks: SearchHit[];
   reminders: SearchHit[];
   memories: SearchHit[];
   clipboard: SearchHit[];
+  semantic?: SemanticHit[];
 };
 
 export type ClipboardKind = "text" | "image";
@@ -1119,5 +1225,71 @@ export const ipc = {
     }),
   automationDryRun: (ruleId: string, event: AutomationEvent) =>
     invoke<AutomationDryRunResult>("automation_dry_run", { ruleId, event }),
+  aiProviderKeyStatus: () =>
+    invoke<{ exists: boolean }>("ai_provider_key_status"),
+  aiProviderKeySet: (key: string) =>
+    invoke<{ exists: boolean }>("ai_provider_key_set", { key }),
+  aiProviderKeyClear: () =>
+    invoke<{ exists: boolean }>("ai_provider_key_clear"),
+  aiProviderProbe: () => invoke<ProbeReport>("ai_provider_probe"),
+  aiSuggestionList: (
+    feature?: AIFeature | null,
+    status?: AISuggestionRecord["status"] | null,
+  ) =>
+    invoke<AISuggestionRecord[]>("ai_suggestion_list", {
+      feature: feature ?? null,
+      status: status ?? null,
+    }),
+  aiSuggestionDecide: (
+    id: string,
+    decision: "accept" | "reject" | "dismiss",
+  ) =>
+    invoke<AISuggestionRecord>("ai_suggestion_decide", { id, decision }),
+  aiSuggestionClear: () => invoke<number>("ai_suggestion_clear"),
+  aiExtractRequest: (memoryId: string) =>
+    invoke<AISuggestionRecord | null>("ai_extract_request", { memoryId }),
+  aiSuggestionApply: (suggestionId: string, selectedIndices: number[]) =>
+    invoke<{ tasks: Task[]; suggestion: AISuggestionRecord }>("ai_suggestion_apply", {
+      input: { suggestionId, selectedIndices },
+    }),
+  aiWeeklySummaryRequest: () =>
+    invoke<AISuggestionRecord | null>("ai_weekly_summary_request"),
+  aiRelatedRequest: (taskId: string) =>
+    invoke<AISuggestionRecord | null>("ai_related_request", { taskId }),
+  aiRelatedConfirm: (suggestionId: string, selectedIndices: number[], taskId: string) =>
+    invoke<EntityLink[]>("ai_related_confirm", {
+      suggestionId,
+      selectedIndices,
+      taskId,
+    }),
+  aiRelatedRejectItem: (suggestionId: string, index: number) =>
+    invoke<AISuggestionRecord>("ai_related_reject_item", { suggestionId, index }),
+  aiDailySuggestRequest: () =>
+    invoke<AISuggestionRecord | null>("ai_daily_suggest_request"),
+  aiDailySuggestSkip: (suggestionId: string, index: number) =>
+    invoke<AISuggestionRecord>("ai_daily_suggest_skip", { suggestionId, index }),
+  aiDailySuggestAccept: (suggestionId: string, index: number) =>
+    invoke<AISuggestionRecord>("ai_daily_suggest_accept", { suggestionId, index }),
+  taskChecklistList: (taskId: string) =>
+    invoke<TaskChecklist>("task_checklist_list", { taskId }),
+  taskChecklistAdd: (taskId: string, content: string) =>
+    invoke<ChecklistItem>("task_checklist_add", { taskId, content }),
+  taskChecklistUpdate: (input: ChecklistUpdateInput) =>
+    invoke<ChecklistItem>("task_checklist_update", { input }),
+  taskChecklistDelete: (id: string) =>
+    invoke<void>("task_checklist_delete", { id }),
+  taskChecklistReorder: (taskId: string, orderedIds: string[]) =>
+    invoke<void>("task_checklist_reorder", { taskId, orderedIds }),
+  aiSplitRequest: (taskId: string) =>
+    invoke<AISuggestionRecord | null>("ai_split_request", { taskId }),
+  aiSplitApply: (suggestionId: string, selectedIndices: number[]) =>
+    invoke<ChecklistItem[]>("ai_split_apply", {
+      input: { suggestionId, selectedIndices },
+    }),
+  semanticIndexStatus: () =>
+    invoke<SemanticIndexStatus>("semantic_index_status"),
+  semanticIndexRebuild: () =>
+    invoke<SemanticIndexStatus>("semantic_index_rebuild"),
+  semanticIndexClear: () => invoke<void>("semantic_index_clear"),
   appQuit: () => invoke<void>("app_quit"),
 };

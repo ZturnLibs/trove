@@ -1,4 +1,5 @@
 use crate::application::csv_tasks::CsvTaskService;
+use crate::application::ai_suggestions::AISuggestionService;
 use crate::application::automation::AutomationService;
 use crate::application::backup::BackupService;
 use crate::application::clipboard::ClipboardService;
@@ -15,6 +16,7 @@ use crate::application::search::SearchService;
 use crate::application::smoke_notes::SmokeNoteService;
 use crate::application::tasks::TaskService;
 use crate::application::templates::TemplateService;
+use crate::application::semantic_index::SemanticIndexService;
 use crate::application::weekly_review::WeeklyReviewService;
 use crate::infrastructure::db::Database;
 use crate::infrastructure::settings::SettingsService;
@@ -43,10 +45,17 @@ pub struct AppState {
     pub file_refs: Arc<FileReferenceService>,
     pub automation: Arc<AutomationService>,
     pub csv_tasks: Arc<CsvTaskService>,
+    pub ai_suggestions: Arc<AISuggestionService>,
+    pub semantic_index: Arc<SemanticIndexService>,
 }
 
 impl AppState {
-    pub fn new(db: Database, backup_dir: PathBuf, assets_root: PathBuf) -> Result<Self, String> {
+    pub fn new(
+        db: Database,
+        backup_dir: PathBuf,
+        assets_root: PathBuf,
+        data_dir: PathBuf,
+    ) -> Result<Self, String> {
         let db = Arc::new(db);
         let tasks = TaskService::new(db.as_ref().clone());
         tasks
@@ -69,8 +78,19 @@ impl AppState {
         let file_refs = FileReferenceService::new(db.as_ref().clone());
         let automation = AutomationService::new(db.as_ref().clone());
         let csv_tasks = CsvTaskService::new(db.as_ref().clone());
+        let settings = Arc::new(SettingsService::new(db.as_ref().clone()));
+        let ai_suggestions = AISuggestionService::new(
+            db.as_ref().clone(),
+            settings.clone(),
+            data_dir.clone(),
+        )?;
+        let semantic_index = SemanticIndexService::new(
+            db.as_ref().clone(),
+            settings.clone(),
+            data_dir,
+        );
         let state = Self {
-            settings: Arc::new(SettingsService::new(db.as_ref().clone())),
+            settings,
             smoke_notes: Arc::new(SmokeNoteService::new(db.as_ref().clone())),
             tasks: Arc::new(tasks),
             reminders: Arc::new(reminders),
@@ -89,6 +109,8 @@ impl AppState {
             file_refs: Arc::new(file_refs),
             automation: Arc::new(automation),
             csv_tasks: Arc::new(csv_tasks),
+            ai_suggestions: Arc::new(ai_suggestions),
+            semantic_index: Arc::new(semantic_index),
             db,
         };
         if let Err(err) = state.search.rebuild_all() {

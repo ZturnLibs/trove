@@ -470,6 +470,7 @@ fn build_memory_update(memory: &Memory, pinned: bool) -> UpdateMemoryInput {
         archived: memory.archived,
         quick_insert: memory.quick_insert,
         trigger_word: memory.trigger_word.clone(),
+        sensitive: memory.sensitive,
         tag_names: memory.tag_names.clone(),
     }
 }

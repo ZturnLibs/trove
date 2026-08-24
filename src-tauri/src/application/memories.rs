@@ -94,9 +94,9 @@ impl MemoryService {
         let tx = conn.unchecked_transaction().map_err(internal)?;
         tx.execute(
             "UPDATE memories SET title = ?1, body = ?2, pinned = ?3, archived = ?4,
-                quick_insert = ?5, trigger_word = ?6,
-                updated_at = ?7, revision = revision + 1
-             WHERE id = ?8 AND deleted_at IS NULL",
+                quick_insert = ?5, trigger_word = ?6, sensitive = ?7,
+                updated_at = ?8, revision = revision + 1
+             WHERE id = ?9 AND deleted_at IS NULL",
             params![
                 title,
                 input.body,
@@ -108,6 +108,7 @@ impl MemoryService {
                     .as_ref()
                     .map(|s| s.trim().to_string())
                     .filter(|s| !s.is_empty()),
+                if input.sensitive { 1 } else { 0 },
                 now,
                 input.id.to_string()
             ],
@@ -480,7 +481,7 @@ impl MemoryService {
         let mut memory = conn
             .query_row(
                 "SELECT id, title, body, pinned, archived, quick_insert, trigger_word,
-                        mention_use_count, created_at, updated_at, revision
+                        mention_use_count, sensitive, created_at, updated_at, revision
                  FROM memories WHERE id = ?1 AND deleted_at IS NULL",
                 [id.to_string()],
                 map_memory_row,
@@ -537,7 +538,7 @@ impl MemoryService {
         };
         let sql = format!(
             "SELECT id, title, body, pinned, archived, quick_insert, trigger_word,
-                    mention_use_count, created_at, updated_at, revision{from_clause}{filters}
+                    mention_use_count, sensitive, created_at, updated_at, revision{from_clause}{filters}
              ORDER BY {order} LIMIT ? OFFSET ?"
         );
         values.push(Box::new(limit));
@@ -699,11 +700,12 @@ fn map_memory_row(row: &rusqlite::Row<'_>) -> Result<Memory, rusqlite::Error> {
         quick_insert: row.get::<_, i64>(5)? == 1,
         trigger_word: row.get(6)?,
         mention_use_count: row.get(7)?,
+        sensitive: row.get::<_, i64>(8)? == 1,
         tag_ids: Vec::new(),
         tag_names: Vec::new(),
-        created_at: row.get(8)?,
-        updated_at: row.get(9)?,
-        revision: row.get(10)?,
+        created_at: row.get(9)?,
+        updated_at: row.get(10)?,
+        revision: row.get(11)?,
     })
 }
 

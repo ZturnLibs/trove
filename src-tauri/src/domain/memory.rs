@@ -12,6 +12,8 @@ pub struct Memory {
     pub archived: bool,
     pub quick_insert: bool,
     pub trigger_word: Option<String>,
+    /// v2.0: excluded from any AI provider context (§9.4 red line).
+    pub sensitive: bool,
     pub mention_use_count: i64,
     pub tag_ids: Vec<EntityId>,
     pub tag_names: Vec<String>,
@@ -41,6 +43,8 @@ pub struct UpdateMemoryInput {
     pub archived: bool,
     pub quick_insert: bool,
     pub trigger_word: Option<String>,
+    #[serde(default)]
+    pub sensitive: bool,
     pub tag_names: Vec<String>,
 }
 
@@ -168,13 +172,16 @@ pub struct SearchQuery {
     pub limit: Option<i64>,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
 #[serde(rename_all = "camelCase")]
 pub struct SearchResults {
     pub tasks: Vec<SearchHit>,
     pub reminders: Vec<SearchHit>,
     pub memories: Vec<SearchHit>,
     pub clipboard: Vec<SearchHit>,
+    /// v2.0 slice 8: semantic matches (empty when disabled/unavailable).
+    #[serde(default)]
+    pub semantic: Vec<crate::domain::ai_suggestion::SemanticHit>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
