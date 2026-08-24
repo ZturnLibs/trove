@@ -34,14 +34,14 @@ QuickWindow 搜索结果在关键词命中下方新增「语义匹配」分区�
 
 ## Acceptance Criteria
 
-- [ ] 关闭开关：`search_query` 响应无 semantic 字段开销，行为与 v1.x 完全一致（单测）
-- [ ] 索引可全量重建且幂等（两次 rebuild 行数一致，单测）；清空后表为空（单测）
-- [ ] 排除范围生效：排除清单的任务不出现在语义索引（单测）
-- [ ] 双列展示：关键词命中与语义匹配分区渲染，语义项带 matchedType 徽标，点击可跳（手测脚本）
-- [ ] ai-eval 语义样本（10 对非关键词查询）在 Ollama 在线档命中 ≥7 对（`#[ignore]` 回归）
-- [ ] embedding 模型名写入索引行；换模型后 rebuild 全量替换（旧模型行不留）
-- [ ] Off/失败降级：无 semantic 节，不阻塞关键词搜索
-- [ ] cargo test / pnpm test / build 全绿；docs/ai-assist.md + privacy（派生索引可删）更新
+- [x] 关闭开关：`search_query` 响应无 semantic 字段开销，行为与 v1.x 完全一致（单测）
+- [x] 索引可全量重建且幂等（两次 rebuild 行数一致，单测）；清空后表为空（单测）
+- [x] 排除范围生效：排除清单的任务不出现在语义索引（单测）
+- [x] 双列展示：关键词命中与语义匹配分区渲染，语义项带 matchedType 徽标，点击可跳（手测脚本）
+- [x] ai-eval 语义样本（10 对非关键词查询）在 Ollama 在线档命中 ≥7 对（`#[ignore]` 回归）
+- [x] embedding 模型名写入索引行；换模型后 rebuild 全量替换（旧模型行不留）
+- [x] Off/失败降级：无 semantic 节，不阻塞关键词搜索
+- [x] cargo test / pnpm test / build 全绿；docs/ai-assist.md + privacy（派生索引可删）更新
 
 ## 明确不做（本切片）
 

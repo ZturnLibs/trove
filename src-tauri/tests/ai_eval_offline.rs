@@ -731,3 +731,78 @@ fn online_split_grounds_excerpts_in_task_source() {
     // Surviving items are grounded by construction (server-side filter).
     assert_eq!(record.payload.items.len(), record.sources.len());
 }
+
+// Slice 8: semantic search (offline contract + online sample regression).
+
+#[test]
+fn eval_semantic_index_offline_contract() {
+    // Exclusion/cap/threshold constants are part of the public contract.
+    assert_eq!(
+        trove_lib::application::semantic_index::SEMANTIC_INDEX_MAX_ROWS,
+        20_000
+    );
+    assert!(trove_lib::application::semantic_index::SEMANTIC_MIN_SCORE >= 0.3);
+}
+
+#[test]
+#[ignore = "requires local Ollama + embedding model (OLLAMA_URL/OLLAMA_EMBED_MODEL); run before releases"]
+fn online_semantic_samples_hit_at_least_7_of_10() {
+    use trove_lib::application::memories::MemoryService;
+    use trove_lib::application::semantic_index::SemanticIndexService;
+    use trove_lib::application::search::SearchService;
+    use trove_lib::domain::{AIConfig, AIFeatureToggles, AIMode, CreateMemoryInput};
+
+    let url = std::env::var("OLLAMA_URL").unwrap_or_else(|_| "http://localhost:11434".into());
+    let model = std::env::var("OLLAMA_EMBED_MODEL").expect("OLLAMA_EMBED_MODEL (e.g. nomic-embed-text)");
+
+    let pairs: SearchPairs = load("search_semantics.json");
+    let dir = tempdir().unwrap();
+    let db = Database::open(dir.path().join("t.db")).unwrap();
+    let settings = Arc::new(SettingsService::new(db.clone()));
+    let mut base = settings.get().unwrap();
+    base.ai = AIConfig {
+        mode: AIMode::Ollama,
+        ollama_url: url,
+        embedding_model: model.clone(),
+        features: AIFeatureToggles {
+            semantic_search: true,
+            ..Default::default()
+        },
+        ..Default::default()
+    };
+    settings.save(&base).unwrap();
+
+    let memories = MemoryService::new(db.clone());
+    for pair in &pairs.pairs {
+        memories
+            .create(CreateMemoryInput {
+                title: pair.target_title.clone(),
+                body: Some(format!("主题：{}", pair.target_title)),
+                pinned: None,
+                quick_insert: None,
+                trigger_word: None,
+                tag_names: None,
+            })
+            .unwrap();
+    }
+    SearchService::new(db.clone()).rebuild_all().unwrap();
+
+    let service = SemanticIndexService::new(db, settings.clone(), dir.path().into());
+    service.rebuild().expect("index built");
+
+    let mut hits = 0usize;
+    for pair in &pairs.pairs {
+        let results = service.search(&pair.query, 5).unwrap();
+        if results
+            .iter()
+            .any(|r| r.title == pair.target_title)
+        {
+            hits += 1;
+        }
+    }
+    assert!(
+        hits >= 7,
+        "semantic sample regression: {hits}/{} hits",
+        pairs.pairs.len()
+    );
+}
