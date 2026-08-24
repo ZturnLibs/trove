@@ -1284,6 +1284,9 @@ mod tests {
             self.output
                 .map(|raw| crate::domain::CompletionOutput { raw_json: raw.into() })
         }
+        fn embed(&self, _texts: &[&str]) -> Option<Vec<Vec<f32>>> {
+            None
+        }
     }
 
     fn setup() -> (tempfile::TempDir, AISuggestionService, Arc<SettingsService>, Arc<FakeProvider>) {
@@ -1566,6 +1569,9 @@ mod tests {
                     raw_json: GOOD_OUTPUT.into(),
                 }
                 .into()
+            }
+            fn embed(&self, _texts: &[&str]) -> Option<Vec<Vec<f32>>> {
+                None
             }
         }
         let db = Database::open(dir.path().join("workbench.db")).unwrap();

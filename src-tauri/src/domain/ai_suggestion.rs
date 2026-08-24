@@ -106,6 +106,7 @@ pub struct AIFeatureToggles {
     pub summary: bool,
     pub suggest: bool,
     pub split: bool,
+    pub semantic_search: bool,
 }
 
 impl AIFeatureToggles {
@@ -155,7 +156,24 @@ pub struct AIConfig {
     pub ollama_model: String,
     pub custom_endpoint: String,
     pub custom_model: String,
+    /// Embedding model for semantic search (e.g. nomic-embed-text). Empty =
+    /// semantic search unavailable with a rebuild hint.
+    #[serde(default)]
+    pub embedding_model: String,
+    /// Scope exclusions for the rebuildable semantic index (slice 8 §9.3).
+    #[serde(default)]
+    pub semantic_exclusions: SemanticExclusions,
     pub features: AIFeatureToggles,
+}
+
+/// Entities excluded from the semantic index at rebuild time. Keyword search
+/// stays unaffected — these only bound what gets embedded.
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase", default)]
+pub struct SemanticExclusions {
+    pub list_ids: Vec<String>,
+    pub tag_ids: Vec<String>,
+    pub clipboard_types: Vec<String>,
 }
 
 impl Default for AIConfig {
@@ -166,6 +184,8 @@ impl Default for AIConfig {
             ollama_model: String::new(),
             custom_endpoint: String::new(),
             custom_model: String::new(),
+            embedding_model: String::new(),
+            semantic_exclusions: SemanticExclusions::default(),
             features: AIFeatureToggles::default(),
         }
     }
@@ -260,6 +280,33 @@ pub struct AISuggestionRecord {
     pub model: String,
     pub created_at: String,
     pub decided_at: Option<String>,
+}
+
+/// One semantic-search result (slice 8): the entity plus similarity score.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct SemanticHit {
+    pub entity_type: String,
+    pub entity_id: String,
+    pub title: String,
+    pub score: f32,
+    pub matched_type: String,
+}
+
+/// Status of the rebuildable semantic index.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct SemanticIndexStatus {
+    pub rows: i64,
+    pub model: Option<String>,
+    pub last_indexed_at: Option<String>,
+    /// Corpus rows eligible for indexing (after exclusions, before the cap).
+    pub eligible: i64,
+    /// Cap currently applied (see SEMANTIC_INDEX_MAX_ROWS).
+    pub capped: bool,
+    /// Current configured embedding model; mismatch with indexed model.
+    pub configured_model: Option<String>,
+    pub model_mismatch: bool,
 }
 
 /// What the application layer hands to a provider implementation.

@@ -127,6 +127,7 @@ impl SearchService {
                 reminders: Vec::new(),
                 memories: Vec::new(),
                 clipboard: Vec::new(),
+                semantic: Vec::new(),
             });
         }
         if q.chars().count() > 200 {
@@ -173,6 +174,7 @@ impl SearchService {
             reminders,
             memories,
             clipboard,
+            semantic: Vec::new(),
         })
     }
 
@@ -187,6 +189,7 @@ impl SearchService {
                 reminders: Vec::new(),
                 memories: Vec::new(),
                 clipboard: Vec::new(),
+                semantic: Vec::new(),
             });
         }
         let limit = input.limit.unwrap_or(40).clamp(1, 100);

@@ -6,6 +6,7 @@ import { Button } from "@/design-system/primitives/Button";
 import { Input } from "@/design-system/primitives/Input";
 import {
   ipc,
+  type SemanticHit,
   type SearchEntityType,
   type SearchHit,
   type TaskPriority,
@@ -308,6 +309,16 @@ export function QuickWindow() {
     () => paletteItems.filter((item) => item.kind === "hit"),
     [paletteItems],
   );
+  const semanticHits: SemanticHit[] = useMemo(
+    () =>
+      (searchQuery.data?.semantic ?? []).filter(
+        (s) =>
+          !flatResults.some(
+            (k) => k.entityType === s.entityType && k.entityId === s.entityId,
+          ),
+      ),
+    [searchQuery.data, flatResults],
+  );
 
   const renderPaletteRow = (item: PaletteItem, index: number) => (
     <li
@@ -384,6 +395,16 @@ export function QuickWindow() {
           : "/today";
     await emit("main://navigate", path);
     await ipc.windowHideQuick();
+  };
+
+  const openSemanticHit = async (hit: SemanticHit) => {
+    await openHit({
+      entityType: hit.entityType as SearchHit["entityType"],
+      entityId: hit.entityId,
+      title: hit.title,
+      snippet: "",
+      updatedAt: "",
+    });
   };
 
   const runPaletteItem = async (item: PaletteItem) => {
@@ -799,6 +820,32 @@ export function QuickWindow() {
                   ) : null}
                 </ul>
               )}
+              {semanticHits.length > 0 ? (
+                <div className="border-t border-border">
+                  <div className="bg-surface px-3 py-1.5 text-[10px] font-medium uppercase tracking-wide text-muted">
+                    语义匹配
+                  </div>
+                  <ul>
+                    {semanticHits.map((hit) => (
+                      <li key={`${hit.entityType}-${hit.entityId}`}>
+                        <button
+                          type="button"
+                          className="flex w-full items-center gap-2 border-b border-border px-3 py-2 text-left text-[13px] hover:bg-row-hover"
+                          onClick={() => void openSemanticHit(hit)}
+                        >
+                          <span className="rounded border border-border px-1 text-[10px] text-muted">
+                            语义
+                          </span>
+                          <span className="min-w-0 flex-1 truncate">{hit.title}</span>
+                          <span className="text-[10px] text-muted">
+                            {(hit.score * 100).toFixed(0)}%
+                          </span>
+                        </button>
+                      </li>
+                    ))}
+                  </ul>
+                </div>
+              ) : null}
             </div>
             <div className="text-[11px] text-muted">
               Enter 执行 · ⌘/Ctrl+Enter 完成任务 · ⌘/Ctrl+Shift+Enter 延期

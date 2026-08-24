@@ -179,6 +179,9 @@ pub struct SearchResults {
     pub reminders: Vec<SearchHit>,
     pub memories: Vec<SearchHit>,
     pub clipboard: Vec<SearchHit>,
+    /// v2.0 slice 8: semantic matches (empty when disabled/unavailable).
+    #[serde(default)]
+    pub semantic: Vec<crate::domain::ai_suggestion::SemanticHit>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

@@ -741,6 +741,9 @@ pub fn run() {
             commands::task_checklist_reorder,
             commands::ai_split_request,
             commands::ai_split_apply,
+            commands::semantic_index_status,
+            commands::semantic_index_rebuild,
+            commands::semantic_index_clear,
             commands::app_quit,
         ])
         .run(tauri::generate_context!())

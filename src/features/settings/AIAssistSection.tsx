@@ -19,6 +19,7 @@ const FEATURES: { key: keyof AIConfig["features"]; label: string }[] = [
   { key: "related", label: "相关内容建议（已开放）" },
   { key: "summary", label: "回顾摘要组织文字（已开放）" },
   { key: "suggest", label: "每日工作建议（已开放）" },
+  { key: "semanticSearch", label: "语义检索（需建索引）" } as const,
   { key: "split", label: "任务拆分检查项（已开放）" },
 ];
 
@@ -84,6 +85,26 @@ export function AIAssistSection({ settings }: { settings: AppSettings }) {
     onSuccess: () => {
       setMessage("API Key 已清除。");
       queryClient.invalidateQueries({ queryKey: ["ai", "provider-key"] });
+    },
+  });
+
+  const semanticStatus = useQuery({
+    queryKey: ["ai", "semantic-status"],
+    queryFn: () => ipc.semanticIndexStatus(),
+    enabled: settings.ai.mode !== "off",
+  });
+  const semanticRebuild = useMutation({
+    mutationFn: () => ipc.semanticIndexRebuild(),
+    onSuccess: () => {
+      setMessage("语义索引已重建（派生数据，可随时清空）。");
+      void queryClient.invalidateQueries({ queryKey: ["ai", "semantic-status"] });
+    },
+  });
+  const semanticClear = useMutation({
+    mutationFn: () => ipc.semanticIndexClear(),
+    onSuccess: () => {
+      setMessage("语义索引已清空，不影响任何业务数据。");
+      void queryClient.invalidateQueries({ queryKey: ["ai", "semantic-status"] });
     },
   });
 
@@ -248,6 +269,55 @@ export function AIAssistSection({ settings }: { settings: AppSettings }) {
             <p className="text-muted">
               数据边界：敏感记忆与排除应用的剪贴板内容永远不会被发送；远程模式仅发送你确认功能所需的最小上下文，密钥只保存在本机。
             </p>
+
+            <div className="rounded border border-border p-2">
+              <div className="flex items-center justify-between">
+                <span className="text-muted">语义索引（可随时清空重建）</span>
+                <div className="flex items-center gap-2">
+                  <Button
+                    size="sm"
+                    variant="secondary"
+                    disabled={semanticRebuild.isPending}
+                    onClick={() => semanticRebuild.mutate()}
+                  >
+                    {semanticRebuild.isPending ? "重建中…" : "重建索引"}
+                  </Button>
+                  {(semanticStatus.data?.rows ?? 0) > 0 ? (
+                    <ConfirmButton
+                      size="sm"
+                      confirmLabel="确认清空"
+                      onConfirm={() => semanticClear.mutate()}
+                    >
+                      清空索引
+                    </ConfirmButton>
+                  ) : null}
+                </div>
+              </div>
+              <label className="mt-2 block">
+                <span className="text-muted">Embedding 模型（如 nomic-embed-text）</span>
+                <input
+                  className="mt-0.5 w-full rounded border border-border bg-surface px-2 py-1"
+                  defaultValue={ai.embeddingModel}
+                  placeholder="ollama pull nomic-embed-text 后填写"
+                  onBlur={(e) =>
+                    e.target.value !== ai.embeddingModel &&
+                    saveMutation.mutate({ embeddingModel: e.target.value })
+                  }
+                />
+              </label>
+              {semanticStatus.data ? (
+                <p className="mt-1 text-[11px] text-muted">
+                  {semanticStatus.data.rows > 0
+                    ? `已索引 ${semanticStatus.data.rows} 条 · 模型 ${semanticStatus.data.model ?? "?"}${semanticStatus.data.capped ? " · 已达 2 万条上限" : ""}${semanticStatus.data.modelMismatch ? " · 模型已变更，请重建" : ""}`
+                    : "未建立索引，重建后语义检索生效。"}
+                </p>
+              ) : null}
+              {semanticRebuild.isError ? (
+                <p className="mt-1 text-[11px] text-warning">
+                  {String(semanticRebuild.error)}
+                </p>
+              ) : null}
+            </div>
           </div>
         ) : (
           <p className="text-muted">当前未配置任何模型服务，所有功能按原样运行。</p>

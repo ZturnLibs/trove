@@ -16,6 +16,7 @@ use crate::application::search::SearchService;
 use crate::application::smoke_notes::SmokeNoteService;
 use crate::application::tasks::TaskService;
 use crate::application::templates::TemplateService;
+use crate::application::semantic_index::SemanticIndexService;
 use crate::application::weekly_review::WeeklyReviewService;
 use crate::infrastructure::db::Database;
 use crate::infrastructure::settings::SettingsService;
@@ -45,6 +46,7 @@ pub struct AppState {
     pub automation: Arc<AutomationService>,
     pub csv_tasks: Arc<CsvTaskService>,
     pub ai_suggestions: Arc<AISuggestionService>,
+    pub semantic_index: Arc<SemanticIndexService>,
 }
 
 impl AppState {
@@ -80,8 +82,13 @@ impl AppState {
         let ai_suggestions = AISuggestionService::new(
             db.as_ref().clone(),
             settings.clone(),
-            data_dir,
+            data_dir.clone(),
         )?;
+        let semantic_index = SemanticIndexService::new(
+            db.as_ref().clone(),
+            settings.clone(),
+            data_dir,
+        );
         let state = Self {
             settings,
             smoke_notes: Arc::new(SmokeNoteService::new(db.as_ref().clone())),
@@ -103,6 +110,7 @@ impl AppState {
             automation: Arc::new(automation),
             csv_tasks: Arc::new(csv_tasks),
             ai_suggestions: Arc::new(ai_suggestions),
+            semantic_index: Arc::new(semantic_index),
             db,
         };
         if let Err(err) = state.search.rebuild_all() {

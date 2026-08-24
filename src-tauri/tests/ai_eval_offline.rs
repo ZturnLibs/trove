@@ -96,6 +96,9 @@ impl AIProvider for CountingProvider {
             .clone()
             .map(|raw_json| CompletionOutput { raw_json })
     }
+    fn embed(&self, _texts: &[&str]) -> Option<Vec<Vec<f32>>> {
+        None
+    }
 }
 
 fn setup_service() -> (

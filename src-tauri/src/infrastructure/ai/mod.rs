@@ -20,6 +20,8 @@ use crate::domain::{
 
 const PROBE_TIMEOUT_SECS: u64 = 5;
 const COMPLETE_TIMEOUT_SECS: u64 = 20;
+const EMBED_TIMEOUT_SECS: u64 = 60;
+const EMBED_BATCH: usize = 32;
 const KEY_FILE_NAME: &str = "ai_provider_key";
 
 /// Provider abstraction injected into `AISuggestionService` as a trait
@@ -27,6 +29,14 @@ const KEY_FILE_NAME: &str = "ai_provider_key";
 pub trait AIProvider: Send + Sync {
     fn probe(&self) -> ProbeReport;
     fn complete(&self, request: &CompletionRequest) -> Option<CompletionOutput>;
+    /// Batch text embeddings for the rebuildable semantic index (slice 8).
+    /// Returns None when off/unconfigured/unreachable — callers degrade.
+    fn embed(&self, texts: &[&str]) -> Option<Vec<Vec<f32>>>;
+}
+
+/// Split texts into provider batches (Ollama/many gateways cap input size).
+pub fn embed_batches<'a>(texts: &'a [&'a str], batch: usize) -> Vec<&'a [&'a str]> {
+    texts.chunks(batch.max(1)).collect()
 }
 
 /// Default provider. Zero I/O, always unavailable.
@@ -46,6 +56,10 @@ impl AIProvider for OffProvider {
     fn complete(&self, _request: &CompletionRequest) -> Option<CompletionOutput> {
         None
     }
+
+    fn embed(&self, _texts: &[&str]) -> Option<Vec<Vec<f32>>> {
+        None
+    }
 }
 
 /// OpenAI-compatible HTTP provider. Serves both `AIMode::Ollama`
@@ -54,6 +68,8 @@ impl AIProvider for OffProvider {
 pub struct HttpProvider {
     base_url: String,
     model: String,
+    /// Embedding model (semantic index); `complete` uses `model`.
+    embedding_model: String,
     mode: AIMode,
     key_path: PathBuf,
     requires_key: bool,
@@ -66,6 +82,7 @@ impl HttpProvider {
             AIMode::Ollama => Self {
                 base_url: format!("{}/v1", config.ollama_url.trim_end_matches('/')),
                 model: config.ollama_model.trim().to_string(),
+                embedding_model: config.embedding_model.trim().to_string(),
                 mode: AIMode::Ollama,
                 key_path,
                 requires_key: false,
@@ -73,6 +90,7 @@ impl HttpProvider {
             AIMode::Custom => Self {
                 base_url: config.custom_endpoint.trim_end_matches('/').to_string(),
                 model: config.custom_model.trim().to_string(),
+                embedding_model: config.embedding_model.trim().to_string(),
                 mode: AIMode::Custom,
                 key_path,
                 requires_key: true,
@@ -80,6 +98,7 @@ impl HttpProvider {
             AIMode::Off => Self {
                 base_url: String::new(),
                 model: String::new(),
+                embedding_model: String::new(),
                 mode: AIMode::Off,
                 key_path,
                 requires_key: false,
@@ -204,6 +223,69 @@ impl AIProvider for HttpProvider {
         }
         Some(CompletionOutput { raw_json: content })
     }
+
+    fn embed(&self, texts: &[&str]) -> Option<Vec<Vec<f32>>> {
+        if self.mode == AIMode::Off || texts.is_empty() {
+            return None;
+        }
+        if self.embedding_model.is_empty() {
+            return None; // embedding model not selected
+        }
+        let client = self.client(EMBED_TIMEOUT_SECS)?;
+        let key = read_provider_key(&self.key_path);
+
+        let mut all: Vec<Vec<f32>> = Vec::with_capacity(texts.len());
+        let owned: Vec<&str> = texts.to_vec();
+        for batch in embed_batches(&owned, EMBED_BATCH) {
+            let (url, body) = match self.mode {
+                AIMode::Ollama => (
+                    format!("{}/api/embed", self.base_url.trim_end_matches("/v1")),
+                    serde_json::json!({ "model": self.embedding_model, "input": batch }),
+                ),
+                _ => (
+                    format!("{}/embeddings", self.base_url),
+                    serde_json::json!({ "model": self.embedding_model, "input": batch }),
+                ),
+            };
+            let mut req = client.post(url).json(&body);
+            if let (true, Some(key)) = (self.requires_key, key.clone()) {
+                req = req.bearer_auth(key);
+            }
+            let response = req.send().ok()?;
+            if !response.status().is_success() {
+                return None;
+            }
+            match self.mode {
+                AIMode::Ollama => {
+                    let parsed: OllamaEmbedResponse = response.json().ok()?;
+                    all.extend(parsed.embeddings);
+                }
+                _ => {
+                    let parsed: OpenAIEmbeddingsResponse = response.json().ok()?;
+                    all.extend(parsed.data.into_iter().map(|d| d.embedding));
+                }
+            }
+        }
+        if all.len() != texts.len() {
+            return None; // partial response — treat as failure
+        }
+        Some(all)
+    }
+}
+
+#[derive(Debug, Deserialize)]
+struct OllamaEmbedResponse {
+    embeddings: Vec<Vec<f32>>,
+}
+
+#[derive(Debug, Deserialize)]
+struct OpenAIEmbeddingsResponse {
+    data: Vec<OpenAIEmbedding>,
+}
+
+#[derive(Debug, Deserialize)]
+struct OpenAIEmbedding {
+    embedding: Vec<f32>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -356,6 +438,31 @@ mod tests {
         let dir = tempfile::tempdir().unwrap();
         let provider = build_provider(&AIConfig::default(), dir.path());
         assert!(!provider.probe().reachable);
+    }
+
+    #[test]
+    fn off_provider_embed_returns_none() {
+        assert!(OffProvider.embed(&["文本"]).is_none());
+    }
+
+    #[test]
+    fn embed_batches_split_respects_size() {
+        let texts = ["a", "b", "c", "d", "e"];
+        let batches = embed_batches(&texts, 2);
+        assert_eq!(batches.len(), 3);
+        assert_eq!(batches[0].len(), 2);
+        assert_eq!(batches[2].len(), 1);
+    }
+
+    #[test]
+    fn embed_without_model_returns_none_fast() {
+        let dir = tempfile::tempdir().unwrap();
+        let config = AIConfig {
+            mode: AIMode::Ollama,
+            ..Default::default()
+        };
+        let provider = HttpProvider::new(&config, dir.path());
+        assert!(provider.embed(&["文本"]).is_none());
     }
 
     #[test]

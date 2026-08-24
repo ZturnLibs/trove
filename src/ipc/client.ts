@@ -69,6 +69,13 @@ export type AIFeatureToggles = {
   summary: boolean;
   suggest: boolean;
   split: boolean;
+  semanticSearch: boolean;
+};
+
+export type SemanticExclusions = {
+  listIds: string[];
+  tagIds: string[];
+  clipboardTypes: string[];
 };
 
 export type AIConfig = {
@@ -77,6 +84,8 @@ export type AIConfig = {
   ollamaModel: string;
   customEndpoint: string;
   customModel: string;
+  embeddingModel: string;
+  semanticExclusions: SemanticExclusions;
   features: AIFeatureToggles;
 };
 
@@ -749,11 +758,30 @@ export type SearchHit = {
   updatedAt: string;
 };
 
+export type SemanticHit = {
+  entityType: string;
+  entityId: string;
+  title: string;
+  score: number;
+  matchedType: string;
+};
+
+export type SemanticIndexStatus = {
+  rows: number;
+  model: string | null;
+  lastIndexedAt: string | null;
+  eligible: number;
+  capped: boolean;
+  configuredModel: string | null;
+  modelMismatch: boolean;
+};
+
 export type SearchResults = {
   tasks: SearchHit[];
   reminders: SearchHit[];
   memories: SearchHit[];
   clipboard: SearchHit[];
+  semantic?: SemanticHit[];
 };
 
 export type ClipboardKind = "text" | "image";
@@ -1258,5 +1286,10 @@ export const ipc = {
     invoke<ChecklistItem[]>("ai_split_apply", {
       input: { suggestionId, selectedIndices },
     }),
+  semanticIndexStatus: () =>
+    invoke<SemanticIndexStatus>("semantic_index_status"),
+  semanticIndexRebuild: () =>
+    invoke<SemanticIndexStatus>("semantic_index_rebuild"),
+  semanticIndexClear: () => invoke<void>("semantic_index_clear"),
   appQuit: () => invoke<void>("app_quit"),
 };

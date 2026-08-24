@@ -1187,7 +1187,42 @@ pub fn search_query(
     state: State<'_, AppState>,
     query: SearchQuery,
 ) -> Result<SearchResults, AppError> {
-    state.search.query(query).map_err(Into::into)
+    let mut results = state.search.query(query.clone())?;
+    // v2.0 slice 8: semantic matches only when the feature is on and the
+    // index is usable; failures degrade to the keyword-only response.
+    let semantic_enabled = state
+        .settings
+        .get()
+        .map(|s| s.ai.features.semantic_search && s.ai.mode != crate::domain::AIMode::Off)
+        .unwrap_or(false);
+    if semantic_enabled {
+        let limit = query.limit.unwrap_or(5).clamp(1, 10) as usize;
+        if let Ok(hits) = state.semantic_index.search(&query.query, limit) {
+            results.semantic = hits;
+        }
+    }
+    Ok(results)
+}
+
+// v2.0 slice 8: semantic index management.
+
+#[tauri::command]
+pub fn semantic_index_status(
+    state: State<'_, AppState>,
+) -> Result<crate::domain::SemanticIndexStatus, AppError> {
+    state.semantic_index.status().map_err(Into::into)
+}
+
+#[tauri::command]
+pub fn semantic_index_rebuild(
+    state: State<'_, AppState>,
+) -> Result<crate::domain::SemanticIndexStatus, AppError> {
+    state.semantic_index.rebuild().map_err(Into::into)
+}
+
+#[tauri::command]
+pub fn semantic_index_clear(state: State<'_, AppState>) -> Result<(), AppError> {
+    state.semantic_index.clear().map_err(Into::into)
 }
 
 fn emit_clipboard_change(app: &AppHandle, item: &ClipboardItem, change: &str) {
