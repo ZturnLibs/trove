@@ -822,7 +822,9 @@ impl AISuggestionService {
 
         let record = match self.request(AIFeature::Suggest, "review", DAILY_SOURCE_ID, &context)? {
             Some(record) => record,
-            None => return Ok(None),
+            None => {
+                return Ok(None);
+            }
         };
 
         // Back-mapping (same anti-fabrication contract as slice 4).
