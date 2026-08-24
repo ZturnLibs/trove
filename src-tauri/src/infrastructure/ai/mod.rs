@@ -19,7 +19,9 @@ use crate::domain::{
 };
 
 const PROBE_TIMEOUT_SECS: u64 = 5;
-const COMPLETE_TIMEOUT_SECS: u64 = 20;
+// Suggestion completions on local CPU models routinely take 20-40s; the UI
+// shows a pending state, so a generous bound beats flaky None results.
+const COMPLETE_TIMEOUT_SECS: u64 = 45;
 const EMBED_TIMEOUT_SECS: u64 = 60;
 const EMBED_BATCH: usize = 32;
 const KEY_FILE_NAME: &str = "ai_provider_key";
