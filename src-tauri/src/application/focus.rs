@@ -244,6 +244,7 @@ mod tests {
                 due_date: None,
                 due_time: None,
                 tag_names: None,
+                parent_id: None,
             })
             .unwrap();
 
@@ -271,6 +272,7 @@ mod tests {
                 due_date: None,
                 due_time: None,
                 tag_names: None,
+                parent_id: None,
             })
             .unwrap();
         let t2 = tasks
@@ -282,6 +284,7 @@ mod tests {
                 due_date: None,
                 due_time: None,
                 tag_names: None,
+                parent_id: None,
             })
             .unwrap();
 
@@ -304,6 +307,7 @@ mod tests {
                 due_date: None,
                 due_time: None,
                 tag_names: None,
+                parent_id: None,
             })
             .unwrap();
         let session = focus.start(&tasks, task.id, None).unwrap();

@@ -27,6 +27,10 @@ pub struct AppSettings {
     pub auto_check_updates: bool,
     #[serde(default = "default_true")]
     pub automation_enabled: bool,
+    #[serde(default = "default_true")]
+    pub subtask_auto_complete_parent: bool,
+    #[serde(default = "default_true")]
+    pub subtask_cascade_children: bool,
     #[serde(default = "default_backup_keep")]
     pub backup_retention_count: u32,
     #[serde(default)]
@@ -98,6 +102,8 @@ impl Default for AppSettings {
             auto_backup_on_launch: true,
             auto_check_updates: true,
             automation_enabled: true,
+            subtask_auto_complete_parent: true,
+            subtask_cascade_children: true,
             backup_retention_count: 10,
             onboarding_completed: false,
             last_focus_carry_dismissed_date: None,
@@ -230,6 +236,8 @@ mod tests {
         let settings = service.get().unwrap();
         assert_eq!(settings.theme, ThemePreference::System);
         assert_eq!(settings.ai, AIConfig::default());
+        assert!(settings.subtask_auto_complete_parent);
+        assert!(settings.subtask_cascade_children);
 
         let mut updated = settings.clone();
         updated.theme = ThemePreference::Dark;

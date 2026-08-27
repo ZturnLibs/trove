@@ -488,6 +488,7 @@ mod tests {
                 due_date: None,
                 due_time: None,
                 tag_names: None,
+                parent_id: None,
             })
             .unwrap();
 
@@ -514,6 +515,7 @@ mod tests {
                 due_date: None,
                 due_time: None,
                 tag_names: None,
+                parent_id: None,
             })
             .unwrap();
         crate::application::search::SearchService::new(service.db_for_test()).rebuild_all().unwrap();
@@ -545,6 +547,7 @@ mod tests {
                 due_date: None,
                 due_time: None,
                 tag_names: None,
+                parent_id: None,
             })
             .unwrap();
         let list_id = tasks.get_task(task.id).unwrap().list_id.to_string();
@@ -577,6 +580,7 @@ mod tests {
                 due_date: None,
                 due_time: None,
                 tag_names: None,
+                parent_id: None,
             })
             .unwrap();
         crate::application::search::SearchService::new(service.db_for_test()).rebuild_all().unwrap();

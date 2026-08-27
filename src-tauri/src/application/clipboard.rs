@@ -684,6 +684,7 @@ impl ClipboardService {
                 .and_then(|d| d.due_time.clone())
                 .or(parsed.due_time),
             tag_names: None,
+            parent_id: None,
         })?;
         self.search
             .upsert(SearchEntityType::Task, task.id, &task.title, &task.notes)?;
