@@ -1,7 +1,7 @@
 import { ChecklistBadge } from "@/design-system/patterns/ChecklistSection";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { useMutation, useQueryClient } from "@tanstack/react-query";
-import { Check } from "lucide-react";
+import { Check, ChevronRight } from "lucide-react";
 import { useSortable } from "@dnd-kit/sortable";
 import { CSS } from "@dnd-kit/utilities";
 import { Input } from "@/design-system/primitives/Input";
@@ -61,6 +61,18 @@ export type TaskRowProps = {
   isDragging?: boolean;
   /** One-line smart sort reason (today view). */
   sortHint?: string;
+  /** Tree indent level (0 = top level). Renders the left padding + chevron. */
+  depth?: number;
+  /** Whether this task has children (shows the expand/collapse chevron). */
+  hasChildren?: boolean;
+  /** Current expanded state (only meaningful when hasChildren). */
+  expanded?: boolean;
+  /** Toggle expand/collapse. */
+  onToggleExpand?: () => void;
+  /** Direct-child completion progress for the row badge (x/y). */
+  childProgress?: { done: number; total: number } | null;
+  /** Row is the current nest drop target (drag highlight). */
+  isNestTarget?: boolean;
 };
 
 /**
@@ -116,6 +128,12 @@ export function TaskRow({
   inFocus,
   isDragging,
   sortHint,
+  depth,
+  hasChildren,
+  expanded,
+  onToggleExpand,
+  childProgress,
+  isNestTarget,
 }: TaskRowProps) {
   const done = task.status === "completed";
   const isWaiting = task.workflowState === "waiting" && !done;
@@ -272,8 +290,27 @@ export function TaskRow({
         inFocus && "border-l-2 border-l-accent pl-[10px]",
         selected && "bg-row-active",
         isDragging && "opacity-50",
+        isNestTarget && "bg-row-active ring-2 ring-accent",
       )}
+      style={depth ? { paddingLeft: 12 + depth * 16 } : undefined}
     >
+      {hasChildren ? (
+        <button
+          type="button"
+          aria-label={expanded ? "折叠子任务" : "展开子任务"}
+          className="flex h-4 w-4 shrink-0 items-center justify-center rounded text-muted hover:bg-surface-raised hover:text-foreground"
+          onClick={(event) => {
+            event.stopPropagation();
+            onToggleExpand?.();
+          }}
+        >
+          <ChevronRight
+            className={cn("h-3 w-3 transition-transform", expanded && "rotate-90")}
+          />
+        </button>
+      ) : depth ? (
+        <span className="w-4 shrink-0" aria-hidden />
+      ) : null}
       <button
         type="button"
         aria-label={done ? "取消完成" : "完成"}
@@ -332,6 +369,14 @@ export function TaskRow({
           </div>
         )}
         {!editing ? <ChecklistBadge taskId={task.id} /> : null}
+        {!editing && childProgress && childProgress.total > 0 ? (
+          <span
+            className="ml-1 rounded border border-border px-1 text-[10px] text-muted"
+            title={`${childProgress.done}/${childProgress.total} 子任务已完成`}
+          >
+            {childProgress.done}/{childProgress.total}
+          </span>
+        ) : null}
         {sortHint && !editing ? (
           <div className="truncate text-[11px] text-muted">{sortHint}</div>
         ) : null}

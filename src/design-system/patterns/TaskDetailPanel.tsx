@@ -3,6 +3,7 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { AttachmentsSection } from "@/design-system/patterns/AttachmentsSection";
 import { RelatedSuggestionsSection } from "@/design-system/patterns/RelatedSuggestionsSection";
 import { ChecklistSection } from "@/design-system/patterns/ChecklistSection";
+import { SubtaskSection } from "@/design-system/patterns/SubtaskSection";
 import { FileRefsSection } from "@/design-system/patterns/FileRefsSection";
 import { DeferPicker } from "@/design-system/patterns/DeferPicker";
 import { WaitingSection } from "@/design-system/patterns/WaitingSection";
@@ -27,6 +28,7 @@ export function TaskDetailPanel({
   focusTitleId,
   dailyFocus,
   onStartFocus,
+  onOpenTask,
 }: {
   task: Task | null;
   onDeleted?: () => void;
@@ -38,6 +40,8 @@ export function TaskDetailPanel({
   };
   /** Start immersive focus session for this todo task. */
   onStartFocus?: () => void;
+  /** Open a subtask's own detail (switches the selected task in the list). */
+  onOpenTask?: (taskId: string) => void;
 }) {
   const queryClient = useQueryClient();
   const listsQuery = useQuery({
@@ -48,6 +52,11 @@ export function TaskDetailPanel({
   const [draft, setDraft] = useState<UpdateTaskInput | null>(null);
   const [tagText, setTagText] = useState("");
   const [error, setError] = useState<string | null>(null);
+  const [deleteTarget, setDeleteTarget] = useState<Task | null>(null);
+  const [hasChildren, setHasChildren] = useState(false);
+  const [deleteDisposition, setDeleteDisposition] = useState<
+    "cascade" | "promote" | null
+  >(null);
   const titleRef = useRef<HTMLInputElement>(null);
 
   useEffect(() => {
@@ -130,7 +139,13 @@ export function TaskDetailPanel({
   });
 
   const deleteMutation = useMutation({
-    mutationFn: () => ipc.taskDelete(task!.id),
+    mutationFn: async (disposition: "cascade" | "promote") => {
+      if (hasChildren) {
+        await ipc.taskDeleteTree(task!.id, disposition);
+      } else {
+        await ipc.taskDelete(task!.id);
+      }
+    },
     onSuccess: () => {
       void queryClient.invalidateQueries({ queryKey: ["tasks"] });
       onDeleted?.();
@@ -144,6 +159,7 @@ export function TaskDetailPanel({
         dueDate: task.dueDate,
         dueTime: task.dueTime,
         tagNames: [...task.tagNames],
+        parentId: task.parentId ?? undefined,
       };
       useRecentActions.getState().push({
         label: "删除任务（重建）",
@@ -153,6 +169,26 @@ export function TaskDetailPanel({
       });
     },
   });
+
+  // Delete with disposition: check for children, then either delete directly
+  // (leaf) or ask the user to pick cascade vs promote.
+  const beginDelete = async () => {
+    if (!task) return;
+    try {
+      const kids = await ipc.taskQuery({ parentId: task.id, limit: 1 });
+      if ((kids.total ?? 0) === 0) {
+        setHasChildren(false);
+        deleteMutation.mutate("cascade");
+        return;
+      }
+      setHasChildren(true);
+      setDeleteTarget(task);
+      setDeleteDisposition(null);
+    } catch {
+      setHasChildren(false);
+      deleteMutation.mutate("cascade");
+    }
+  };
 
   const linksQuery = useQuery({
     queryKey: ["links", "task", task?.id],
@@ -389,6 +425,7 @@ export function TaskDetailPanel({
 
         <TaskRemindersSection taskId={task.id} />
 
+        <SubtaskSection task={task} onOpenTask={onOpenTask} />
         <ChecklistSection task={task} />
         <RelatedSuggestionsSection taskId={task.id} />
         <AttachmentsSection entityType="task" entityId={task.id} />
@@ -424,7 +461,7 @@ export function TaskDetailPanel({
                 ? `确认删除？(${(linksQuery.data ?? []).length} 关联)`
                 : "确认删除？"
             }
-            onConfirm={() => deleteMutation.mutate()}
+            onConfirm={() => void beginDelete()}
             resetKey={task.id}
           >
             删除
@@ -438,6 +475,57 @@ export function TaskDetailPanel({
           {task.status === "completed" ? "恢复待办" : "完成"}
         </Button>
       </div>
+      {deleteTarget ? (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/30 p-4">
+          <div
+            className="w-full max-w-sm rounded-[var(--radius-panel)] border border-border bg-surface p-4 shadow-lg"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <h3 className="text-[13px] font-medium text-foreground">
+              删除任务「{deleteTarget.title}」
+            </h3>
+            <p className="mt-2 text-[12px] text-muted">
+              该任务含有子任务，请选择处理方式：
+            </p>
+            <div className="mt-4 flex flex-col gap-2">
+              <Button
+                size="sm"
+                variant="secondary"
+                disabled={deleteMutation.isPending}
+                onClick={() => {
+                  setDeleteDisposition("cascade");
+                  deleteMutation.mutate("cascade");
+                }}
+              >
+                级联删除（含所有子任务）
+              </Button>
+              <Button
+                size="sm"
+                variant="secondary"
+                disabled={deleteMutation.isPending}
+                onClick={() => {
+                  setDeleteDisposition("promote");
+                  deleteMutation.mutate("promote");
+                }}
+              >
+                仅删除该任务（子任务提升为顶层）
+              </Button>
+              <Button
+                size="sm"
+                variant="ghost"
+                onClick={() => setDeleteTarget(null)}
+              >
+                取消
+              </Button>
+            </div>
+            {deleteDisposition === "promote" ? (
+              <p className="mt-2 text-[11px] text-warning">
+                子任务将提升为顶层任务，保留各自清单与数据。
+              </p>
+            ) : null}
+          </div>
+        </div>
+      ) : null}
     </div>
   );
 }
