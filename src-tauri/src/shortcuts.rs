@@ -15,21 +15,21 @@ pub struct ShortcutApplyResult {
 fn default_fallback(kind: &str) -> Shortcut {
     #[cfg(target_os = "macos")]
     let (mods, code) = match kind {
-        "capture" => (Modifiers::SUPER | Modifiers::SHIFT, Code::Space),
-        "search" => (Modifiers::SUPER | Modifiers::SHIFT, Code::KeyF),
-        "clipboard" => (Modifiers::SUPER | Modifiers::SHIFT, Code::KeyV),
-        "main" => (Modifiers::SUPER | Modifiers::SHIFT, Code::KeyA),
-        "screenshot" => (Modifiers::SUPER | Modifiers::SHIFT, Code::Digit6),
-        _ => (Modifiers::SUPER | Modifiers::SHIFT, Code::KeyA),
+        "capture" => (Modifiers::SUPER | Modifiers::ALT, Code::Space),
+        "search" => (Modifiers::SUPER | Modifiers::ALT, Code::KeyF),
+        "clipboard" => (Modifiers::SUPER | Modifiers::ALT, Code::KeyC),
+        "main" => (Modifiers::SUPER | Modifiers::ALT, Code::KeyT),
+        "screenshot" => (Modifiers::SUPER | Modifiers::ALT, Code::KeyX),
+        _ => (Modifiers::SUPER | Modifiers::ALT, Code::KeyT),
     };
     #[cfg(not(target_os = "macos"))]
     let (mods, code) = match kind {
-        "capture" => (Modifiers::CONTROL | Modifiers::SHIFT, Code::Space),
-        "search" => (Modifiers::CONTROL | Modifiers::SHIFT, Code::KeyF),
-        "clipboard" => (Modifiers::CONTROL | Modifiers::SHIFT, Code::KeyV),
-        "main" => (Modifiers::CONTROL | Modifiers::SHIFT, Code::KeyA),
-        "screenshot" => (Modifiers::CONTROL | Modifiers::SHIFT, Code::Digit6),
-        _ => (Modifiers::CONTROL | Modifiers::SHIFT, Code::KeyA),
+        "capture" => (Modifiers::CONTROL | Modifiers::ALT, Code::Space),
+        "search" => (Modifiers::CONTROL | Modifiers::ALT, Code::KeyF),
+        "clipboard" => (Modifiers::CONTROL | Modifiers::ALT, Code::KeyC),
+        "main" => (Modifiers::CONTROL | Modifiers::ALT, Code::KeyT),
+        "screenshot" => (Modifiers::CONTROL | Modifiers::ALT, Code::KeyX),
+        _ => (Modifiers::CONTROL | Modifiers::ALT, Code::KeyT),
     };
     Shortcut::new(Some(mods), code)
 }
@@ -137,4 +137,62 @@ pub fn apply_shortcuts(app: &AppHandle) -> ShortcutApplyResult {
     }
 
     result
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// 所有出厂默认（新、旧两套、两个平台）都必须能被 global-hotkey 解析，
+    /// 否则运行时会退回 fallback 并提示注册失败。
+    #[test]
+    fn defaults_parse_into_shortcuts() {
+        let candidates = [
+            // macOS 新默认
+            "Command+Alt+Space",
+            "Command+Alt+F",
+            "Command+Alt+C",
+            "Command+Alt+T",
+            "Command+Alt+X",
+            // Windows/Linux 新默认
+            "Ctrl+Alt+Space",
+            "Ctrl+Alt+F",
+            "Ctrl+Alt+C",
+            "Ctrl+Alt+T",
+            "Ctrl+Alt+X",
+            // v2.0.x 旧默认（迁移前存储值仍需可解析）
+            "Command+Shift+Space",
+            "Command+Shift+F",
+            "Command+Shift+V",
+            "Command+Shift+A",
+            "Command+Shift+6",
+            "Ctrl+Shift+Space",
+            "Ctrl+Shift+F",
+            "Ctrl+Shift+V",
+            "Ctrl+Shift+A",
+            "Ctrl+Shift+6",
+        ];
+        for raw in candidates {
+            assert!(
+                raw.parse::<Shortcut>().is_ok(),
+                "默认快捷键「{raw}」无法解析"
+            );
+        }
+    }
+
+    #[test]
+    fn settings_defaults_have_no_duplicates() {
+        let settings = ShortcutSettings::default();
+        let keys = [
+            settings.quick_capture,
+            settings.search,
+            settings.clipboard,
+            settings.focus_main,
+            settings.screenshot_region,
+        ];
+        let mut seen = std::collections::HashSet::new();
+        for key in &keys {
+            assert!(seen.insert(key.to_ascii_lowercase()), "默认快捷键重复: {key}");
+        }
+    }
 }
