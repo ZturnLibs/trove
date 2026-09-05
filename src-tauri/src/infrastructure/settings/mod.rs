@@ -332,6 +332,7 @@ mod tests {
         let legacy = serde_json::json!({
             "theme": "system",
             "launchAtLogin": false,
+            "clipboardCaptureEnabled": true,
             "shortcuts": serde_json::to_value(ShortcutSettings::legacy_defaults()).unwrap()
         });
         conn.execute(
@@ -359,6 +360,7 @@ mod tests {
         let custom = serde_json::json!({
             "theme": "system",
             "launchAtLogin": false,
+            "clipboardCaptureEnabled": true,
             "shortcuts": serde_json::to_value(shortcuts).unwrap()
         });
         conn.execute(
