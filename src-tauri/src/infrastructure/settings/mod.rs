@@ -48,11 +48,11 @@ fn default_backup_keep() -> u32 {
 fn default_screenshot_region() -> String {
     #[cfg(target_os = "macos")]
     {
-        "Command+Shift+6".into()
+        "Command+Alt+X".into()
     }
     #[cfg(not(target_os = "macos"))]
     {
-        "Ctrl+Shift+6".into()
+        "Ctrl+Alt+X".into()
     }
 }
 
@@ -72,7 +72,7 @@ pub enum ThemePreference {
     Dark,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "camelCase")]
 pub struct ShortcutSettings {
     pub quick_capture: String,
@@ -108,6 +108,37 @@ impl Default for AppSettings {
 
 impl Default for ShortcutSettings {
     fn default() -> Self {
+        // 默认键位选用 ⌘⌥（Ctrl+Alt）组合：避开系统键（Spotlight ⌘Space、输入法 ⌃Space /
+        // Ctrl+Space、系统截图 ⌘⇧3/4/5）、常见输入法键（微软拼音简繁 Ctrl+Shift+F）、
+        // 以及高频应用全局键（Chrome/Edge 标签页搜索 Ctrl+Shift+A、无格式粘贴 Ctrl+Shift+V 等）。
+        #[cfg(target_os = "macos")]
+        {
+            Self {
+                quick_capture: "Command+Alt+Space".into(),
+                search: "Command+Alt+F".into(),
+                clipboard: "Command+Alt+C".into(),
+                focus_main: "Command+Alt+T".into(),
+                screenshot_region: default_screenshot_region(),
+            }
+        }
+        #[cfg(not(target_os = "macos"))]
+        {
+            Self {
+                quick_capture: "Ctrl+Alt+Space".into(),
+                search: "Ctrl+Alt+F".into(),
+                clipboard: "Ctrl+Alt+C".into(),
+                focus_main: "Ctrl+Alt+T".into(),
+                screenshot_region: default_screenshot_region(),
+            }
+        }
+    }
+}
+
+impl ShortcutSettings {
+    /// v2.0.x 及更早版本的出厂默认键位。仅用于一次性迁移：存储值与旧默认完全一致
+    /// （即用户从未改过）时，升级后自动换成新默认，消除与其他应用/系统的冲突；
+    /// 用户自定义过的键位不受影响。
+    pub fn legacy_defaults() -> Self {
         #[cfg(target_os = "macos")]
         {
             Self {
@@ -115,7 +146,7 @@ impl Default for ShortcutSettings {
                 search: "Command+Shift+F".into(),
                 clipboard: "Command+Shift+V".into(),
                 focus_main: "Command+Shift+A".into(),
-                screenshot_region: default_screenshot_region(),
+                screenshot_region: "Command+Shift+6".into(),
             }
         }
         #[cfg(not(target_os = "macos"))]
@@ -125,8 +156,18 @@ impl Default for ShortcutSettings {
                 search: "Ctrl+Shift+F".into(),
                 clipboard: "Ctrl+Shift+V".into(),
                 focus_main: "Ctrl+Shift+A".into(),
-                screenshot_region: default_screenshot_region(),
+                screenshot_region: "Ctrl+Shift+6".into(),
             }
+        }
+    }
+
+    /// 存储值仍是旧出厂默认（用户未自定义）时替换为新默认。返回是否有变更。
+    pub fn migrate_legacy_defaults(&mut self) -> bool {
+        if *self == Self::legacy_defaults() {
+            *self = Self::default();
+            true
+        } else {
+            false
         }
     }
 }
@@ -160,8 +201,15 @@ impl SettingsService {
             .map_err(|e| DomainError::Internal(e.to_string()))?;
 
         match value {
-            Some(raw) => serde_json::from_str(&raw)
-                .map_err(|e| DomainError::Internal(format!("invalid settings json: {e}"))),
+            Some(raw) => {
+                let mut settings: AppSettings = serde_json::from_str(&raw)
+                    .map_err(|e| DomainError::Internal(format!("invalid settings json: {e}")))?;
+                // 一次性迁移：从未自定义过快捷键的老安装，升级到新出厂默认。
+                if settings.shortcuts.migrate_legacy_defaults() {
+                    self.save(&settings)?;
+                }
+                Ok(settings)
+            }
             None => {
                 let defaults = AppSettings::default();
                 self.save(&defaults)?;
@@ -267,6 +315,64 @@ mod tests {
         let settings = service.get().unwrap();
         assert_eq!(settings.ai.mode, crate::domain::AIMode::Off);
         assert!(!settings.ai.features.extract);
+    }
+
+    #[test]
+    fn defaults_differ_from_legacy_defaults() {
+        // 新默认必须与旧默认不同，否则迁移与「避免冲突」目标无意义。
+        assert_ne!(ShortcutSettings::default(), ShortcutSettings::legacy_defaults());
+    }
+
+    #[test]
+    fn untouched_legacy_shortcut_defaults_are_migrated() {
+        // 用户从未改过快捷键（存储值 = 旧出厂默认）时，读取时自动换成新默认并持久化。
+        let dir = tempdir().unwrap();
+        let db = Database::open(dir.path().join("workbench.db")).unwrap();
+        let conn = db.connect().unwrap();
+        let legacy = serde_json::json!({
+            "theme": "system",
+            "launchAtLogin": false,
+            "clipboardCaptureEnabled": true,
+            "shortcuts": serde_json::to_value(ShortcutSettings::legacy_defaults()).unwrap()
+        });
+        conn.execute(
+            "INSERT INTO settings (key, value_json, updated_at) VALUES ('app.settings', ?1, '2026-01-01T00:00:00Z')",
+            rusqlite::params![legacy.to_string()],
+        )
+        .unwrap();
+        drop(conn);
+        let service = SettingsService::new(db);
+        let settings = service.get().unwrap();
+        assert_eq!(settings.shortcuts, ShortcutSettings::default());
+        // 迁移结果已持久化，再次读取不再触发变更。
+        let again = service.get().unwrap();
+        assert_eq!(again.shortcuts, ShortcutSettings::default());
+    }
+
+    #[test]
+    fn customized_shortcuts_survive_migration() {
+        // 用户自定义过的键位原样保留，不做迁移。
+        let dir = tempdir().unwrap();
+        let db = Database::open(dir.path().join("workbench.db")).unwrap();
+        let conn = db.connect().unwrap();
+        let mut shortcuts = ShortcutSettings::legacy_defaults();
+        shortcuts.quick_capture = "Ctrl+Alt+P".into();
+        let custom = serde_json::json!({
+            "theme": "system",
+            "launchAtLogin": false,
+            "clipboardCaptureEnabled": true,
+            "shortcuts": serde_json::to_value(shortcuts).unwrap()
+        });
+        conn.execute(
+            "INSERT INTO settings (key, value_json, updated_at) VALUES ('app.settings', ?1, '2026-01-01T00:00:00Z')",
+            rusqlite::params![custom.to_string()],
+        )
+        .unwrap();
+        drop(conn);
+        let service = SettingsService::new(db);
+        let settings = service.get().unwrap();
+        assert_eq!(settings.shortcuts.quick_capture, "Ctrl+Alt+P");
+        assert_ne!(settings.shortcuts, ShortcutSettings::default());
     }
 
     #[test]

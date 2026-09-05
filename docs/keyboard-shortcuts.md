@@ -24,22 +24,52 @@
 
 ## 3. 全局快捷键（可配置）
 
-配置字段：`settings.shortcuts.*`（已实现）。
+配置字段：`settings.shortcuts.*`（已实现，设置页可录制改键、保存后立即热重注册、可恢复默认）。
 
 | 配置键 | 意图 | macOS 默认 | Windows 默认 | 动作 |
 | --- | --- | --- | --- | --- |
-| `quickCapture` | 快速记录 | `⌘⇧Space` | `Ctrl+Shift+Space` | 显示 quick · capture |
-| `search` | 统一搜索 / 命令面板 | `⌘⇧F` | `Ctrl+Shift+F` | 显示 quick · search |
-| `clipboard` | 剪切板历史 | `⌘⇧V` | `Ctrl+Shift+V` | 显示 quick · clip |
-| `focusMain` | 打开主窗口 | `⌘⇧A` | `Ctrl+Shift+A` | 显示并聚焦 main；允许用户关闭该项 |
+| `quickCapture` | 快速记录 | `⌘⌥Space` | `Ctrl+Alt+Space` | 显示 quick · capture |
+| `search` | 统一搜索 / 命令面板 | `⌘⌥F` | `Ctrl+Alt+F` | 显示 quick · search |
+| `clipboard` | 剪切板历史 | `⌘⌥C` | `Ctrl+Alt+C` | 显示 quick · clip |
+| `focusMain` | 打开主窗口 | `⌘⌥T` | `Ctrl+Alt+T` | 显示并聚焦 main；允许用户关闭该项 |
+| `screenshotRegion` | 区域截图 | `⌘⌥X` | `Ctrl+Alt+X` | 截取屏幕区域并入剪切板 |
+
+### 3.1 默认键位选型依据（v2.1 起生效）
+
+默认键位统一采用 `⌘⌥`（macOS）/ `Ctrl+Alt`（Windows）修饰组合，避开以下已知冲突：
+
+| 旧默认 | 已知冲突 | 新默认 |
+| --- | --- | --- |
+| `⌘⇧Space` / `Ctrl+Shift+Space` | 与「输入法切换 Ctrl+Shift / IME 开关 Ctrl+Space」同修饰链，中文输入下易误触；部分启动器占用 | `⌘⌥Space` / `Ctrl+Alt+Space`（避开 Spotlight `⌘Space`、Raycast/Alfred `⌥Space`、输入源切换 `⌃⌥Space`、表情面板 `⌃⌘Space`） |
+| `⌘⇧F` / `Ctrl+Shift+F` | **微软拼音简繁切换 = `Ctrl+Shift+F`**（中文用户高概率冲突）；Office/Outlook 高级查找；VS Code 全局搜索 | `⌘⌥F` / `Ctrl+Alt+F` |
+| `⌘⇧V` / `Ctrl+Shift+V` | 主流应用「无格式粘贴」；macOS 剪贴板工具（Paste 等）默认占用 | `⌘⌥C` / `Ctrl+Alt+C`（C = Clipboard） |
+| `⌘⇧A` / `Ctrl+Shift+A` | **Chrome / Edge 标签页搜索 = `Ctrl+Shift+A`** | `⌘⌥T` / `Ctrl+Alt+T`（T = Trove；Linux 适配时需复核 GNOME 终端 `Ctrl+Alt+T`） |
+| `⌘⇧6` / `Ctrl+Shift+6` | Touch Bar 机型系统截图为 `⌘⇧6`；与系统截图 `⌘⇧3/4/5` 修饰链一致，误触风险高 | `⌘⌥X` / `Ctrl+Alt+X`（避开 QQ 截图 `Ctrl+Alt+A`、微信截图 `Alt+A`、IntelliJ 设置 `Ctrl+Alt+S`） |
+
+已知取舍（记录在案）：
+
+- `Ctrl+Alt` 在 Windows 上等价 AltGr，欧洲键盘布局（波兰、捷克等）下 `Ctrl+Alt+C/X` 可能影响特殊字符输入；产品当前中文用户为主，可接受，用户可自行改键。
+- `⌘⌥C` 与部分剪贴板工具（Alfred 剪贴板等）默认键相近；`⌘⌥T` 会覆盖 Safari 标签栏开关（应用内键位，低频）。
+
+### 3.2 旧默认迁移
+
+- 升级时若存储值仍为 v2.0.x 出厂默认（即用户从未自定义），读取设置时**自动迁移**到新默认并持久化（`ShortcutSettings::migrate_legacy_defaults`）。
+- 用户自定义过的键位**原样保留**，不受迁移影响。
+- 「恢复默认」按钮恢复到本表新默认。
 
 设置交互：
 
-- 列表展示当前绑定；「恢复默认」调用 `settings_reset_shortcuts`。
-- `v1.0` 可先只读 + 恢复默认（与当前实现对齐）；录制改键作为增强：点击「更改」→ 聆听下一组合键 → 校验保留键 → 保存 → **重新注册全局快捷键**（尽量无需重启；若插件限制则提示重启）。
+- 列表展示当前绑定；「更改」录制下一组合键（系统保留键会被拒绝）；「恢复默认」调用 `settings_reset_shortcuts`。
+- 保存后立即重新注册全局快捷键，无需重启（已实现）。
 - 冲突提示文案：「无法注册 {键位}，可能被其他应用占用。可更换快捷键或恢复默认后重试。」
 
-保留键（禁止用户绑定为全局）：`⌘Q` / `Alt+F4` 退出语义、`⌘W` 关闭窗、系统截屏键等。
+保留键（录制时拒绝绑定为全局，`src/lib/shortcut-record.ts`）：
+
+- 退出 / 关闭语义：`⌘Q`、`⌘W`、`⌘M`、`Alt+F4`、`Ctrl+Q`、`Ctrl+W`、`Ctrl+M`；
+- 系统启动器与输入法：`⌘Space`（Spotlight）、`Ctrl+Space`（IME 开关）、`⌃⌘Space`（表情与符号面板）；
+- 系统截图：`⌘⇧3`、`⌘⇧4`、`⌘⇧5`；
+- 窗口与进程管理：`Alt+Tab`、`Alt+Space`（窗口系统菜单）、`Ctrl+Shift+Esc`（任务管理器）、`⌘⌥Esc`（强制退出）；
+- Windows / Linux 上仅含 Win（Super）键的组合一律拒绝（避免劫持 `Win+E`、`Win+D` 等系统键）。
 
 ## 4. 应用内导航与创建（菜单加速键）
 
@@ -57,7 +87,7 @@
 | 关闭窗口（隐藏） | `⌘W` | `Ctrl+W` | `menu.file.close_window` |
 | 退出应用 | `⌘Q` | `Ctrl+Q` | `menu.app.quit` / `menu.file.quit` |
 | 查找（顶栏） | `⌘F` | `Ctrl+F` | `menu.edit.find` |
-| 命令面板式搜索（主窗内） | `⌘K` | `Ctrl+K` | 聚焦顶栏或打开与全局 search 同源面板；与全局 `⌘⇧F` 并存 |
+| 命令面板式搜索（主窗内） | `⌘K` | `Ctrl+K` | 聚焦顶栏或打开与全局 search 同源面板；与全局 `⌘⌥F` 并存 |
 | 切换详情面板 | `⌘⇧D` | `Ctrl+Shift+D` | `menu.view.detail` |
 
 `⌘N` 语义：始终「新建任务」，不随当前页变成新建记忆（新建记忆用独立键）。页面「+」按钮可按模块默认类型，与菜单可不同。
@@ -194,7 +224,7 @@ Step 1 每项决策立即生效并进入 recent-actions 撤销栈；**无**「�
 | --- | --- |
 | 四项全局默认注册 | 已有 |
 | 设置中展示与恢复默认 | 已有 |
-| 热切换重新注册 / 录制改键 | 待增强 |
+| 热切换重新注册 / 录制改键 | 已有（保存后立即重注册；系统保留键拒绝录制；v2.1 起新默认 + 旧默认自动迁移） |
 | 菜单栏加速键完整集 | 待按[应用菜单](./app-menu-design.md)补齐 |
 | 主窗 `⌘1`–`⌘5` | 待接 |
 | quick 内搜索命令面板键位 | 已有 Enter / ⌘Enter / ⌘⇧Enter |

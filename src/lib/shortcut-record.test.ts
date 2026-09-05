@@ -30,10 +30,10 @@ describe("eventToShortcutString (non-Mac)", () => {
     stubPlatform("Windows");
   });
 
-  it("returns Ctrl+Shift+Space for the Ctrl+Shift+Space combination", () => {
+  it("returns Ctrl+Alt+Space for the Ctrl+Alt+Space combination (new default)", () => {
     expect(
-      eventToShortcutString(makeEvent({ key: " ", ctrlKey: true, shiftKey: true })),
-    ).toBe("Ctrl+Shift+Space");
+      eventToShortcutString(makeEvent({ key: " ", ctrlKey: true, altKey: true })),
+    ).toBe("Ctrl+Alt+Space");
   });
 
   it("returns null for a single key without modifiers", () => {
@@ -55,10 +55,36 @@ describe("eventToShortcutString (non-Mac)", () => {
     ).toBeNull();
   });
 
+  it("returns null for system-reserved IME / launcher / window keys", () => {
+    // 输入法开关 / Spotlight
+    expect(eventToShortcutString(makeEvent({ key: " ", ctrlKey: true }))).toBeNull();
+    // 任务切换与窗口系统菜单
+    expect(eventToShortcutString(makeEvent({ key: "Tab", altKey: true }))).toBeNull();
+    expect(eventToShortcutString(makeEvent({ key: " ", altKey: true }))).toBeNull();
+    // 任务管理器
+    expect(
+      eventToShortcutString(
+        makeEvent({ key: "Escape", ctrlKey: true, shiftKey: true }),
+      ),
+    ).toBeNull();
+  });
+
+  it("returns null for Win-key-only combos on Windows (hijacks system keys)", () => {
+    // metaKey 即 Win 键；Win+E / Win+D 属于系统，不允许单独注册
+    expect(eventToShortcutString(makeEvent({ key: "e", metaKey: true }))).toBeNull();
+    expect(
+      eventToShortcutString(makeEvent({ key: "d", metaKey: true, shiftKey: true })),
+    ).toBeNull();
+    // 搭配 Ctrl 后允许（非 mac 上 Ctrl 优先记录，Win 修饰被忽略）
+    expect(
+      eventToShortcutString(makeEvent({ key: "c", metaKey: true, ctrlKey: true })),
+    ).toBe("Ctrl+C");
+  });
+
   it("normalizes the space key to Space", () => {
-    expect(eventToShortcutString(makeEvent({ key: " ", ctrlKey: true }))).toBe(
-      "Ctrl+Space",
-    );
+    expect(
+      eventToShortcutString(makeEvent({ key: " ", ctrlKey: true, altKey: true })),
+    ).toBe("Ctrl+Alt+Space");
   });
 
   it("uppercases single character keys", () => {
@@ -73,17 +99,38 @@ describe("eventToShortcutString (Mac)", () => {
     stubPlatform("MacIntel");
   });
 
-  it("returns Command+Shift+Space for the Command+Shift+Space combination", () => {
+  it("returns Command+Alt+Space for the Command+Alt+Space combination (new default)", () => {
     expect(
       eventToShortcutString(
-        makeEvent({ key: " ", metaKey: true, shiftKey: true }),
+        makeEvent({ key: " ", metaKey: true, altKey: true }),
       ),
-    ).toBe("Command+Shift+Space");
+    ).toBe("Command+Alt+Space");
   });
 
   it("returns null for blocked system shortcuts (Command+Q / Command+M)", () => {
     expect(eventToShortcutString(makeEvent({ key: "q", metaKey: true }))).toBeNull();
     expect(eventToShortcutString(makeEvent({ key: "m", metaKey: true }))).toBeNull();
+  });
+
+  it("returns null for system-reserved launcher / emoji / screenshot keys", () => {
+    // Spotlight 搜索
+    expect(eventToShortcutString(makeEvent({ key: " ", metaKey: true }))).toBeNull();
+    // 表情符号与符号面板（Ctrl+Cmd+Space）
+    expect(
+      eventToShortcutString(
+        makeEvent({ key: " ", metaKey: true, ctrlKey: true }),
+      ),
+    ).toBeNull();
+    // 系统截图 ⌘⇧3 / ⌘⇧4 / ⌘⇧5
+    expect(
+      eventToShortcutString(makeEvent({ key: "3", metaKey: true, shiftKey: true })),
+    ).toBeNull();
+    expect(
+      eventToShortcutString(makeEvent({ key: "4", metaKey: true, shiftKey: true })),
+    ).toBeNull();
+    expect(
+      eventToShortcutString(makeEvent({ key: "5", metaKey: true, shiftKey: true })),
+    ).toBeNull();
   });
 
   it("keeps Ctrl as a separate modifier on Mac", () => {
