@@ -8,7 +8,7 @@
 
 <!-- @@@auto:current-status -->
 - **Active File**: `journal-1.md`
-- **Total Sessions**: 12
+- **Total Sessions**: 13
 - **Last Active**: 2026-08-24
 <!-- @@@/auto:current-status -->
 
@@ -19,7 +19,7 @@
 <!-- @@@auto:active-documents -->
 | File | Lines | Status |
 |------|-------|--------|
-| `journal-1.md` | ~287 | Active |
+| `journal-1.md` | ~308 | Active |
 <!-- @@@/auto:active-documents -->
 
 ---
@@ -29,6 +29,7 @@
 <!-- @@@auto:session-history -->
 | # | Date | Title | Commits | Branch |
 |---|------|-------|---------|--------|
+| 13 | 2026-08-24 | v2.0 真实模型在线回归与 v2.0.1 发版 | `420baa6` | `feat-improve` |
 | 12 | 2026-08-24 | v2.0.0 发版：PR 合并、CI 修复与 Release 流水线 | `98c67df` | `feat-improve` |
 | 11 | 2026-08-24 | v2.0 切片 8 语义检索 + 全路线图收官 | `83f75aa` | `feat-improve` |
 | 10 | 2026-08-23 | v2.0 切片 7：AI 任务拆分 | `c55581e` | `feat-improve` |

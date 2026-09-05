@@ -285,3 +285,24 @@
 ### Status
 
 [OK] **Completed**
+
+
+## Session 13: v2.0 真实模型在线回归与 v2.0.1 发版
+
+**Date**: 2026-08-24
+**Task**: v2.0 真实模型在线回归与 v2.0.1 发版
+**Branch**: `feat-improve`
+
+### Summary
+
+本地 Ollama（gemma3 + bge-m3）跑通 7 项在线回归，发现并修复三个真实问题（回配《》包裹误杀、20s 超时临界抖动、ambiguous 缺字段）；PR #14 合并后发布 v2.0.1（全平台安装包 + 更新器产物）；docs 建议 bge-m3 为中文 embedding 首选
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `420baa6` | (see git log) |
+
+### Status
+
+[OK] **Completed**
