@@ -598,6 +598,7 @@ fn online_related_backmapping_hits_candidates() {
             due_date: None,
             due_time: None,
             tag_names: None,
+            parent_id: None,
         })
         .unwrap();
 
@@ -659,6 +660,7 @@ fn online_daily_suggest_backmaps_and_cites_features() {
             due_date: Some(today),
             due_time: Some("18:00".into()),
             tag_names: None,
+            parent_id: None,
         })
         .unwrap();
 
@@ -718,6 +720,7 @@ fn online_split_grounds_excerpts_in_task_source() {
             due_date: None,
             due_time: None,
             tag_names: None,
+            parent_id: None,
         })
         .unwrap();
 

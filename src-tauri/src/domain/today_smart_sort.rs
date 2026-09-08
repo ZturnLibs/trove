@@ -161,6 +161,8 @@ mod tests {
             completed_at: None,
             sort_order: 0.0,
             series_id: None,
+            parent_id: None,
+            child_order: 0.0,
             tag_ids: vec![],
             tag_names: vec![],
             workflow_state: TaskWorkflowState::Active,

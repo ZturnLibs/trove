@@ -5,7 +5,8 @@ use crate::domain::{
     SystemClock, Tag, Task, TaskList, TaskPriority, TaskQuery, TaskStatus, TaskWorkflowState,
     ChecklistItem, ChecklistUpdateInput, TaskChecklist, CHECKLIST_MAX_ITEMS,
     TodaySortSuggestions, TodayTasks, UpdateTaskInput, validate_checklist_content,
-    validate_due_vs_available,
+    validate_due_vs_available, TaskDeleteDisposition, TaskTreeExpanded,
+    validate_parent_depth,
 };
 use crate::domain::{page_limit, page_offset};
 use crate::infrastructure::db::Database;
@@ -312,12 +313,32 @@ impl TaskService {
             validate_due_time(time)?;
         }
 
+        // Subtask context: validate parent and inherit its list when unset.
+        let parent_chain_len = match input.parent_id {
+            Some(parent_id) => {
+                let parent = self.get_task(parent_id)?;
+                if parent.status == TaskStatus::Archived {
+                    return Err(DomainError::Validation("已归档任务不能再添加子任务".into()));
+                }
+                // The new task's ancestor chain = parent's chain + 1.
+                let chain = self.ancestor_chain_len(&parent_id)?;
+                validate_parent_depth(chain + 1)?;
+                Some(parent.list_id)
+            }
+            None => None,
+        };
+
         let list_id = match input.list_id {
             Some(id) => {
                 let _ = self.get_list(id)?;
                 id
             }
-            None => self.inbox_list_id()?,
+            // Inherit the parent's list when creating a subtask without an
+            // explicit list; top-level tasks default to the inbox.
+            None => match parent_chain_len {
+                Some(parent_list_id) => parent_list_id,
+                None => self.inbox_list_id()?,
+            },
         };
 
         let conn = self.connect()?;
@@ -332,13 +353,24 @@ impl TaskService {
                 |row| row.get(0),
             )
             .unwrap_or(1.0);
+        let child_order: f64 = match input.parent_id {
+            Some(parent_id) => conn
+                .query_row(
+                    "SELECT COALESCE(MAX(child_order), 0) + 1 FROM tasks WHERE parent_id = ?1 AND deleted_at IS NULL",
+                    [parent_id.to_string()],
+                    |row| row.get(0),
+                )
+                .unwrap_or(1.0),
+            None => 0.0,
+        };
 
         let tx = conn.unchecked_transaction().map_err(internal)?;
         tx.execute(
             "INSERT INTO tasks (
                 id, title, notes, status, priority, list_id, due_date, due_time,
-                completed_at, sort_order, created_at, updated_at, revision, deleted_at
-             ) VALUES (?1, ?2, ?3, 'todo', ?4, ?5, ?6, ?7, NULL, ?8, ?9, ?9, 1, NULL)",
+                completed_at, sort_order, parent_id, child_order,
+                created_at, updated_at, revision, deleted_at
+             ) VALUES (?1, ?2, ?3, 'todo', ?4, ?5, ?6, ?7, NULL, ?8, ?9, ?10, ?11, ?11, 1, NULL)",
             params![
                 id.to_string(),
                 title,
@@ -348,6 +380,8 @@ impl TaskService {
                 input.due_date,
                 input.due_time,
                 sort_order,
+                input.parent_id.map(|p| p.to_string()),
+                child_order,
                 now,
             ],
         )
@@ -414,22 +448,15 @@ impl TaskService {
         let conn = self.connect()?;
         let now = stamp(&self.clock);
         let tx = conn.unchecked_transaction().map_err(internal)?;
-        tx.execute(
-            "UPDATE tasks SET status = 'completed', completed_at = ?1, updated_at = ?1, revision = revision + 1
-             WHERE id = ?2 AND deleted_at IS NULL",
-            params![now, id.to_string()],
-        )
-        .map_err(internal)?;
-        tx.execute(
-            "DELETE FROM daily_focus WHERE task_id = ?1",
-            params![id.to_string()],
-        )
-        .map_err(internal)?;
+        let affected = self.complete_with_aggregation(&tx, id, &now)?;
 
+        // Series spawn only for the explicitly completed target.
         if let Some(series_id) = task.series_id {
             self.spawn_next_series_instance(&tx, &task, series_id, &now)?;
         }
         tx.commit().map_err(internal)?;
+        // Refresh the returned task (may have changed parent status too).
+        let _ = affected;
         self.get_task(id)
     }
 
@@ -644,12 +671,9 @@ impl TaskService {
         }
         let conn = self.connect()?;
         let now = stamp(&self.clock);
-        conn.execute(
-            "UPDATE tasks SET status = 'todo', completed_at = NULL, updated_at = ?1, revision = revision + 1
-             WHERE id = ?2 AND deleted_at IS NULL",
-            params![now, id.to_string()],
-        )
-        .map_err(internal)?;
+        let tx = conn.unchecked_transaction().map_err(internal)?;
+        self.uncomplete_with_aggregation(&tx, id, &now)?;
+        tx.commit().map_err(internal)?;
         self.get_task(id)
     }
 
@@ -660,12 +684,23 @@ impl TaskService {
         }
         let conn = self.connect()?;
         let now = stamp(&self.clock);
-        conn.execute(
+        let tx = conn.unchecked_transaction().map_err(internal)?;
+        tx.execute(
             "UPDATE tasks SET status = 'todo', updated_at = ?1, revision = revision + 1
              WHERE id = ?2 AND deleted_at IS NULL",
             params![now, id.to_string()],
         )
         .map_err(internal)?;
+        // Unarchive cascades to descendants so the subtree stays consistent.
+        for d in self.descendant_ids(&tx, id)? {
+            tx.execute(
+                "UPDATE tasks SET status = 'todo', updated_at = ?1, revision = revision + 1
+                 WHERE id = ?2 AND deleted_at IS NULL",
+                params![now, d.to_string()],
+            )
+            .map_err(internal)?;
+        }
+        tx.commit().map_err(internal)?;
         self.get_task(id)
     }
 
@@ -673,12 +708,23 @@ impl TaskService {
         let _ = self.get_task(id)?;
         let conn = self.connect()?;
         let now = stamp(&self.clock);
-        conn.execute(
+        let tx = conn.unchecked_transaction().map_err(internal)?;
+        tx.execute(
             "UPDATE tasks SET status = 'archived', updated_at = ?1, revision = revision + 1
              WHERE id = ?2 AND deleted_at IS NULL",
             params![now, id.to_string()],
         )
         .map_err(internal)?;
+        // Archive cascades to descendants so the subtree stays consistent.
+        for d in self.descendant_ids(&tx, id)? {
+            tx.execute(
+                "UPDATE tasks SET status = 'archived', updated_at = ?1, revision = revision + 1
+                 WHERE id = ?2 AND deleted_at IS NULL",
+                params![now, d.to_string()],
+            )
+            .map_err(internal)?;
+        }
+        tx.commit().map_err(internal)?;
         self.get_task(id)
     }
 
@@ -686,6 +732,20 @@ impl TaskService {
         let _ = self.get_task(id)?;
         let conn = self.connect()?;
         let now = stamp(&self.clock);
+        // Refuse to silently orphan children; callers with subtasks must use
+        // delete_task_tree with an explicit disposition.
+        let child_count: i64 = conn
+            .query_row(
+                "SELECT COUNT(*) FROM tasks WHERE parent_id = ?1 AND deleted_at IS NULL",
+                [id.to_string()],
+                |row| row.get(0),
+            )
+            .map_err(internal)?;
+        if child_count > 0 {
+            return Err(DomainError::Validation(
+                "该任务有子任务，请选择级联删除或仅删除父任务".into(),
+            ));
+        }
         conn.execute(
             "UPDATE tasks SET deleted_at = ?1, updated_at = ?1, revision = revision + 1
              WHERE id = ?2 AND deleted_at IS NULL",
@@ -699,7 +759,122 @@ impl TaskService {
             params![now, id.to_string()],
         )
         .map_err(internal)?;
+        // Tree expand state follows its task.
+        conn.execute(
+            "DELETE FROM task_tree_expanded WHERE task_id = ?1",
+            [id.to_string()],
+        )
+        .map_err(internal)?;
         Ok(())
+    }
+
+    /// Delete a task with an explicit disposition for its subtree.
+    /// Returns the ids of every deleted task (cascade) or the deleted parent
+    /// plus promoted children (promote).
+    pub fn delete_task_tree(
+        &self,
+        id: EntityId,
+        disposition: TaskDeleteDisposition,
+    ) -> Result<Vec<EntityId>, DomainError> {
+        let _ = self.get_task(id)?;
+        let conn = self.connect()?;
+        let now = stamp(&self.clock);
+        let tx = conn.unchecked_transaction().map_err(internal)?;
+
+        let mut affected = vec![id];
+        let children = self.descendant_ids(&tx, id)?;
+
+        match disposition {
+            TaskDeleteDisposition::Cascade => {
+                affected.extend(children.iter().copied());
+                for tid in &affected {
+                    tx.execute(
+                        "UPDATE tasks SET deleted_at = ?1, updated_at = ?1, revision = revision + 1
+                         WHERE id = ?2 AND deleted_at IS NULL",
+                        params![now, tid.to_string()],
+                    )
+                    .map_err(internal)?;
+                    tx.execute(
+                        "UPDATE task_checklist_items SET deleted_at = ?1, updated_at = ?1
+                         WHERE task_id = ?2 AND deleted_at IS NULL",
+                        params![now, tid.to_string()],
+                    )
+                    .map_err(internal)?;
+                    tx.execute(
+                        "DELETE FROM task_tree_expanded WHERE task_id = ?1",
+                        [tid.to_string()],
+                    )
+                    .map_err(internal)?;
+                }
+            }
+            TaskDeleteDisposition::Promote => {
+                // Capture direct children BEFORE detaching them so we can
+                // renumber their sort_order in their own list.
+                let mut direct_children: Vec<EntityId> = Vec::new();
+                for child in &children {
+                    let is_direct: i64 = tx
+                        .query_row(
+                            "SELECT COUNT(*) FROM tasks WHERE id = ?1 AND parent_id = ?2 AND deleted_at IS NULL",
+                            params![child.to_string(), id.to_string()],
+                            |row| row.get(0),
+                        )
+                        .map_err(internal)?;
+                    if is_direct == 1 {
+                        direct_children.push(*child);
+                    }
+                }
+                // Promote direct children to top level (parent_id = NULL).
+                tx.execute(
+                    "UPDATE tasks SET parent_id = NULL, child_order = 0, updated_at = ?1, revision = revision + 1
+                     WHERE parent_id = ?2 AND deleted_at IS NULL",
+                    params![now, id.to_string()],
+                )
+                .map_err(internal)?;
+                for child in &direct_children {
+                    let list_id: String = tx
+                        .query_row(
+                            "SELECT list_id FROM tasks WHERE id = ?1 AND deleted_at IS NULL",
+                            [child.to_string()],
+                            |row| row.get(0),
+                        )
+                        .map_err(internal)?;
+                    let sort_order: f64 = tx
+                        .query_row(
+                            "SELECT COALESCE(MAX(sort_order), 0) + 1 FROM tasks WHERE list_id = ?1 AND deleted_at IS NULL",
+                            [&list_id],
+                            |row| row.get(0),
+                        )
+                        .unwrap_or(1.0);
+                    tx.execute(
+                        "UPDATE tasks SET sort_order = ?1, updated_at = ?2, revision = revision + 1
+                         WHERE id = ?3 AND deleted_at IS NULL",
+                        params![sort_order, now, child.to_string()],
+                    )
+                    .map_err(internal)?;
+                    affected.push(*child);
+                }
+                tx.execute(
+                    "UPDATE tasks SET deleted_at = ?1, updated_at = ?1, revision = revision + 1
+                     WHERE id = ?2 AND deleted_at IS NULL",
+                    params![now, id.to_string()],
+                )
+                .map_err(internal)?;
+                tx.execute(
+                    "UPDATE task_checklist_items SET deleted_at = ?1, updated_at = ?1
+                     WHERE task_id = ?2 AND deleted_at IS NULL",
+                    params![now, id.to_string()],
+                )
+                .map_err(internal)?;
+                tx.execute(
+                    "DELETE FROM task_tree_expanded WHERE task_id = ?1",
+                    [id.to_string()],
+                )
+                .map_err(internal)?;
+            }
+        }
+
+        tx.commit().map_err(internal)?;
+        Ok(affected)
     }
 
     /// Rewrites sort_order for the given tasks, numbered per list.
@@ -764,30 +939,272 @@ impl TaskService {
         Ok(())
     }
 
-    pub fn get_task(&self, id: EntityId) -> Result<Task, DomainError> {
+    /// Nest a task under a parent (or promote to top level when None).
+    /// Validates cycles, max depth, and active state on both sides.
+    pub fn set_task_parent(
+        &self,
+        id: EntityId,
+        parent_id: Option<EntityId>,
+    ) -> Result<Task, DomainError> {
+        let task = self.get_task(id)?;
         let conn = self.connect()?;
-        let mut task = conn
-            .query_row(
-                &format!(
-                    "SELECT {TASK_ROW_SELECT}
-                 FROM tasks t
-                 JOIN task_lists l ON l.id = t.list_id
-                 WHERE t.id = ?1 AND t.deleted_at IS NULL"
-                ),
-                [id.to_string()],
-                map_task_row,
-            )
-            .optional()
-            .map_err(internal)?
-            .ok_or_else(|| DomainError::NotFound("任务不存在".into()))?;
-        self.attach_tags(&conn, &mut task)?;
-        Ok(task)
+        let now = stamp(&self.clock);
+        let tx = conn.unchecked_transaction().map_err(internal)?;
+
+        match parent_id {
+            Some(parent) => {
+                if parent == id {
+                    return Err(DomainError::Validation("不能把任务设为自己的子任务".into()));
+                }
+                // Cycle check: parent must not be one of our descendants.
+                let descendants = self.descendant_ids(&tx, id)?;
+                if descendants.contains(&parent) {
+                    return Err(DomainError::Validation(
+                        "不能把任务设为后代的子任务（会形成循环）".into(),
+                    ));
+                }
+                // Depth check: the task's ancestor chain = parent's chain + 1.
+                let chain_len = self.ancestor_chain_len(&parent)?;
+                validate_parent_depth(chain_len + 1)?;
+                // Parent must be active.
+                let parent_status: String = tx
+                    .query_row(
+                        "SELECT status FROM tasks WHERE id = ?1 AND deleted_at IS NULL",
+                        [parent.to_string()],
+                        |row| row.get(0),
+                    )
+                    .optional()
+                    .map_err(internal)?
+                    .ok_or_else(|| DomainError::NotFound("父任务不存在".into()))?;
+                if parent_status == "archived" {
+                    return Err(DomainError::Validation("已归档任务不能再添加子任务".into()));
+                }
+                let child_order: f64 = tx
+                    .query_row(
+                        "SELECT COALESCE(MAX(child_order), 0) + 1 FROM tasks WHERE parent_id = ?1 AND deleted_at IS NULL",
+                        [parent.to_string()],
+                        |row| row.get(0),
+                    )
+                    .unwrap_or(1.0);
+                tx.execute(
+                    "UPDATE tasks SET parent_id = ?1, child_order = ?2, updated_at = ?3, revision = revision + 1
+                     WHERE id = ?4 AND deleted_at IS NULL",
+                    params![parent.to_string(), child_order, now, id.to_string()],
+                )
+                .map_err(internal)?;
+            }
+            None => {
+                // Promote to top level: keep list_id, append at its end.
+                let sort_order: f64 = tx
+                    .query_row(
+                        "SELECT COALESCE(MAX(sort_order), 0) + 1 FROM tasks WHERE list_id = ?1 AND deleted_at IS NULL",
+                        [task.list_id.to_string()],
+                        |row| row.get(0),
+                    )
+                    .unwrap_or(1.0);
+                tx.execute(
+                    "UPDATE tasks SET parent_id = NULL, child_order = 0, sort_order = ?1, updated_at = ?2, revision = revision + 1
+                     WHERE id = ?3 AND deleted_at IS NULL",
+                    params![sort_order, now, id.to_string()],
+                )
+                .map_err(internal)?;
+            }
+        }
+
+        tx.commit().map_err(internal)?;
+        self.get_task(id)
     }
 
-    pub fn query_tasks(&self, query: TaskQuery) -> Result<PagedResult<Task>, DomainError> {
+    /// Rewrite sibling ordering within one parent (or among top-level tasks
+    /// when `parent_id` is None). Mirrors `reorder_tasks` but scoped by parent.
+    pub fn reorder_subtasks(
+        &self,
+        parent_id: Option<EntityId>,
+        ordered_ids: Vec<EntityId>,
+    ) -> Result<(), DomainError> {
+        if ordered_ids.is_empty() {
+            return Ok(());
+        }
+        // Top-level reorder keeps list-scoped sort_order semantics (the same
+        // as the pre-tree drag reorder).
+        if parent_id.is_none() {
+            return self.reorder_tasks(ordered_ids);
+        }
         let conn = self.connect()?;
-        let limit = page_limit(query.limit);
-        let offset = page_offset(query.offset);
+        let now = stamp(&self.clock);
+
+        let placeholders = vec!["?"; ordered_ids.len()].join(", ");
+        let id_strings: Vec<String> = ordered_ids.iter().map(|id| id.to_string()).collect();
+        let params_ref: Vec<&dyn rusqlite::types::ToSql> = id_strings
+            .iter()
+            .map(|s| s as &dyn rusqlite::types::ToSql)
+            .collect();
+        let expected_parent = parent_id.map(|p| p.to_string());
+        {
+            let mut stmt = conn
+                .prepare(&format!(
+                    "SELECT id, parent_id FROM tasks
+                     WHERE id IN ({placeholders}) AND deleted_at IS NULL"
+                ))
+                .map_err(internal)?;
+            let rows = stmt
+                .query_map(params_ref.as_slice(), |row| {
+                    Ok((parse_id(row.get(0)?)?, row.get::<_, Option<String>>(1)?))
+                })
+                .map_err(internal)?;
+            for row in rows {
+                let (_id, parent) = row.map_err(internal)?;
+                if parent != expected_parent {
+                    return Err(DomainError::Validation(
+                        "排序列表包含不属于该父任务的任务".into(),
+                    ));
+                }
+            }
+        }
+
+        let tx = conn.unchecked_transaction().map_err(internal)?;
+        for (index, id) in ordered_ids.iter().enumerate() {
+            tx.execute(
+                "UPDATE tasks SET child_order = ?1, updated_at = ?2, revision = revision + 1
+                 WHERE id = ?3 AND deleted_at IS NULL",
+                params![index as f64, now, id.to_string()],
+            )
+            .map_err(internal)?;
+        }
+        tx.commit().map_err(internal)?;
+        Ok(())
+    }
+
+    /// Tree query: matching tasks plus their ancestors and descendants (all
+    /// depths), deduplicated. Business filters apply to the matched set only;
+    /// the closure is only constrained by active (non-deleted) status.
+    pub fn query_tree(&self, query: TaskQuery) -> Result<Vec<Task>, DomainError> {
+        let conn = self.connect()?;
+        // Build the same filters as query_tasks (no pagination).
+        let (filters, values) = self.build_task_filters(&query)?;
+        let from_clause = " FROM tasks t
+             JOIN task_lists l ON l.id = t.list_id
+             WHERE t.deleted_at IS NULL";
+
+        let matched_sql = format!(
+            "SELECT t.id{from_clause}{filters}"
+        );
+        let params_ref: Vec<&dyn rusqlite::types::ToSql> =
+            values.iter().map(|v| v.as_ref()).collect();
+        let mut stmt = conn.prepare(&matched_sql).map_err(internal)?;
+        let matched_rows = stmt
+            .query_map(params_ref.as_slice(), |row| {
+                let raw: String = row.get(0)?;
+                raw.parse().map_err(|e| {
+                    rusqlite::Error::FromSqlConversionFailure(
+                        0,
+                        rusqlite::types::Type::Text,
+                        Box::new(e),
+                    )
+                })
+            })
+            .map_err(internal)?;
+        let matched = collect_rows(matched_rows)?;
+
+        // Closure: matched + ancestors + descendants.
+        let mut ids: std::collections::HashSet<EntityId> =
+            matched.iter().copied().collect();
+        for id in &matched {
+            let mut current = id.to_string();
+            loop {
+                let parent: Option<String> = conn
+                    .query_row(
+                        "SELECT parent_id FROM tasks WHERE id = ?1 AND deleted_at IS NULL",
+                        [&current],
+                        |row| row.get::<_, Option<String>>(0),
+                    )
+                    .map_err(internal)?;
+                match parent {
+                    Some(p) => {
+                        let parsed = p
+                            .parse()
+                            .map_err(|e| DomainError::Internal(format!("invalid parent id: {e}")))?;
+                        ids.insert(parsed);
+                        current = p;
+                    }
+                    None => break,
+                }
+            }
+            for d in self.descendant_ids(&conn, *id)? {
+                ids.insert(d);
+            }
+        }
+
+        if ids.is_empty() {
+            return Ok(Vec::new());
+        }
+        let placeholders = vec!["?"; ids.len()].join(", ");
+        let id_strings: Vec<String> = ids.iter().map(|id| id.to_string()).collect();
+        let params_ref: Vec<&dyn rusqlite::types::ToSql> = id_strings
+            .iter()
+            .map(|s| s as &dyn rusqlite::types::ToSql)
+            .collect();
+        let sql = format!(
+            "SELECT {TASK_ROW_SELECT}{from_clause} AND t.id IN ({placeholders})
+             ORDER BY t.parent_id IS NOT NULL, t.parent_id, t.child_order ASC, t.sort_order ASC, t.created_at DESC"
+        );
+        let mut stmt = conn.prepare(&sql).map_err(internal)?;
+        let rows = stmt
+            .query_map(params_ref.as_slice(), map_task_row)
+            .map_err(internal)?;
+        let mut tasks = collect_rows(rows)?;
+        for task in &mut tasks {
+            self.attach_tags(&conn, task)?;
+        }
+        Ok(tasks)
+    }
+
+    pub fn tree_expanded_list(&self) -> Result<Vec<TaskTreeExpanded>, DomainError> {
+        let conn = self.connect()?;
+        let mut stmt = conn
+            .prepare(
+                "SELECT task_id, expanded, updated_at FROM task_tree_expanded",
+            )
+            .map_err(internal)?;
+        let rows = stmt
+            .query_map([], |row| {
+                Ok(TaskTreeExpanded {
+                    task_id: parse_id(row.get(0)?)?,
+                    expanded: row.get::<_, i64>(1)? != 0,
+                    updated_at: row.get(2)?,
+                })
+            })
+            .map_err(internal)?;
+        collect_rows(rows)
+    }
+
+    pub fn set_tree_expanded(&self, task_id: EntityId, expanded: bool) -> Result<(), DomainError> {
+        let conn = self.connect()?;
+        let now = stamp(&self.clock);
+        if expanded {
+            // Default is expanded; removing the row restores the default.
+            conn.execute(
+                "DELETE FROM task_tree_expanded WHERE task_id = ?1",
+                [task_id.to_string()],
+            )
+            .map_err(internal)?;
+        } else {
+            conn.execute(
+                "INSERT INTO task_tree_expanded (task_id, expanded, updated_at)
+                 VALUES (?1, 0, ?2)
+                 ON CONFLICT(task_id) DO UPDATE SET expanded = 0, updated_at = excluded.updated_at",
+                params![task_id.to_string(), now],
+            )
+            .map_err(internal)?;
+        }
+        Ok(())
+    }
+
+    /// Build the WHERE filters used by query_tasks (and query_tree).
+    fn build_task_filters(
+        &self,
+        query: &TaskQuery,
+    ) -> Result<(String, Vec<Box<dyn rusqlite::types::ToSql>>), DomainError> {
         let mut filters = String::new();
         let mut values: Vec<Box<dyn rusqlite::types::ToSql>> = Vec::new();
 
@@ -839,6 +1256,10 @@ impl TaskService {
             );
             values.push(Box::new(since.clone()));
         }
+        if let Some(parent_id) = query.parent_id {
+            filters.push_str(" AND t.parent_id = ?");
+            values.push(Box::new(parent_id.to_string()));
+        }
 
         let today = local_today(&self.clock);
         if query.deferred_only.unwrap_or(false) {
@@ -871,8 +1292,40 @@ impl TaskService {
             }
         }
 
+        Ok((filters, values))
+    }
+
+    pub fn get_task(&self, id: EntityId) -> Result<Task, DomainError> {
+        let conn = self.connect()?;
+        let mut task = conn
+            .query_row(
+                &format!(
+                    "SELECT {TASK_ROW_SELECT}
+                 FROM tasks t
+                 JOIN task_lists l ON l.id = t.list_id
+                 WHERE t.id = ?1 AND t.deleted_at IS NULL"
+                ),
+                [id.to_string()],
+                map_task_row,
+            )
+            .optional()
+            .map_err(internal)?
+            .ok_or_else(|| DomainError::NotFound("任务不存在".into()))?;
+        self.attach_tags(&conn, &mut task)?;
+        Ok(task)
+    }
+
+    pub fn query_tasks(&self, query: TaskQuery) -> Result<PagedResult<Task>, DomainError> {
+        let conn = self.connect()?;
+        let limit = page_limit(query.limit);
+        let offset = page_offset(query.offset);
+        let (filters, mut values) = self.build_task_filters(&query)?;
+
         let order_by = if query.completed_since.is_some() {
             " ORDER BY t.completed_at DESC, t.updated_at DESC"
+        } else if query.parent_id.is_some() {
+            // Subtask list: sibling order within the parent.
+            " ORDER BY t.child_order ASC, t.created_at DESC"
         } else {
             " ORDER BY t.sort_order ASC, t.created_at DESC"
         };
@@ -1670,6 +2123,266 @@ impl TaskService {
         }
         Ok(())
     }
+
+    // -------------------------------------------------------------------
+    // v2.1 subtasks: helpers
+    // -------------------------------------------------------------------
+
+    /// Read the two subtask aggregation flags from the settings table.
+    /// Missing/legacy settings default to true (current behavior for both).
+    fn subtask_aggregation_settings(&self) -> Result<(bool, bool), DomainError> {
+        #[derive(serde::Deserialize)]
+        #[serde(rename_all = "camelCase")]
+        struct SubtaskFlags {
+            #[serde(default = "default_true")]
+            subtask_auto_complete_parent: bool,
+            #[serde(default = "default_true")]
+            subtask_cascade_children: bool,
+        }
+        fn default_true() -> bool {
+            true
+        }
+
+        let conn = self.connect()?;
+        let raw: Option<String> = conn
+            .query_row(
+                "SELECT value_json FROM settings WHERE key = 'app.settings'",
+                [],
+                |row| row.get(0),
+            )
+            .optional()
+            .map_err(internal)?;
+        match raw {
+            Some(json) => {
+                let flags: SubtaskFlags = serde_json::from_str(&json)
+                    .map_err(|e| DomainError::Internal(format!("invalid settings json: {e}")))?;
+                Ok((
+                    flags.subtask_auto_complete_parent,
+                    flags.subtask_cascade_children,
+                ))
+            }
+            None => Ok((true, true)),
+        }
+    }
+
+    /// Number of ancestors the task currently has (0 = top level).
+    fn ancestor_chain_len(&self, id: &EntityId) -> Result<usize, DomainError> {
+        let conn = self.connect()?;
+        let mut current = id.to_string();
+        let mut len = 0usize;
+        loop {
+            let parent: Option<String> = conn
+                .query_row(
+                    "SELECT parent_id FROM tasks WHERE id = ?1 AND deleted_at IS NULL",
+                    [&current],
+                    |row| row.get::<_, Option<String>>(0),
+                )
+                .map_err(internal)?;
+            match parent {
+                Some(p) => {
+                    current = p;
+                    len += 1;
+                }
+                None => return Ok(len),
+            }
+        }
+    }
+
+    /// Recursively collect all active descendants of a task (excluding itself).
+    fn descendant_ids(&self, conn: &Connection, id: EntityId) -> Result<Vec<EntityId>, DomainError> {
+        let mut stmt = conn
+            .prepare(
+                "WITH RECURSIVE descendants(id) AS (
+                    SELECT id FROM tasks WHERE parent_id = ?1 AND deleted_at IS NULL
+                    UNION ALL
+                    SELECT t.id FROM tasks t
+                      JOIN descendants d ON t.parent_id = d.id
+                    WHERE t.deleted_at IS NULL
+                 )
+                 SELECT id FROM descendants",
+            )
+            .map_err(internal)?;
+        let rows = stmt
+            .query_map([id.to_string()], |row| {
+                let raw: String = row.get(0)?;
+                raw.parse().map_err(|e| {
+                    rusqlite::Error::FromSqlConversionFailure(
+                        0,
+                        rusqlite::types::Type::Text,
+                        Box::new(e),
+                    )
+                })
+            })
+            .map_err(internal)?;
+        collect_rows(rows)
+    }
+
+    /// Are all active direct children of `parent_id` completed?
+    /// A parent with no active children returns true (trivially complete).
+    fn all_children_completed(&self, conn: &Connection, parent_id: EntityId) -> Result<bool, DomainError> {
+        let total: i64 = conn
+            .query_row(
+                "SELECT COUNT(*) FROM tasks WHERE parent_id = ?1 AND deleted_at IS NULL",
+                [parent_id.to_string()],
+                |row| row.get(0),
+            )
+            .map_err(internal)?;
+        if total == 0 {
+            return Ok(true);
+        }
+        let done: i64 = conn
+            .query_row(
+                "SELECT COUNT(*) FROM tasks WHERE parent_id = ?1 AND deleted_at IS NULL
+                 AND status = 'completed'",
+                [parent_id.to_string()],
+                |row| row.get(0),
+            )
+            .map_err(internal)?;
+        Ok(done == total)
+    }
+
+    /// Complete a task plus (per settings) cascade descendants / auto-complete
+    /// ancestors. Runs inside the caller's transaction.
+    fn complete_with_aggregation(
+        &self,
+        tx: &Connection,
+        id: EntityId,
+        now: &str,
+    ) -> Result<Vec<EntityId>, DomainError> {
+        let (auto_complete_parent, cascade_children) = self.subtask_aggregation_settings()?;
+        let mut affected = vec![id];
+
+        tx.execute(
+            "UPDATE tasks SET status = 'completed', completed_at = ?1, updated_at = ?1, revision = revision + 1
+             WHERE id = ?2 AND deleted_at IS NULL",
+            params![now, id.to_string()],
+        )
+        .map_err(internal)?;
+        tx.execute("DELETE FROM daily_focus WHERE task_id = ?1", params![id.to_string()])
+            .map_err(internal)?;
+
+        // Downward cascade: complete all active descendants (no per-task
+        // series spawn — only the explicit target spawns its next instance).
+        if cascade_children {
+            for d in self.descendant_ids(tx, id)? {
+                tx.execute(
+                    "UPDATE tasks SET status = 'completed', completed_at = ?1, updated_at = ?1, revision = revision + 1
+                     WHERE id = ?2 AND deleted_at IS NULL",
+                    params![now, d.to_string()],
+                )
+                .map_err(internal)?;
+                tx.execute("DELETE FROM daily_focus WHERE task_id = ?1", params![d.to_string()])
+                    .map_err(internal)?;
+                affected.push(d);
+            }
+        }
+
+        // Upward aggregation: auto-complete ancestors whose direct children
+        // are all completed.
+        if auto_complete_parent {
+            let mut current = id;
+            loop {
+                let parent: Option<String> = tx
+                    .query_row(
+                        "SELECT parent_id FROM tasks WHERE id = ?1 AND deleted_at IS NULL",
+                        [current.to_string()],
+                        |row| row.get::<_, Option<String>>(0),
+                    )
+                    .map_err(internal)?;
+                let Some(parent_raw) = parent else { break };
+                let parent_id: EntityId = parent_raw
+                    .parse()
+                    .map_err(|e| DomainError::Internal(format!("invalid parent id: {e}")))?;
+                if !self.all_children_completed(tx, parent_id)? {
+                    break;
+                }
+                tx.execute(
+                    "UPDATE tasks SET status = 'completed', completed_at = ?1, updated_at = ?1, revision = revision + 1
+                     WHERE id = ?2 AND deleted_at IS NULL",
+                    params![now, parent_id.to_string()],
+                )
+                .map_err(internal)?;
+                tx.execute("DELETE FROM daily_focus WHERE task_id = ?1", params![parent_id.to_string()])
+                    .map_err(internal)?;
+                affected.push(parent_id);
+                current = parent_id;
+            }
+        }
+
+        Ok(affected)
+    }
+
+    /// Restore a completed task plus (per settings) cascade descendants /
+    /// auto-restore ancestors. Runs inside the caller's transaction.
+    fn uncomplete_with_aggregation(
+        &self,
+        tx: &Connection,
+        id: EntityId,
+        now: &str,
+    ) -> Result<Vec<EntityId>, DomainError> {
+        let (auto_complete_parent, cascade_children) = self.subtask_aggregation_settings()?;
+        let mut affected = vec![id];
+
+        tx.execute(
+            "UPDATE tasks SET status = 'todo', completed_at = NULL, updated_at = ?1, revision = revision + 1
+             WHERE id = ?2 AND deleted_at IS NULL",
+            params![now, id.to_string()],
+        )
+        .map_err(internal)?;
+
+        if cascade_children {
+            for d in self.descendant_ids(tx, id)? {
+                tx.execute(
+                    "UPDATE tasks SET status = 'todo', completed_at = NULL, updated_at = ?1, revision = revision + 1
+                     WHERE id = ?2 AND deleted_at IS NULL",
+                    params![now, d.to_string()],
+                )
+                .map_err(internal)?;
+                affected.push(d);
+            }
+        }
+
+        // Upward aggregation (bidirectional): restore completed ancestors.
+        if auto_complete_parent {
+            let mut current = id;
+            loop {
+                let parent: Option<String> = tx
+                    .query_row(
+                        "SELECT parent_id FROM tasks WHERE id = ?1 AND deleted_at IS NULL",
+                        [current.to_string()],
+                        |row| row.get::<_, Option<String>>(0),
+                    )
+                    .map_err(internal)?;
+                let Some(parent_raw) = parent else { break };
+                let parent_id: EntityId = parent_raw
+                    .parse()
+                    .map_err(|e| DomainError::Internal(format!("invalid parent id: {e}")))?;
+                // Stop at the first ancestor that is not completed.
+                let parent_status: String = tx
+                    .query_row(
+                        "SELECT status FROM tasks WHERE id = ?1 AND deleted_at IS NULL",
+                        [parent_id.to_string()],
+                        |row| row.get(0),
+                    )
+                    .optional()
+                    .map_err(internal)?
+                    .unwrap_or_default();
+                if parent_status != "completed" {
+                    break;
+                }
+                tx.execute(
+                    "UPDATE tasks SET status = 'todo', completed_at = NULL, updated_at = ?1, revision = revision + 1
+                     WHERE id = ?2 AND deleted_at IS NULL",
+                    params![now, parent_id.to_string()],
+                )
+                .map_err(internal)?;
+                affected.push(parent_id);
+                current = parent_id;
+            }
+        }
+
+        Ok(affected)
+    }
 }
 
 #[derive(Debug, Clone, serde::Serialize)]
@@ -1739,6 +2452,11 @@ fn map_task_row(row: &rusqlite::Row<'_>) -> Result<Task, rusqlite::Error> {
         available_at: row.get(14)?,
         waiting_for: row.get(15)?,
         follow_up_date: row.get(16)?,
+        parent_id: row
+            .get::<_, Option<String>>(20)?
+            .map(parse_id)
+            .transpose()?,
+        child_order: row.get(21)?,
         created_at: row.get(17)?,
         updated_at: row.get(18)?,
         revision: row.get(19)?,
@@ -1748,7 +2466,7 @@ fn map_task_row(row: &rusqlite::Row<'_>) -> Result<Task, rusqlite::Error> {
 const TASK_ROW_SELECT: &str = "t.id, t.title, t.notes, t.status, t.priority, t.list_id,
                     l.name, l.kind, t.due_date, t.due_time, t.completed_at, t.sort_order, t.series_id,
                     t.workflow_state, t.available_at, t.waiting_for, t.follow_up_date,
-                    t.created_at, t.updated_at, t.revision";
+                    t.created_at, t.updated_at, t.revision, t.parent_id, t.child_order";
 
 fn map_domain_sql(err: DomainError) -> rusqlite::Error {
     rusqlite::Error::ToSqlConversionFailure(Box::new(std::io::Error::other(err.to_string())))
@@ -2074,6 +2792,7 @@ fn active_checklist_rows(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::domain::MAX_SUBTASK_DEPTH;
     use crate::infrastructure::db::Database;
     use tempfile::tempdir;
 
@@ -2109,6 +2828,7 @@ mod tests {
                 due_date: None,
                 due_time: None,
                 tag_names: Some(vec!["work".into()]),
+                parent_id: None,
             })
             .unwrap();
         assert_eq!(inbox.list_kind, ListKind::Inbox);
@@ -2123,6 +2843,7 @@ mod tests {
                 due_date: Some(today.clone()),
                 due_time: Some("09:30".into()),
                 tag_names: None,
+                parent_id: None,
             })
             .unwrap();
 
@@ -2135,6 +2856,7 @@ mod tests {
                 due_date: Some("2000-01-01".into()),
                 due_time: None,
                 tag_names: None,
+                parent_id: None,
             })
             .unwrap();
 
@@ -2169,6 +2891,7 @@ mod tests {
                 due_date: None,
                 due_time: None,
                 tag_names: None,
+                parent_id: None,
             })
             .unwrap();
         assert_eq!(task.status, TaskStatus::Todo);
@@ -2196,6 +2919,7 @@ mod tests {
                 due_date: None,
                 due_time: None,
                 tag_names: None,
+                parent_id: None,
             })
             .unwrap();
         }
@@ -2238,6 +2962,7 @@ mod tests {
                 due_date: None,
                 due_time: None,
                 tag_names: None,
+                parent_id: None,
             })
             .unwrap();
 
@@ -2271,6 +2996,7 @@ mod tests {
                 due_date: None,
                 due_time: None,
                 tag_names: None,
+                parent_id: None,
             })
             .unwrap();
 
@@ -2315,6 +3041,7 @@ mod tests {
                 due_date: None,
                 due_time: None,
                 tag_names: None,
+                parent_id: None,
             })
             .unwrap();
         let t2 = svc
@@ -2326,6 +3053,7 @@ mod tests {
                 due_date: None,
                 due_time: None,
                 tag_names: None,
+                parent_id: None,
             })
             .unwrap();
         let t3 = svc
@@ -2337,6 +3065,7 @@ mod tests {
                 due_date: None,
                 due_time: None,
                 tag_names: None,
+                parent_id: None,
             })
             .unwrap();
         assert_eq!(list_order_ids(&svc, list.id), vec![t1.id, t2.id, t3.id]);
@@ -2363,6 +3092,7 @@ mod tests {
                 due_date: None,
                 due_time: None,
                 tag_names: None,
+                parent_id: None,
             })
             .unwrap()
         };
@@ -2405,6 +3135,7 @@ mod tests {
                 due_date: None,
                 due_time: None,
                 tag_names: None,
+                parent_id: None,
             })
             .unwrap();
         let t2 = svc
@@ -2416,6 +3147,7 @@ mod tests {
                 due_date: None,
                 due_time: None,
                 tag_names: None,
+                parent_id: None,
             })
             .unwrap();
         let before = svc.get_task(t1.id).unwrap().sort_order;
@@ -2444,6 +3176,7 @@ mod tests {
                 due_date: None,
                 due_time: None,
                 tag_names: None,
+                parent_id: None,
             })
             .unwrap();
 
@@ -2487,6 +3220,7 @@ mod tests {
                 due_date: Some("2026-08-10".into()),
                 due_time: None,
                 tag_names: None,
+                parent_id: None,
             })
             .unwrap();
         assert!(svc
@@ -2508,6 +3242,7 @@ mod tests {
                 due_date: Some(today.clone()),
                 due_time: None,
                 tag_names: None,
+                parent_id: None,
             })
             .unwrap();
 
@@ -2559,6 +3294,7 @@ mod tests {
                 due_date: None,
                 due_time: None,
                 tag_names: None,
+                parent_id: None,
             })
             .unwrap();
 
@@ -2587,6 +3323,7 @@ mod tests {
                 due_date: Some(today.clone()),
                 due_time: None,
                 tag_names: None,
+                parent_id: None,
             })
             .unwrap();
 
@@ -2627,6 +3364,7 @@ mod tests {
                 due_date: None,
                 due_time: None,
                 tag_names: None,
+                parent_id: None,
             })
             .unwrap();
 
@@ -2653,6 +3391,7 @@ mod tests {
                 due_date: Some(yesterday),
                 due_time: None,
                 tag_names: None,
+                parent_id: None,
             })
             .unwrap();
         svc.postpone_task(task.id, 1).unwrap();
@@ -2673,6 +3412,7 @@ mod tests {
                 due_date: Some(today.clone()),
                 due_time: None,
                 tag_names: None,
+                parent_id: None,
             })
             .unwrap();
         let timed = svc
@@ -2684,6 +3424,7 @@ mod tests {
                 due_date: Some(today),
                 due_time: Some("09:00".into()),
                 tag_names: None,
+                parent_id: None,
             })
             .unwrap();
 
@@ -2712,6 +3453,7 @@ mod tests {
                 due_date: None,
                 due_time: None,
                 tag_names: None,
+                parent_id: None,
             })
             .unwrap();
 
@@ -2775,6 +3517,7 @@ mod tests {
                 due_date: None,
                 due_time: None,
                 tag_names: None,
+                parent_id: None,
             })
             .unwrap();
         let item = service.checklist_add(task.id, "子项").unwrap();
@@ -2818,6 +3561,7 @@ mod tests {
                 due_date: None,
                 due_time: None,
                 tag_names: None,
+                parent_id: None,
             })
             .unwrap();
         for i in 0..50 {
@@ -2835,5 +3579,417 @@ mod tests {
             })
             .unwrap();
         assert!(hits.tasks.iter().any(|h| h.entity_id == task.id));
+    }
+
+    // -------------------------------------------------------------------
+    // v2.1 subtasks
+    // -------------------------------------------------------------------
+
+    fn make_input(title: &str) -> CreateTaskInput {
+        CreateTaskInput {
+            title: title.into(),
+            notes: None,
+            priority: None,
+            list_id: None,
+            due_date: None,
+            due_time: None,
+            tag_names: None,
+            parent_id: None,
+        }
+    }
+
+    #[test]
+    fn subtask_create_inherits_list_and_orders_siblings() {
+        let svc = open_service();
+        let parent = svc.create_task(make_input("父任务")).unwrap();
+        let child1 = svc
+            .create_task(CreateTaskInput {
+                title: "子1".into(),
+                parent_id: Some(parent.id),
+                ..make_input("")
+            })
+            .unwrap();
+        let child2 = svc
+            .create_task(CreateTaskInput {
+                title: "子2".into(),
+                parent_id: Some(parent.id),
+                ..make_input("")
+            })
+            .unwrap();
+
+        assert_eq!(child1.parent_id, Some(parent.id));
+        assert_eq!(child2.parent_id, Some(parent.id));
+        // Inherits parent's list when list_id is unset.
+        assert_eq!(child1.list_id, parent.list_id);
+        assert_eq!(child2.list_id, parent.list_id);
+        // Sibling order increments.
+        assert!(child1.child_order < child2.child_order);
+
+        // query with parent_id filter returns direct children ordered.
+        let list = svc
+            .query_tasks(TaskQuery {
+                parent_id: Some(parent.id),
+                ..Default::default()
+            })
+            .unwrap();
+        assert_eq!(list.total, 2);
+        assert_eq!(list.items[0].id, child1.id);
+        assert_eq!(list.items[1].id, child2.id);
+    }
+
+    #[test]
+    fn subtask_depth_limit_enforced() {
+        let svc = open_service();
+        let mut prev = svc.create_task(make_input("L1")).unwrap();
+        for _ in 2..=MAX_SUBTASK_DEPTH {
+            prev = svc
+                .create_task(CreateTaskInput {
+                    title: "child".into(),
+                    parent_id: Some(prev.id),
+                    ..make_input("")
+                })
+                .unwrap();
+        }
+        // prev is at depth MAX; one more must fail on both create and reparent.
+        assert!(svc
+            .create_task(CreateTaskInput {
+                title: "too deep".into(),
+                parent_id: Some(prev.id),
+                ..make_input("")
+            })
+            .is_err());
+        let root = svc.create_task(make_input("root")).unwrap();
+        assert!(svc.set_task_parent(root.id, Some(prev.id)).is_err());
+    }
+
+    #[test]
+    fn subtask_cycle_prevention() {
+        let svc = open_service();
+        let a = svc.create_task(make_input("A")).unwrap();
+        let b = svc
+            .create_task(CreateTaskInput {
+                title: "B".into(),
+                parent_id: Some(a.id),
+                ..make_input("")
+            })
+            .unwrap();
+        let c = svc
+            .create_task(CreateTaskInput {
+                title: "C".into(),
+                parent_id: Some(b.id),
+                ..make_input("")
+            })
+            .unwrap();
+
+        // Self-parent and descendant-parent are rejected.
+        assert!(svc.set_task_parent(a.id, Some(a.id)).is_err());
+        assert!(svc.set_task_parent(a.id, Some(c.id)).is_err());
+        assert!(svc.set_task_parent(b.id, Some(c.id)).is_err());
+        // Valid move is accepted.
+        let moved = svc.set_task_parent(b.id, Some(a.id)).unwrap();
+        assert_eq!(moved.parent_id, Some(a.id));
+    }
+
+    #[test]
+    fn subtask_aggregation_defaults_on() {
+        let svc = open_service();
+        let parent = svc.create_task(make_input("P")).unwrap();
+        let c1 = svc
+            .create_task(CreateTaskInput {
+                title: "C1".into(),
+                parent_id: Some(parent.id),
+                ..make_input("")
+            })
+            .unwrap();
+        let c2 = svc
+            .create_task(CreateTaskInput {
+                title: "C2".into(),
+                parent_id: Some(parent.id),
+                ..make_input("")
+            })
+            .unwrap();
+
+        // Completing one child does not complete the parent.
+        svc.complete_task(c1.id).unwrap();
+        assert_eq!(svc.get_task(parent.id).unwrap().status, TaskStatus::Todo);
+
+        // Completing the last child auto-completes the parent.
+        svc.complete_task(c2.id).unwrap();
+        assert_eq!(svc.get_task(parent.id).unwrap().status, TaskStatus::Completed);
+
+        // Uncompleting one child restores the parent (bidirectional up).
+        svc.uncomplete_task(c1.id).unwrap();
+        assert_eq!(svc.get_task(parent.id).unwrap().status, TaskStatus::Todo);
+    }
+
+    #[test]
+    fn subtask_cascade_children_on_complete_and_uncomplete() {
+        let svc = open_service();
+        let parent = svc.create_task(make_input("P")).unwrap();
+        let c1 = svc
+            .create_task(CreateTaskInput {
+                title: "C1".into(),
+                parent_id: Some(parent.id),
+                ..make_input("")
+            })
+            .unwrap();
+        let c2 = svc
+            .create_task(CreateTaskInput {
+                title: "C2".into(),
+                parent_id: Some(c1.id),
+                ..make_input("")
+            })
+            .unwrap();
+
+        // Completing the parent cascades to all descendants.
+        svc.complete_task(parent.id).unwrap();
+        assert_eq!(svc.get_task(c1.id).unwrap().status, TaskStatus::Completed);
+        assert_eq!(svc.get_task(c2.id).unwrap().status, TaskStatus::Completed);
+
+        // Uncompleting the parent cascades back (bidirectional down).
+        svc.uncomplete_task(parent.id).unwrap();
+        assert_eq!(svc.get_task(c1.id).unwrap().status, TaskStatus::Todo);
+        assert_eq!(svc.get_task(c2.id).unwrap().status, TaskStatus::Todo);
+    }
+
+    #[test]
+    fn subtask_aggregation_off_when_toggles_disabled() {
+        let db = test_db();
+        let svc = TaskService::new(db.clone());
+        svc.ensure_seed_data().unwrap();
+        // Disable both toggles.
+        let conn = db.connect().unwrap();
+        conn.execute(
+            "INSERT INTO settings (key, value_json, updated_at) VALUES ('app.settings', ?1, '2026-01-01T00:00:00Z')
+             ON CONFLICT(key) DO UPDATE SET value_json = excluded.value_json",
+            rusqlite::params![r#"{"subtaskAutoCompleteParent":false,"subtaskCascadeChildren":false}"#.to_string()],
+        )
+        .unwrap();
+        drop(conn);
+
+        let parent = svc.create_task(make_input("P")).unwrap();
+        let c1 = svc
+            .create_task(CreateTaskInput {
+                title: "C1".into(),
+                parent_id: Some(parent.id),
+                ..make_input("")
+            })
+            .unwrap();
+        let c2 = svc
+            .create_task(CreateTaskInput {
+                title: "C2".into(),
+                parent_id: Some(parent.id),
+                ..make_input("")
+            })
+            .unwrap();
+
+        svc.complete_task(c1.id).unwrap();
+        svc.complete_task(c2.id).unwrap();
+        // No auto-complete of the parent.
+        assert_eq!(svc.get_task(parent.id).unwrap().status, TaskStatus::Todo);
+
+        svc.complete_task(parent.id).unwrap();
+        // No cascade to children.
+        assert_eq!(svc.get_task(c1.id).unwrap().status, TaskStatus::Completed);
+    }
+
+    #[test]
+    fn subtask_archive_cascades() {
+        let svc = open_service();
+        let parent = svc.create_task(make_input("P")).unwrap();
+        let c1 = svc
+            .create_task(CreateTaskInput {
+                title: "C1".into(),
+                parent_id: Some(parent.id),
+                ..make_input("")
+            })
+            .unwrap();
+        let c2 = svc
+            .create_task(CreateTaskInput {
+                title: "C2".into(),
+                parent_id: Some(c1.id),
+                ..make_input("")
+            })
+            .unwrap();
+
+        svc.archive_task(parent.id).unwrap();
+        assert_eq!(svc.get_task(c1.id).unwrap().status, TaskStatus::Archived);
+        assert_eq!(svc.get_task(c2.id).unwrap().status, TaskStatus::Archived);
+
+        svc.unarchive_task(parent.id).unwrap();
+        assert_eq!(svc.get_task(c1.id).unwrap().status, TaskStatus::Todo);
+        assert_eq!(svc.get_task(c2.id).unwrap().status, TaskStatus::Todo);
+    }
+
+    #[test]
+    fn subtask_delete_tree_cascade_and_promote() {
+        let svc = open_service();
+        // Cascade.
+        let parent = svc.create_task(make_input("P")).unwrap();
+        let c1 = svc
+            .create_task(CreateTaskInput {
+                title: "C1".into(),
+                parent_id: Some(parent.id),
+                ..make_input("")
+            })
+            .unwrap();
+        let c2 = svc
+            .create_task(CreateTaskInput {
+                title: "C2".into(),
+                parent_id: Some(c1.id),
+                ..make_input("")
+            })
+            .unwrap();
+        let affected = svc
+            .delete_task_tree(parent.id, TaskDeleteDisposition::Cascade)
+            .unwrap();
+        assert!(affected.contains(&parent.id));
+        assert!(affected.contains(&c1.id));
+        assert!(affected.contains(&c2.id));
+        assert!(svc.get_task(parent.id).is_err());
+        assert!(svc.get_task(c1.id).is_err());
+        assert!(svc.get_task(c2.id).is_err());
+
+        // Promote: children rise to top level, grandchildren stay attached.
+        let parent2 = svc.create_task(make_input("P2")).unwrap();
+        let g1 = svc
+            .create_task(CreateTaskInput {
+                title: "G1".into(),
+                parent_id: Some(parent2.id),
+                ..make_input("")
+            })
+            .unwrap();
+        let g2 = svc
+            .create_task(CreateTaskInput {
+                title: "G2".into(),
+                parent_id: Some(g1.id),
+                ..make_input("")
+            })
+            .unwrap();
+        let affected = svc
+            .delete_task_tree(parent2.id, TaskDeleteDisposition::Promote)
+            .unwrap();
+        assert_eq!(affected.len(), 2); // parent + direct child
+        let promoted = svc.get_task(g1.id).unwrap();
+        assert_eq!(promoted.parent_id, None);
+        assert_eq!(promoted.list_id, parent2.list_id, "list_id unchanged");
+        assert_eq!(svc.get_task(g2.id).unwrap().parent_id, Some(g1.id));
+    }
+
+    #[test]
+    fn subtask_delete_refuses_when_children_exist() {
+        let svc = open_service();
+        let parent = svc.create_task(make_input("P")).unwrap();
+        svc.create_task(CreateTaskInput {
+            title: "C".into(),
+            parent_id: Some(parent.id),
+            ..make_input("")
+        })
+        .unwrap();
+        assert!(svc.delete_task(parent.id).is_err());
+        // Leaf delete still works.
+        let leaf = svc.create_task(make_input("leaf")).unwrap();
+        svc.delete_task(leaf.id).unwrap();
+    }
+
+    #[test]
+    fn subtask_query_tree_closure() {
+        let svc = open_service();
+        let root_a = svc.create_task(make_input("A")).unwrap();
+        let child_a1 = svc
+            .create_task(CreateTaskInput {
+                title: "A1".into(),
+                parent_id: Some(root_a.id),
+                ..make_input("")
+            })
+            .unwrap();
+        svc.create_task(CreateTaskInput {
+            title: "A1a".into(),
+            parent_id: Some(child_a1.id),
+            ..make_input("")
+        })
+        .unwrap();
+        let root_b = svc.create_task(make_input("B")).unwrap();
+
+        // Query matching only A (by search) still returns the full subtree +
+        // root B is excluded when it does not match.
+        let tree = svc
+            .query_tree(TaskQuery {
+                search: Some("A".into()),
+                ..Default::default()
+            })
+            .unwrap();
+        let ids: Vec<EntityId> = tree.iter().map(|t| t.id).collect();
+        assert!(ids.contains(&root_a.id));
+        assert!(ids.contains(&child_a1.id));
+        assert!(!ids.contains(&root_b.id));
+
+        // Search matching a leaf pulls its ancestors too.
+        let tree2 = svc
+            .query_tree(TaskQuery {
+                search: Some("A1a".into()),
+                ..Default::default()
+            })
+            .unwrap();
+        let ids2: Vec<EntityId> = tree2.iter().map(|t| t.id).collect();
+        assert!(ids2.contains(&root_a.id));
+        assert!(ids2.contains(&child_a1.id));
+    }
+
+    #[test]
+    fn subtask_reorder_subtasks() {
+        let svc = open_service();
+        let parent = svc.create_task(make_input("P")).unwrap();
+        let c1 = svc
+            .create_task(CreateTaskInput {
+                title: "C1".into(),
+                parent_id: Some(parent.id),
+                ..make_input("")
+            })
+            .unwrap();
+        let c2 = svc
+            .create_task(CreateTaskInput {
+                title: "C2".into(),
+                parent_id: Some(parent.id),
+                ..make_input("")
+            })
+            .unwrap();
+
+        svc.reorder_subtasks(Some(parent.id), vec![c2.id, c1.id])
+            .unwrap();
+        let list = svc
+            .query_tasks(TaskQuery {
+                parent_id: Some(parent.id),
+                ..Default::default()
+            })
+            .unwrap();
+        assert_eq!(list.items[0].id, c2.id);
+        assert_eq!(list.items[1].id, c1.id);
+
+        // Mixed-parent ids are rejected.
+        let other = svc.create_task(make_input("other")).unwrap();
+        assert!(svc
+            .reorder_subtasks(Some(parent.id), vec![c1.id, other.id])
+            .is_err());
+    }
+
+    #[test]
+    fn subtask_tree_expanded_state() {
+        let svc = open_service();
+        let parent = svc.create_task(make_input("P")).unwrap();
+        svc.set_tree_expanded(parent.id, false).unwrap();
+        let list = svc.tree_expanded_list().unwrap();
+        assert_eq!(list.len(), 1);
+        assert_eq!(list[0].task_id, parent.id);
+        assert!(!list[0].expanded);
+
+        // Restore default (expanded) removes the row.
+        svc.set_tree_expanded(parent.id, true).unwrap();
+        assert!(svc.tree_expanded_list().unwrap().is_empty());
+
+        // Delete removes expand state rows.
+        svc.set_tree_expanded(parent.id, false).unwrap();
+        svc.delete_task(parent.id).unwrap();
+        assert!(svc.tree_expanded_list().unwrap().is_empty());
     }
 }

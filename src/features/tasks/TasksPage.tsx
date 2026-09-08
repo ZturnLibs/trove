@@ -7,7 +7,7 @@ import {
   useSensor,
   useSensors,
 } from "@dnd-kit/core";
-import type { DragEndEvent, DragStartEvent } from "@dnd-kit/core";
+import type { DragEndEvent, DragOverEvent, DragStartEvent } from "@dnd-kit/core";
 import {
   SortableContext,
   arrayMove,
@@ -43,6 +43,12 @@ import {
   PagedListFooter,
   usePagedQuery,
 } from "@/features/shared/usePagedQuery";
+import {
+  buildForest,
+  flattenVisible,
+  siblingIds,
+  type VisibleRow,
+} from "@/features/tasks/taskTree";
 
 const smartLists: { id: SmartListKind | "none"; label: string }[] = [
   { id: "none", label: "清单视图" },
@@ -85,6 +91,7 @@ export function TasksPage() {
   const [viewName, setViewName] = useState("");
   const [selectedViewId, setSelectedViewId] = useState<string>("");
   const [activeDragId, setActiveDragId] = useState<string | null>(null);
+  const [nestTargetId, setNestTargetId] = useState<string | null>(null);
   // Browsers synthesize a click on the drop target after a drag ends; suppress
   // clicks inside this window so reordering never accidentally selects a task.
   const suppressClickUntilRef = useRef(0);
@@ -207,6 +214,64 @@ export function TasksPage() {
     loadingMore: tasksLoadingMore,
     loadMore: loadMoreTasks,
   } = usePagedQuery(taskListQueryKey, fetchTasks);
+
+  // --- v2.1 subtask tree (list view only) ---
+  const isTreeView = smart === "none";
+  const treeQueryKey = ["tasks", "tree", listId, status, priority, tagId, search, showDeferred, showWaiting];
+  const treeQuery = useQuery({
+    queryKey: treeQueryKey,
+    queryFn: () =>
+      ipc.taskQueryTree({
+        listId: listId === "all" ? undefined : listId,
+        status:
+          showDeferred || showWaiting
+            ? "todo"
+            : status === "active"
+              ? undefined
+              : status,
+        includeArchived: status === "archived",
+        priority: priority === "all" ? undefined : priority,
+        tagId: tagId ?? undefined,
+        search: search.trim() || undefined,
+        deferredOnly: showDeferred || undefined,
+        workflowState: showWaiting ? "waiting" : undefined,
+      }),
+    enabled: isTreeView,
+  });
+  const expandedQuery = useQuery({
+    queryKey: ["task-tree-expanded"],
+    queryFn: () => ipc.taskTreeExpandedList(),
+  });
+  const collapsedSet = useMemo(() => {
+    const s = new Set<string>();
+    for (const row of expandedQuery.data ?? []) {
+      if (!row.expanded) s.add(row.taskId);
+    }
+    return s;
+  }, [expandedQuery.data]);
+  const forest = useMemo(
+    () => (isTreeView ? buildForest(treeQuery.data ?? []) : null),
+    [isTreeView, treeQuery.data],
+  );
+  const visibleRows: VisibleRow[] = useMemo(
+    () => (forest ? flattenVisible(forest, collapsedSet) : []),
+    [forest, collapsedSet],
+  );
+
+  const toggleExpand = (taskId: string) => {
+    const nowCollapsed = collapsedSet.has(taskId);
+    // optimistic UI via expandedQuery cache
+    queryClient.setQueryData(
+      ["task-tree-expanded"],
+      (old: { taskId: string; expanded: boolean; updatedAt: string }[] | undefined) => {
+        const base = old ?? [];
+        const next = base.filter((r) => r.taskId !== taskId);
+        if (!nowCollapsed) next.push({ taskId, expanded: false, updatedAt: "" });
+        return next;
+      },
+    );
+    void ipc.taskSetTreeExpanded(taskId, nowCollapsed);
+  };
 
   const createMutation = useMutation({
     mutationFn: () =>
@@ -355,16 +420,53 @@ export function TasksPage() {
     onSuccess: () => void queryClient.invalidateQueries({ queryKey: ["tasks"] }),
   });
 
+  const reorderSubtasksMutation = useMutation({
+    mutationFn: (input: { parentId: string | null; orderedIds: string[] }) =>
+      ipc.taskReorderSubtasks(input.parentId, input.orderedIds),
+    onSuccess: () => void queryClient.invalidateQueries({ queryKey: ["tasks"] }),
+  });
+
+  const setParentMutation = useMutation({
+    mutationFn: (input: { id: string; parentId: string | null }) =>
+      ipc.taskSetParent(input.id, input.parentId),
+    onSuccess: () => {
+      void queryClient.invalidateQueries({ queryKey: ["tasks"] });
+      useRecentActions.getState().push({
+        label: "调整子任务归属",
+        undo: async () => {
+          void queryClient.invalidateQueries({ queryKey: ["tasks"] });
+        },
+      });
+    },
+  });
+
   const moveSelected = (direction: "up" | "down") => {
-    if (!selectedId || tasks.length === 0) return;
-    const list = [...tasks];
-    const index = list.findIndex((t) => t.id === selectedId);
-    if (index < 0) return;
+    if (!selectedId || visibleRows.length === 0) return;
+    if (!isTreeView) {
+      if (tasks.length === 0) return;
+      const list = [...tasks];
+      const index = list.findIndex((t) => t.id === selectedId);
+      if (index < 0) return;
+      const target = direction === "up" ? index - 1 : index + 1;
+      if (target < 0 || target >= list.length) return;
+      const [item] = list.splice(index, 1);
+      list.splice(target, 0, item);
+      reorderMutation.mutate(list.map((t) => t.id));
+      return;
+    }
+    // Tree view: move within the sibling group of the selected task.
+    if (!forest) return;
+    const siblings = siblingIds(forest, selectedId);
+    if (!siblings) return;
+    const index = siblings.indexOf(selectedId);
     const target = direction === "up" ? index - 1 : index + 1;
-    if (target < 0 || target >= list.length) return;
-    const [item] = list.splice(index, 1);
-    list.splice(target, 0, item);
-    reorderMutation.mutate(list.map((t) => t.id));
+    if (target < 0 || target >= siblings.length) return;
+    const orderedIds = arrayMove(siblings, index, target);
+    const selectedTask = tasks.find((t) => t.id === selectedId);
+    reorderSubtasksMutation.mutate({
+      parentId: selectedTask?.parentId ?? null,
+      orderedIds,
+    });
   };
 
   const handleSelect = (id: string) => {
@@ -374,15 +476,80 @@ export function TasksPage() {
 
   const handleDragStart = (event: DragStartEvent) => {
     setActiveDragId(String(event.active.id));
+    setNestTargetId(null);
+  };
+
+  /**
+   * Tree drag: dropping in the middle band of a row nests (归巢); dropping in
+   * the top/bottom bands reorders within the same parent. Drag events expose
+   * the pointer via activatorEvent + delta and the target rect via over.rect.
+   */
+  const handleDragOver = (event: DragOverEvent) => {
+    if (!event.over || !isTreeView) return;
+    const overId = String(event.over.id);
+    if (overId === String(event.active.id)) return;
+    const pointerY = (event.activatorEvent as PointerEvent).clientY + event.delta.y;
+    const rect = event.over.rect;
+    const rel = (pointerY - rect.top) / Math.max(rect.height, 1);
+    setNestTargetId(rel > 0.3 && rel < 0.7 ? overId : null);
   };
 
   const handleDragEnd = (event: DragEndEvent) => {
     const { active, over } = event;
+    const activeId = String(active.id);
     setActiveDragId(null);
     suppressClickUntilRef.current = Date.now() + 300;
-    if (!over || active.id === over.id) return;
-    const oldIndex = tasks.findIndex((t) => t.id === active.id);
-    const newIndex = tasks.findIndex((t) => t.id === over.id);
+    if (!over) return;
+
+    if (isTreeView) {
+      const overId = String(over.id);
+      // Nest: drop onto the middle of a row -> become its child.
+      if (nestTargetId && nestTargetId !== activeId) {
+        setParentMutation.mutate({ id: activeId, parentId: nestTargetId });
+        setNestTargetId(null);
+        return;
+      }
+      setNestTargetId(null);
+      if (activeId === overId) return;
+      // Reorder within the same sibling group (same parent).
+      if (!forest) return;
+      const activeTask = taskById.get(activeId);
+      const overTask = taskById.get(overId);
+      if (!activeTask || !overTask) return;
+      if ((activeTask.parentId ?? null) !== (overTask.parentId ?? null)) {
+        // Cross-parent gap drop: treat as nest into the over task's parent
+        // position — fall back to no-op (must nest explicitly via middle band).
+        return;
+      }
+      const siblings = siblingIds(forest, activeId);
+      if (!siblings) return;
+      const oldIndex = siblings.indexOf(activeId);
+      const newIndex = siblings.indexOf(overId);
+      if (oldIndex < 0 || newIndex < 0) return;
+      const orderedIds = arrayMove(siblings, oldIndex, newIndex);
+      if (orderedIds.join("|") === siblings.join("|")) return;
+      // Optimistic update on both caches (tree view renders treeQuery).
+      const order = new Map(orderedIds.map((id, i) => [id, i]));
+      const applyOrder = (old?: Task[]) => {
+        if (!old) return old;
+        return [...old].sort(
+          (a, b) =>
+            (order.get(a.id) ?? Number.MAX_SAFE_INTEGER) -
+            (order.get(b.id) ?? Number.MAX_SAFE_INTEGER),
+        );
+      };
+      queryClient.setQueryData<Task[]>(taskListQueryKey, applyOrder);
+      queryClient.setQueryData<Task[]>(treeQueryKey, applyOrder);
+      reorderSubtasksMutation.mutate({
+        parentId: activeTask.parentId ?? null,
+        orderedIds,
+      });
+      return;
+    }
+
+    // Flat view (smart lists): existing behavior.
+    const oldIndex = tasks.findIndex((t) => t.id === activeId);
+    const newIndex = tasks.findIndex((t) => t.id === String(over.id));
     if (oldIndex < 0 || newIndex < 0) return;
     const orderedIds = arrayMove(
       tasks.map((t) => t.id),
@@ -407,14 +574,22 @@ export function TasksPage() {
     suppressClickUntilRef.current = Date.now() + 300;
   };
 
+  // Lookup map for tree rendering (tasks may come from the tree query).
+  const taskById = useMemo(() => {
+    const m = new Map<string, Task>();
+    for (const t of tasks) m.set(t.id, t);
+    if (treeQuery.data) for (const t of treeQuery.data) m.set(t.id, t);
+    return m;
+  }, [tasks, treeQuery.data]);
+
   const activeDragTask = useMemo(
-    () => tasks.find((t) => t.id === activeDragId) ?? null,
-    [tasks, activeDragId],
+    () => taskById.get(activeDragId ?? "") ?? null,
+    [taskById, activeDragId],
   );
 
   const selected = useMemo(
-    () => tasks.find((t) => t.id === selectedId) ?? null,
-    [tasks, selectedId],
+    () => taskById.get(selectedId ?? "") ?? null,
+    [taskById, selectedId],
   );
 
   const listName = showDeferred
@@ -696,9 +871,9 @@ export function TasksPage() {
               ) : null}
             </div>
           ) : null}
-          {tasksLoading ? (
+          {tasksLoading && isTreeView && treeQuery.isLoading ? (
             <div className="p-4 text-[12px] text-muted">加载中…</div>
-          ) : tasks.length === 0 ? (
+          ) : (isTreeView ? visibleRows.length : tasks.length) === 0 ? (
             <EmptyState
               title={
                 showDeferred
@@ -748,27 +923,43 @@ export function TasksPage() {
                   sensors={sensors}
                   collisionDetection={closestCenter}
                   onDragStart={handleDragStart}
+                  onDragOver={handleDragOver}
                   onDragEnd={handleDragEnd}
                   onDragCancel={handleDragCancel}
                 >
                   <SortableContext
-                    items={tasks.map((t) => t.id)}
+                    items={visibleRows.map((r) => r.task.id)}
                     strategy={verticalListSortingStrategy}
                   >
-                    {tasks.map((task) => (
-                      <SortableTaskRow
-                        key={task.id}
-                        task={task}
-                        selected={selectedId === task.id}
-                        onSelect={() => handleSelect(task.id)}
-                        onToggleComplete={() => toggleMutation.mutate(task)}
-                        onRename={rename}
-                        onSetDefer={applyDefer}
-                        onMarkWaiting={applyMarkWaiting}
-                        showDeferLabel={showDeferred}
-                        showWaitingLabel={showWaiting}
-                      />
-                    ))}
+                    {visibleRows.map((row) => {
+                      const task = taskById.get(row.task.id);
+                      if (!task) return null;
+                      const progress = forest?.progress.get(task.id) ?? null;
+                      return (
+                        <SortableTaskRow
+                          key={task.id}
+                          task={task}
+                          selected={selectedId === task.id}
+                          depth={row.depth}
+                          hasChildren={row.hasChildren}
+                          expanded={
+                            row.hasChildren && !collapsedSet.has(task.id)
+                          }
+                          onToggleExpand={() => toggleExpand(task.id)}
+                          childProgress={
+                            row.hasChildren ? progress ?? null : null
+                          }
+                          isNestTarget={nestTargetId === task.id}
+                          onSelect={() => handleSelect(task.id)}
+                          onToggleComplete={() => toggleMutation.mutate(task)}
+                          onRename={rename}
+                          onSetDefer={applyDefer}
+                          onMarkWaiting={applyMarkWaiting}
+                          showDeferLabel={showDeferred}
+                          showWaitingLabel={showWaiting}
+                        />
+                      );
+                    })}
                   </SortableContext>
                   <DragOverlay>
                     {activeDragTask ? (
@@ -798,13 +989,15 @@ export function TasksPage() {
                   />
                 ))
               )}
-              <PagedListFooter
-                shown={tasks.length}
-                total={taskTotal}
-                hasMore={tasksHasMore}
-                loadingMore={tasksLoadingMore}
-                onLoadMore={loadMoreTasks}
-              />
+              {isTreeView ? null : (
+                <PagedListFooter
+                  shown={tasks.length}
+                  total={taskTotal}
+                  hasMore={tasksHasMore}
+                  loadingMore={tasksLoadingMore}
+                  onLoadMore={loadMoreTasks}
+                />
+              )}
             </>
           )}
         </div>
@@ -814,6 +1007,10 @@ export function TasksPage() {
           task={selected}
           onDeleted={() => setSelectedId(null)}
           focusTitleId={createdId}
+          onOpenTask={(id) => {
+            setSelectedId(id);
+            setCreatedId(null);
+          }}
           onStartFocus={
             selected?.status === "todo"
               ? () => void startFocus(selected.id)

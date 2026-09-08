@@ -285,3 +285,41 @@
 ### Status
 
 [OK] **Completed**
+
+
+## Session 13: 任务支持多层嵌套子任务（v2.1 切片）
+
+**Date**: 2026-08-31
+**Task**: 任务支持多层嵌套子任务（v2.1 切片）
+**Branch**: `allan852/feat-sub-task`
+
+### Summary
+
+为任务实现多层嵌套子任务：parent_id 邻接表 + child_order 兄弟排序、完成聚合（向上自动完成/向下级联，双向，两个全局开关）、删除处置确认（级联/提升）、归档级联、树形列表 + 拖拽归巢、详情面板子任务区、展开状态数据库持久化、设置页开关。
+
+### Main Changes
+
+- 后端：迁移 0022（tasks.parent_id/child_order + task_tree_expanded 表）、TaskService 聚合/归巢/树查询/删除处置/展开状态、6 个新 IPC 命令、AppSettings 两个开关
+- 前端：TasksPage 树形渲染 + dnd 归巢与兄弟重排、taskTree.ts 纯函数、TaskDetailPanel SubtaskSection、SettingsPage 子任务区块、TaskRow 深度/chevron/进度徽标
+- 测试：12 个后端子任务单测 + 4 个前端树纯函数单测；cargo test --lib 179 通过、typecheck/build/test:unit 通过
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `0d71881` | (see git log) |
+| `467f184` | (see git log) |
+| `bec7517` | (see git log) |
+
+### Testing
+
+- [OK] cargo test --lib: 179 passed
+- [OK] pnpm typecheck + build + test:unit: 通过（46 tests）
+
+### Status
+
+[OK] **Completed**
+
+### Next Steps
+
+- 可选：每任务覆盖完成策略、级联改动触发自动化规则、CSV 导入导出 parent 列

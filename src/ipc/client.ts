@@ -33,6 +33,8 @@ export type AppSettings = {
   onboardingCompleted: boolean;
   lastFocusCarryDismissedDate?: string | null;
   automationEnabled: boolean;
+  subtaskAutoCompleteParent: boolean;
+  subtaskCascadeChildren: boolean;
   ai: AIConfig;
 };
 
@@ -57,6 +59,14 @@ export type ChecklistUpdateInput = {
   id: string;
   content?: string | null;
   checked?: boolean | null;
+};
+
+export type TaskDeleteDisposition = "cascade" | "promote";
+
+export type TaskTreeExpanded = {
+  taskId: string;
+  expanded: boolean;
+  updatedAt: string;
 };
 
 export type AIMode = "off" | "ollama" | "custom";
@@ -289,6 +299,8 @@ export type Task = {
   completedAt: string | null;
   sortOrder: number;
   seriesId: string | null;
+  parentId: string | null;
+  childOrder: number;
   tagIds: string[];
   tagNames: string[];
   workflowState: TaskWorkflowState;
@@ -308,6 +320,7 @@ export type CreateTaskInput = {
   dueDate?: string | null;
   dueTime?: string | null;
   tagNames?: string[];
+  parentId?: string;
 };
 
 export type UpdateTaskInput = {
@@ -336,6 +349,7 @@ export type TaskQuery = {
   workflowState?: TaskWorkflowState;
   deferredOnly?: boolean;
   waitingFollowUpDue?: boolean;
+  parentId?: string;
   limit?: number;
   offset?: number;
 };
@@ -1035,6 +1049,18 @@ export const ipc = {
   taskSkip: (id: string) => invoke<Task>("task_skip", { id }),
   taskReorder: (orderedIds: string[]) =>
     invoke<void>("task_reorder", { orderedIds }),
+  taskQueryTree: (query: TaskQuery = {}) =>
+    invoke<Task[]>("task_query_tree", { query }),
+  taskSetParent: (id: string, parentId: string | null) =>
+    invoke<Task>("task_set_parent", { id, parentId }),
+  taskReorderSubtasks: (parentId: string | null, orderedIds: string[]) =>
+    invoke<void>("task_reorder_subtasks", { parentId, orderedIds }),
+  taskDeleteTree: (id: string, disposition: TaskDeleteDisposition) =>
+    invoke<string[]>("task_delete_tree", { id, disposition }),
+  taskTreeExpandedList: () =>
+    invoke<TaskTreeExpanded[]>("task_tree_expanded_list"),
+  taskSetTreeExpanded: (taskId: string, expanded: boolean) =>
+    invoke<void>("task_set_tree_expanded", { taskId, expanded }),
   taskListTags: () => invoke<Tag[]>("task_list_tags"),
   taskCounts: () => invoke<TaskCounts>("task_counts"),
   taskSmartList: (kind: SmartListKind, limit?: number, offset?: number) =>

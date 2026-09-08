@@ -401,6 +401,43 @@ export function SettingsPage() {
         </section>
 
         <section className="rounded-[var(--radius-panel)] border border-border bg-surface-raised p-4">
+          <h2 className="text-[13px] font-semibold">子任务</h2>
+          <p className="mt-1 text-[12px] text-muted">
+            任务可嵌套多层子任务；以下是完成状态的聚合规则。
+          </p>
+          {settings ? (
+            <div className="mt-3 flex flex-col gap-2">
+              <label className="flex items-center gap-2 text-[12px]">
+                <input
+                  type="checkbox"
+                  checked={settings.subtaskAutoCompleteParent}
+                  onChange={(e) =>
+                    saveSettings.mutate({
+                      ...settings,
+                      subtaskAutoCompleteParent: e.target.checked,
+                    })
+                  }
+                />
+                所有子任务完成时，自动完成父任务（取消子任务时父任务恢复）
+              </label>
+              <label className="flex items-center gap-2 text-[12px]">
+                <input
+                  type="checkbox"
+                  checked={settings.subtaskCascadeChildren}
+                  onChange={(e) =>
+                    saveSettings.mutate({
+                      ...settings,
+                      subtaskCascadeChildren: e.target.checked,
+                    })
+                  }
+                />
+                完成父任务时，级联完成所有子任务（取消时同样恢复）
+              </label>
+            </div>
+          ) : null}
+        </section>
+
+        <section className="rounded-[var(--radius-panel)] border border-border bg-surface-raised p-4">
           <h2 className="text-[13px] font-semibold">应用状态</h2>
           {healthQuery.isLoading ? (
             <p className="mt-2 text-[12px] text-muted">检查中…</p>

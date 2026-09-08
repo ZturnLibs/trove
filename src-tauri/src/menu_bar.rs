@@ -50,6 +50,7 @@ fn menu_new_task(app: &AppHandle) {
         due_date: None,
         due_time: None,
         tag_names: None,
+        parent_id: None,
     }) {
         Ok(task) => {
             let _ = state

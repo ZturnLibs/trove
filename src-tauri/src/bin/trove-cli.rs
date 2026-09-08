@@ -242,6 +242,7 @@ fn build_create_action(
                 due_date,
                 due_time: None,
                 tag_names: None,
+                parent_id: None,
             },
             confirmed: true,
         }),

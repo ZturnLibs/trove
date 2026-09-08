@@ -1,0 +1,2 @@
+{"file": ".trellis/spec/tauri/index.md", "reason": "Tauri/Rust 质量检查（schema 断言、cargo test、tempdir 规则）——本次涉及迁移与服务层"}
+{"file": ".trellis/spec/guides/cross-layer-thinking-guide.md", "reason": "本次跨 DB/domain/service/IPC/前端多层，需按跨层指南核对数据流"}

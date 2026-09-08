@@ -220,6 +220,7 @@ mod tests {
                 due_date: Some(today.clone()),
                 due_time: None,
                 tag_names: None,
+                parent_id: None,
             })
             .unwrap();
         tasks.daily_focus_add(task.id, Some(today.clone())).unwrap();

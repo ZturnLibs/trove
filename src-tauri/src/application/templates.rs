@@ -167,6 +167,7 @@ impl TemplateService {
             } else {
                 Some(preview.tag_names)
             },
+            parent_id: None,
         })
     }
 

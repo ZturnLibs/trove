@@ -171,6 +171,8 @@ pub struct Task {
     pub completed_at: Option<String>,
     pub sort_order: f64,
     pub series_id: Option<EntityId>,
+    pub parent_id: Option<EntityId>,
+    pub child_order: f64,
     pub tag_ids: Vec<EntityId>,
     pub tag_names: Vec<String>,
     pub workflow_state: TaskWorkflowState,
@@ -192,6 +194,7 @@ pub struct CreateTaskInput {
     pub due_date: Option<String>,
     pub due_time: Option<String>,
     pub tag_names: Option<Vec<String>>,
+    pub parent_id: Option<EntityId>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -227,6 +230,8 @@ pub struct TaskQuery {
     pub workflow_state: Option<TaskWorkflowState>,
     pub deferred_only: Option<bool>,
     pub waiting_follow_up_due: Option<bool>,
+    /// Filter to direct children of a task (subtask list in detail panel).
+    pub parent_id: Option<EntityId>,
     pub limit: Option<i64>,
     pub offset: Option<i64>,
 }
@@ -343,6 +348,62 @@ pub struct ChecklistUpdateInput {
 
 pub const CHECKLIST_MAX_ITEMS: usize = 50;
 pub const CHECKLIST_CONTENT_MAX_CHARS: usize = 200;
+
+// ---------------------------------------------------------------------------
+// v2.1 subtasks: multi-level nested tasks
+// ---------------------------------------------------------------------------
+
+/// Maximum nesting depth for subtasks (root = depth 1, its children depth 2,
+/// ... depth 5 is the deepest allowed level).
+pub const MAX_SUBTASK_DEPTH: usize = 5;
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub enum TaskDeleteDisposition {
+    /// Delete the task and all its descendants.
+    Cascade,
+    /// Delete only the task; promote its direct children to top level.
+    Promote,
+}
+
+impl TaskDeleteDisposition {
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::Cascade => "cascade",
+            Self::Promote => "promote",
+        }
+    }
+
+    pub fn parse(value: &str) -> Result<Self, DomainError> {
+        match value {
+            "cascade" => Ok(Self::Cascade),
+            "promote" => Ok(Self::Promote),
+            _ => Err(DomainError::Validation(format!(
+                "invalid delete disposition: {value}"
+            ))),
+        }
+    }
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct TaskTreeExpanded {
+    pub task_id: EntityId,
+    pub expanded: bool,
+    pub updated_at: String,
+}
+
+/// Validate that a task at `ancestor_chain_len` ancestors below a root still
+/// respects the max nesting depth. `chain_len` is the number of ancestors the
+/// new task would have (0 = top level).
+pub fn validate_parent_depth(chain_len: usize) -> Result<(), DomainError> {
+    if chain_len >= MAX_SUBTASK_DEPTH {
+        return Err(DomainError::Validation(format!(
+            "子任务嵌套最多 {MAX_SUBTASK_DEPTH} 层"
+        )));
+    }
+    Ok(())
+}
 
 pub fn validate_checklist_content(content: &str) -> Result<String, DomainError> {
     let trimmed = content.trim();

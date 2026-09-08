@@ -299,6 +299,7 @@ impl CsvTaskService {
                 due_date: item.due_date,
                 due_time: item.due_time,
                 tag_names: item.tags,
+                parent_id: None,
             }) {
                 Ok(task) => {
                     if item.status == TaskStatus::Completed {
@@ -653,6 +654,7 @@ mod tests {
                 due_date: Some("2026-08-20".into()),
                 due_time: None,
                 tag_names: Some(vec!["errands".into()]),
+                parent_id: None,
             })
             .unwrap();
 

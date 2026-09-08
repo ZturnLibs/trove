@@ -586,6 +586,7 @@ impl MemoryService {
             due_date: None,
             due_time: None,
             tag_names: Some(memory.tag_names.clone()),
+            parent_id: None,
         })?;
         // Index task
         self.search

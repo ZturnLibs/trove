@@ -414,6 +414,7 @@ impl AISuggestionService {
                 due_date: due_date.map(str::to_string),
                 due_time: due_time.map(str::to_string),
                 tag_names: None,
+                parent_id: None,
             })?;
             search.upsert(SearchEntityType::Task, task.id, &task.title, &task.notes)?;
             if let Ok(entity_id) = record.source_entity_id.parse() {
@@ -1941,6 +1942,7 @@ mod tests {
                 due_date: None,
                 due_time: None,
                 tag_names: None,
+                parent_id: None,
             })
             .unwrap();
 
@@ -1982,6 +1984,7 @@ mod tests {
                 due_date: None,
                 due_time: None,
                 tag_names: None,
+                parent_id: None,
             })
             .unwrap();
 
@@ -2019,6 +2022,7 @@ mod tests {
                 due_date: None,
                 due_time: None,
                 tag_names: None,
+                parent_id: None,
             })
             .unwrap();
         let record2 = service
@@ -2080,6 +2084,7 @@ mod tests {
                 due_date: None,
                 due_time: None,
                 tag_names: None,
+                parent_id: None,
             })
             .unwrap();
         // Link the sensitive memory manually: it must be excluded twice over.
@@ -2151,6 +2156,7 @@ mod tests {
                 due_date: Some(today),
                 due_time: Some("18:00".into()),
                 tag_names: None,
+                parent_id: None,
             })
             .unwrap()
     }
@@ -2260,6 +2266,7 @@ mod tests {
                 due_date: None,
                 due_time: None,
                 tag_names: None,
+                parent_id: None,
             })
             .unwrap();
         let before = tasks.get_task(task.id).unwrap();
@@ -2331,6 +2338,7 @@ mod tests {
                 due_date: None,
                 due_time: None,
                 tag_names: None,
+                parent_id: None,
             })
             .unwrap();
         let service = AISuggestionService::with_provider(
@@ -2355,6 +2363,7 @@ mod tests {
                 due_date: None,
                 due_time: None,
                 tag_names: None,
+                parent_id: None,
             })
             .unwrap();
         tasks.complete_task(done.id).unwrap();

@@ -242,6 +242,7 @@ mod tests {
                 due_date: None,
                 due_time: None,
                 tag_names: None,
+                parent_id: None,
             })
             .unwrap();
 

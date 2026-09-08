@@ -25,6 +25,7 @@ use crate::domain::{
     SearchResults, SmartListKind, SnoozePreset, Tag, Task, TaskList, TaskQuery, TodaySortSuggestions,
     TodayTasks, UpdateAutomationRuleInput, UpdateMemoryInput, UpdateReminderInput, UpdateTaskInput,
     DeleteListResult, ListDeleteDisposition, ActionDispatchOptions, ActionOutcome, WorkbenchAction,
+    TaskDeleteDisposition, TaskTreeExpanded,
 };
 use crate::infrastructure::db::DbHealth;
 use crate::infrastructure::settings::{AppSettings, ShortcutSettings};
@@ -578,6 +579,91 @@ pub fn task_reorder(
 #[tauri::command]
 pub fn task_list_tags(state: State<'_, AppState>) -> Result<Vec<Tag>, AppError> {
     state.tasks.list_tags().map_err(Into::into)
+}
+
+#[tauri::command]
+pub fn task_query_tree(
+    state: State<'_, AppState>,
+    query: TaskQuery,
+) -> Result<Vec<Task>, AppError> {
+    state.tasks.query_tree(query).map_err(Into::into)
+}
+
+#[tauri::command]
+pub fn task_set_parent(
+    app: AppHandle,
+    state: State<'_, AppState>,
+    id: EntityId,
+    parent_id: Option<EntityId>,
+) -> Result<Task, AppError> {
+    let task = state.tasks.set_task_parent(id, parent_id)?;
+    index_task(&state, &task);
+    emit_task_change(&app, &task, "updated");
+    Ok(task)
+}
+
+#[tauri::command]
+pub fn task_reorder_subtasks(
+    app: AppHandle,
+    state: State<'_, AppState>,
+    parent_id: Option<EntityId>,
+    ordered_ids: Vec<EntityId>,
+) -> Result<(), AppError> {
+    state.tasks.reorder_subtasks(parent_id, ordered_ids.clone())?;
+    if let Some(id) = ordered_ids.first() {
+        let _ = app.emit(
+            "domain://changed",
+            DomainChangeEvent {
+                entity_type: "task".into(),
+                entity_id: id.to_string(),
+                change: "updated".into(),
+                revision: 0,
+            },
+        );
+    }
+    Ok(())
+}
+
+#[tauri::command]
+pub fn task_delete_tree(
+    app: AppHandle,
+    state: State<'_, AppState>,
+    id: EntityId,
+    disposition: TaskDeleteDisposition,
+) -> Result<Vec<EntityId>, AppError> {
+    let affected = state.tasks.delete_task_tree(id, disposition)?;
+    for tid in &affected {
+        let _ = state.search.remove(SearchEntityType::Task, *tid);
+        let _ = state.links.purge_for_source("task", *tid);
+    }
+    for tid in &affected {
+        let _ = app.emit(
+            "domain://changed",
+            DomainChangeEvent {
+                entity_type: "task".into(),
+                entity_id: tid.to_string(),
+                change: "deleted".into(),
+                revision: 0,
+            },
+        );
+    }
+    Ok(affected)
+}
+
+#[tauri::command]
+pub fn task_tree_expanded_list(
+    state: State<'_, AppState>,
+) -> Result<Vec<TaskTreeExpanded>, AppError> {
+    state.tasks.tree_expanded_list().map_err(Into::into)
+}
+
+#[tauri::command]
+pub fn task_set_tree_expanded(
+    state: State<'_, AppState>,
+    task_id: EntityId,
+    expanded: bool,
+) -> Result<(), AppError> {
+    state.tasks.set_tree_expanded(task_id, expanded).map_err(Into::into)
 }
 
 #[tauri::command]
