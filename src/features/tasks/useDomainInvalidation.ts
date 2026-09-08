@@ -10,6 +10,7 @@ export function useDomainInvalidation() {
     void listen("domain://changed", () => {
       void queryClient.invalidateQueries({ queryKey: ["tasks"] });
       void queryClient.invalidateQueries({ queryKey: ["task-lists"] });
+      void queryClient.invalidateQueries({ queryKey: ["task-list-overview"] });
       void queryClient.invalidateQueries({ queryKey: ["task-tags"] });
       void queryClient.invalidateQueries({ queryKey: ["task-counts"] });
       void queryClient.invalidateQueries({ queryKey: ["reminders"] });

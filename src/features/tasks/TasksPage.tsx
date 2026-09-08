@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useLocation, useNavigate, useParams } from "react-router-dom";
 import {
   DndContext,
   DragOverlay,
@@ -13,6 +14,7 @@ import {
   arrayMove,
   verticalListSortingStrategy,
 } from "@dnd-kit/sortable";
+import { Sparkles, X } from "lucide-react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { TaskDetailPanel } from "@/design-system/patterns/TaskDetailPanel";
 import { SortableTaskRow, TaskRow } from "@/design-system/patterns/TaskRow";
@@ -28,13 +30,17 @@ import {
   type SmartListKind,
   type Task,
   type TaskList,
+  type TaskListGroupOverview,
   type TaskPriority,
   type TaskStatus,
 } from "@/ipc/client";
 import {
   NewTaskButton,
   SplitTaskLayout,
+  TaskGroup,
 } from "@/features/tasks/TaskLayout";
+import { ListDeleteDialog } from "@/features/tasks/ListDeleteDialog";
+import { listNameInOverview } from "@/features/tasks/listGroupTree";
 import { useDomainInvalidation } from "@/features/tasks/useDomainInvalidation";
 import { useTaskRename } from "@/features/tasks/useTaskRename";
 import { useFocusSession } from "@/stores/focus-session";
@@ -49,6 +55,8 @@ import {
   siblingIds,
   type VisibleRow,
 } from "@/features/tasks/taskTree";
+
+const GROUPS_ONBOARDING_KEY = "tasks.groupsOnboardingDone";
 
 const smartLists: { id: SmartListKind | "none"; label: string }[] = [
   { id: "none", label: "清单视图" },
@@ -67,8 +75,15 @@ export function TasksPage() {
   const rename = useTaskRename();
   const queryClient = useQueryClient();
   const startFocus = useFocusSession((s) => s.start);
+  // 路由参数：/tasks/:listId 按清单过滤、/tasks/group/:groupId 按分组过滤。
+  // URL → 状态单向同步；页内切换清单时用 replace 导航保持 URL 真实。
+  const { listId: routeListId, groupId: routeGroupId } = useParams();
+  const navigate = useNavigate();
+  const location = useLocation();
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [listId, setListId] = useState<string>("all");
+  const [listGroupId, setListGroupId] = useState<string | null>(null);
+  const [groupByList, setGroupByList] = useState(false);
   const [status, setStatus] = useState<TaskStatus | "active">("active");
   const [priority, setPriority] = useState<TaskPriority | "all">("all");
   const [tagId, setTagId] = useState<string | null>(null);
@@ -78,6 +93,7 @@ export function TasksPage() {
   const [search, setSearch] = useState("");
   const [newListName, setNewListName] = useState("");
   const [createdId, setCreatedId] = useState<string | null>(null);
+  const [onboardingVisible, setOnboardingVisible] = useState(false);
   const [listMenu, setListMenu] = useState<{
     list: TaskList;
     x: number;
@@ -107,6 +123,52 @@ export function TasksPage() {
     queryFn: () => ipc.taskListLists(),
   });
 
+  const overviewQuery = useQuery({
+    queryKey: ["task-list-overview"],
+    queryFn: () => ipc.taskListOverview(),
+  });
+  const overview: TaskListGroupOverview | undefined = overviewQuery.data;
+
+  // URL → 状态：进入 /tasks/:listId、/tasks/group/:groupId 或裸 /tasks 时同步。
+  useEffect(() => {
+    if (routeGroupId !== undefined) {
+      setListGroupId(routeGroupId);
+      setListId("all");
+      return;
+    }
+    setListGroupId(null);
+    setListId(routeListId ?? "all");
+  }, [routeGroupId, routeListId]);
+
+  // 页内切清单 → replace 导航保持 URL 真实（避免污染历史栈）。
+  const syncListUrl = useCallback(
+    (nextListId: string, nextGroupId: string | null) => {
+      const path =
+        nextGroupId
+          ? `/tasks/group/${nextGroupId}`
+          : nextListId === "all"
+            ? "/tasks"
+            : `/tasks/${nextListId}`;
+      if (location.pathname !== path) navigate(path, { replace: true });
+    },
+    [location.pathname, navigate],
+  );
+
+  // 一次性空状态引导：无任何自定义分组且只有收件箱时提示。
+  useEffect(() => {
+    try {
+      setOnboardingVisible(
+        localStorage.getItem(GROUPS_ONBOARDING_KEY) !== "1",
+      );
+    } catch {
+      setOnboardingVisible(false);
+    }
+  }, []);
+  const onboardingEligible =
+    !!overview &&
+    overview.groups.length === 0 &&
+    overview.ungrouped.length === 0;
+
   const tagsQuery = useQuery({
     queryKey: ["task-tags"],
     queryFn: () => ipc.taskListTags(),
@@ -121,7 +183,16 @@ export function TasksPage() {
     mutationFn: () =>
       ipc.savedViewCreate({
         name: viewName.trim(),
-        filter: { listId, status, priority, tagId, smart, showDeferred, showWaiting },
+        filter: {
+          listId,
+          status,
+          priority,
+          tagId,
+          smart,
+          showDeferred,
+          showWaiting,
+          groupByList,
+        },
       }),
     onSuccess: () => {
       void queryClient.invalidateQueries({ queryKey: ["saved-views"] });
@@ -140,7 +211,11 @@ export function TasksPage() {
 
   const applySavedView = (view: SavedView) => {
     const f = view.filter;
-    setListId(typeof f.listId === "string" ? f.listId : "all");
+    const nextListId = typeof f.listId === "string" ? f.listId : "all";
+    setListId(nextListId);
+    setListGroupId(null);
+    syncListUrl(nextListId, null);
+    setGroupByList(f.groupByList === true);
     const nextStatus = f.status;
     setStatus(
       nextStatus === "todo" ||
@@ -174,6 +249,7 @@ export function TasksPage() {
       smart === "none"
         ? ipc.taskQuery({
             listId: listId === "all" ? undefined : listId,
+            listGroupId: listGroupId ?? undefined,
             status:
               showDeferred || showWaiting
                 ? "todo"
@@ -190,13 +266,14 @@ export function TasksPage() {
             offset,
           })
         : ipc.taskSmartList(smart, limit, offset),
-    [listId, priority, search, showDeferred, showWaiting, smart, status, tagId],
+    [listGroupId, listId, priority, search, showDeferred, showWaiting, smart, status, tagId],
   );
 
   const taskListQueryKey = [
     "tasks",
     "list",
     listId,
+    listGroupId,
     status,
     priority,
     smart,
@@ -217,12 +294,13 @@ export function TasksPage() {
 
   // --- v2.1 subtask tree (list view only) ---
   const isTreeView = smart === "none";
-  const treeQueryKey = ["tasks", "tree", listId, status, priority, tagId, search, showDeferred, showWaiting];
+  const treeQueryKey = ["tasks", "tree", listId, listGroupId, status, priority, tagId, search, showDeferred, showWaiting];
   const treeQuery = useQuery({
     queryKey: treeQueryKey,
     queryFn: () =>
       ipc.taskQueryTree({
         listId: listId === "all" ? undefined : listId,
+        listGroupId: listGroupId ?? undefined,
         status:
           showDeferred || showWaiting
             ? "todo"
@@ -290,7 +368,10 @@ export function TasksPage() {
     mutationFn: (name: string) => ipc.taskListCreate(name),
     onSuccess: (list) => {
       void queryClient.invalidateQueries({ queryKey: ["task-lists"] });
+      // 新清单必为未分组：退出分组过滤，避免 listId + listGroupId 双过滤出空集。
+      setListGroupId(null);
       setListId(list.id);
+      syncListUrl(list.id, null);
       setNewListName("");
     },
   });
@@ -313,8 +394,12 @@ export function TasksPage() {
     }) => ipc.taskListDelete(id, disposition),
     onSuccess: (result: DeleteListResult) => {
       void queryClient.invalidateQueries({ queryKey: ["task-lists"] });
+      void queryClient.invalidateQueries({ queryKey: ["task-list-overview"] });
       void queryClient.invalidateQueries({ queryKey: ["tasks"] });
-      if (listId === result.listId) setListId("all");
+      if (listId === result.listId) {
+        setListId("all");
+        syncListUrl("all", null);
+      }
       setDeleteTarget(null);
       useRecentActions.getState().push({
         label: `删除清单「${result.listName}」`,
@@ -326,6 +411,39 @@ export function TasksPage() {
       });
     },
   });
+
+  // 一键创建 工作/个人 分组骨架（空状态引导，只出现一次）。
+  const bootstrapGroupsMutation = useMutation({
+    mutationFn: async () => {
+      const work = await ipc.taskListGroupCreate("工作");
+      const personal = await ipc.taskListGroupCreate("个人");
+      const workList = await ipc.taskListCreate("工作");
+      await ipc.taskListUpdate(workList.id, workList.name, { groupId: work.id });
+      const personalList = await ipc.taskListCreate("个人");
+      await ipc.taskListUpdate(personalList.id, personalList.name, {
+        groupId: personal.id,
+      });
+    },
+    onSuccess: () => {
+      try {
+        localStorage.setItem(GROUPS_ONBOARDING_KEY, "1");
+      } catch {
+        /* ignore */
+      }
+      setOnboardingVisible(false);
+      void queryClient.invalidateQueries({ queryKey: ["task-list-overview"] });
+      void queryClient.invalidateQueries({ queryKey: ["task-lists"] });
+    },
+  });
+
+  const dismissOnboarding = () => {
+    try {
+      localStorage.setItem(GROUPS_ONBOARDING_KEY, "1");
+    } catch {
+      /* ignore */
+    }
+    setOnboardingVisible(false);
+  };
 
   useEffect(() => {
     if (!listMenu) return;
@@ -367,6 +485,7 @@ export function TasksPage() {
     status !== "active" ||
     priority !== "all" ||
     tagId !== null ||
+    listGroupId !== null ||
     search.trim().length > 0;
 
   const applyDefer = useCallback(
@@ -592,15 +711,67 @@ export function TasksPage() {
     [taskById, selectedId],
   );
 
+  const groupName = listGroupId
+    ? (overview?.groups.find((g) => g.group.id === listGroupId)?.group.name ??
+      "分组")
+    : null;
+
   const listName = showDeferred
     ? "已推迟"
     : showWaiting
       ? "等待中"
       : smart !== "none"
       ? (smartLists.find((s) => s.id === smart)?.label ?? "智能列表")
-      : listId === "all"
-        ? "全部"
-        : (listsQuery.data?.find((l) => l.id === listId)?.name ?? "任务");
+      : groupName
+        ? groupName
+        : listId === "all"
+          ? "全部"
+          : listNameInOverview(
+              overview,
+              listId,
+              listsQuery.data?.find((l) => l.id === listId)?.name ?? "任务",
+            );
+
+  // 「按清单分区显示」：分区顺序 = 收件箱 → 各分组清单 → 未分组清单（与侧边栏一致）。
+  const orderedListIds = useMemo(() => {
+    if (!overview) return [] as string[];
+    return [
+      overview.inbox.id,
+      ...overview.groups.flatMap((g) => g.lists.map((l) => l.id)),
+      ...overview.ungrouped.map((l) => l.id),
+    ];
+  }, [overview]);
+
+  const listTitle = (id: string) =>
+    listNameInOverview(overview, id, "清单");
+
+  // 「按清单分区」开关仅在「全部清单」视图可操作；切到具体清单/分组视图时自动失效，
+  // 避免分区行为在开关不可见时仍然生效。
+  const groupByListActive =
+    groupByList && smart === "none" && listId === "all" && !listGroupId;
+
+  const sections: { listId: string; rows: VisibleRow[] }[] = useMemo(() => {
+    if (!groupByListActive) return [];
+    const byList = new Map<string, VisibleRow[]>();
+    for (const row of visibleRows) {
+      const key = row.task.listId;
+      const bucket = byList.get(key);
+      if (bucket) bucket.push(row);
+      else byList.set(key, [row]);
+    }
+    const ordered: { listId: string; rows: VisibleRow[] }[] = [];
+    const seen = new Set<string>();
+    const pushSection = (id: string) => {
+      const rowsFor = byList.get(id);
+      if (rowsFor && !seen.has(id)) {
+        seen.add(id);
+        ordered.push({ listId: id, rows: rowsFor });
+      }
+    };
+    for (const id of orderedListIds) pushSection(id);
+    for (const id of byList.keys()) pushSection(id);
+    return ordered;
+  }, [groupByListActive, visibleRows, orderedListIds]);
 
   return (
     <>
@@ -612,7 +783,9 @@ export function TasksPage() {
           : showWaiting
             ? "等待外部依赖的任务 · 跟进日到期会出现在今日页"
             : smart === "none"
-            ? "按清单管理任务"
+            ? groupName
+              ? `分组「${groupName}」下的全部任务`
+              : "按清单管理任务"
             : "智能列表 · 条件视图，非数据副本"
       }
       actions={
@@ -645,16 +818,62 @@ export function TasksPage() {
               />
               <select
                 className="h-7 rounded-[var(--radius-control)] border border-border bg-surface-raised px-2 text-[12px]"
-                value={listId}
-                onChange={(e) => setListId(e.target.value)}
+                value={listGroupId ? `group:${listGroupId}` : listId}
+                onChange={(e) => {
+                  const value = e.target.value;
+                  if (value.startsWith("group:")) {
+                    setListGroupId(value.slice("group:".length));
+                    setListId("all");
+                    syncListUrl("all", value.slice("group:".length));
+                    return;
+                  }
+                  setListGroupId(null);
+                  setListId(value);
+                  syncListUrl(value, null);
+                }}
               >
-                <option value="all">全部</option>
-                {(listsQuery.data ?? []).map((list) => (
-                  <option key={list.id} value={list.id}>
-                    {list.name}
-                  </option>
+                <option value="all">全部清单</option>
+                {overview ? (
+                  <option value={overview.inbox.id}>{overview.inbox.name}</option>
+                ) : null}
+                {(overview?.groups ?? []).map((node) => (
+                  <optgroup key={node.group.id} label={node.group.name}>
+                    {node.lists.map((list) => (
+                      <option key={list.id} value={list.id}>
+                        {list.name}
+                      </option>
+                    ))}
+                  </optgroup>
                 ))}
+                {(overview?.ungrouped ?? []).length > 0 ? (
+                  <optgroup label="未分组">
+                    {(overview?.ungrouped ?? []).map((list) => (
+                      <option key={list.id} value={list.id}>
+                        {list.name}
+                      </option>
+                    ))}
+                  </optgroup>
+                ) : null}
+                {/* 分组过滤入口 */}
+                {(overview?.groups ?? []).length > 0 ? (
+                  <optgroup label="按分组">
+                    {(overview?.groups ?? []).map((node) => (
+                      <option key={node.group.id} value={`group:${node.group.id}`}>
+                        {node.group.name}（整组）
+                      </option>
+                    ))}
+                  </optgroup>
+                ) : null}
               </select>
+              {smart === "none" && listId === "all" && !listGroupId ? (
+                <Button
+                  size="sm"
+                  variant={groupByList ? "secondary" : "ghost"}
+                  onClick={() => setGroupByList((v) => !v)}
+                >
+                  按清单分区
+                </Button>
+              ) : null}
               <select
                 className="h-7 rounded-[var(--radius-control)] border border-border bg-surface-raised px-2 text-[12px]"
                 value={status}
@@ -824,6 +1043,30 @@ export function TasksPage() {
         <div>
           {smart === "none" ? (
             <div className="border-b border-border">
+              {onboardingVisible && onboardingEligible ? (
+                <div className="flex items-center gap-2 border-b border-border bg-surface-raised px-2 py-2 text-[12px]">
+                  <Sparkles className="h-3.5 w-3.5 shrink-0 text-accent" />
+                  <span className="min-w-0 flex-1 text-muted">
+                    用分组区分工作与个人：一键创建「工作 / 个人」分组骨架
+                  </span>
+                  <Button
+                    size="sm"
+                    variant="secondary"
+                    disabled={bootstrapGroupsMutation.isPending}
+                    onClick={() => bootstrapGroupsMutation.mutate()}
+                  >
+                    {bootstrapGroupsMutation.isPending ? "创建中…" : "一键创建"}
+                  </Button>
+                  <button
+                    type="button"
+                    aria-label="关闭引导"
+                    className="flex h-5 w-5 items-center justify-center rounded text-muted hover:bg-row-hover hover:text-foreground"
+                    onClick={dismissOnboarding}
+                  >
+                    <X className="h-3.5 w-3.5" />
+                  </button>
+                </div>
+              ) : null}
               <div className="flex gap-2 border-b border-border p-2">
                 <Input
                   value={newListName}
@@ -855,7 +1098,12 @@ export function TasksPage() {
                           ? "border-foreground bg-surface-raised text-foreground"
                           : "border-border text-muted hover:text-foreground"
                       }`}
-                      onClick={() => setListId(list.id)}
+                      onClick={() => {
+                        // 清单 chips 与分组过滤互斥：切清单时清掉分组过滤并同步 URL。
+                        setListGroupId(null);
+                        setListId(list.id);
+                        syncListUrl(list.id, null);
+                      }}
                       onContextMenu={(e) => {
                         e.preventDefault();
                         setListMenu({ list, x: e.clientX, y: e.clientY });
@@ -911,6 +1159,8 @@ export function TasksPage() {
                         setPriority("all");
                         setTagId(null);
                         setSearch("");
+                        setListGroupId(null);
+                        syncListUrl(listId, null);
                       },
                     }
                   : undefined
@@ -931,7 +1181,49 @@ export function TasksPage() {
                     items={visibleRows.map((r) => r.task.id)}
                     strategy={verticalListSortingStrategy}
                   >
-                    {visibleRows.map((row) => {
+                    {sections.length > 0
+                      ? sections.map((section) => (
+                          <TaskGroup
+                            key={section.listId}
+                            title={listTitle(section.listId)}
+                            count={section.rows.length}
+                            alwaysShow
+                          >
+                            {section.rows.map((row) => {
+                              const task = taskById.get(row.task.id);
+                              if (!task) return null;
+                              const progress =
+                                forest?.progress.get(task.id) ?? null;
+                              return (
+                                <SortableTaskRow
+                                  key={task.id}
+                                  task={task}
+                                  selected={selectedId === task.id}
+                                  depth={row.depth}
+                                  hasChildren={row.hasChildren}
+                                  expanded={
+                                    row.hasChildren && !collapsedSet.has(task.id)
+                                  }
+                                  onToggleExpand={() => toggleExpand(task.id)}
+                                  childProgress={
+                                    row.hasChildren ? progress ?? null : null
+                                  }
+                                  isNestTarget={nestTargetId === task.id}
+                                  onSelect={() => handleSelect(task.id)}
+                                  onToggleComplete={() =>
+                                    toggleMutation.mutate(task)
+                                  }
+                                  onRename={rename}
+                                  onSetDefer={applyDefer}
+                                  onMarkWaiting={applyMarkWaiting}
+                                  showDeferLabel={showDeferred}
+                                  showWaitingLabel={showWaiting}
+                                />
+                              );
+                            })}
+                          </TaskGroup>
+                        ))
+                      : visibleRows.map((row) => {
                       const task = taskById.get(row.task.id);
                       if (!task) return null;
                       const progress = forest?.progress.get(task.id) ?? null;
@@ -1042,67 +1334,14 @@ export function TasksPage() {
       </div>
     ) : null}
     {deleteTarget ? (
-      <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/30 p-4">
-        <div
-          className="w-full max-w-sm rounded-[var(--radius-panel)] border border-border bg-surface p-4 shadow-lg"
-          onClick={(e) => e.stopPropagation()}
-        >
-          <h3 className="text-[13px] font-medium text-foreground">
-            删除清单「{deleteTarget.list.name}」
-          </h3>
-          <p className="mt-2 text-[12px] text-muted">
-            清单内还有 {deleteTarget.todoCount} 个未完成任务，请选择处理方式：
-          </p>
-          <div className="mt-4 flex flex-col gap-2">
-            <Button
-              size="sm"
-              variant="secondary"
-              disabled={deleteListMutation.isPending}
-              onClick={() =>
-                deleteListMutation.mutate({
-                  id: deleteTarget.list.id,
-                  disposition: "moveToInbox",
-                })
-              }
-            >
-              移动到收件箱
-            </Button>
-            <Button
-              size="sm"
-              variant="secondary"
-              disabled={deleteListMutation.isPending}
-              onClick={() =>
-                deleteListMutation.mutate({
-                  id: deleteTarget.list.id,
-                  disposition: "archiveTasks",
-                })
-              }
-            >
-              归档未完成任务
-            </Button>
-            <Button
-              size="sm"
-              variant="danger"
-              disabled={deleteListMutation.isPending}
-              onClick={() =>
-                deleteListMutation.mutate({
-                  id: deleteTarget.list.id,
-                  disposition: "forceDelete",
-                })
-              }
-            >
-              强制删除（含任务）
-            </Button>
-            <Button
-              size="sm"
-              variant="ghost"
-              onClick={() => setDeleteTarget(null)}
-            >
-              取消
-            </Button>
-          </div>
-        </div>
-      </div>
+      <ListDeleteDialog
+        target={deleteTarget.list}
+        pending={deleteListMutation.isPending}
+        onConfirm={(disposition) =>
+          deleteListMutation.mutate({ id: deleteTarget.list.id, disposition })
+        }
+        onClose={() => setDeleteTarget(null)}
+      />
     ) : null}
   </>
   );

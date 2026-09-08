@@ -68,6 +68,7 @@ function MainRoutes() {
           <Route path="/inbox" element={<InboxPage />} />
           <Route path="/tasks" element={<TasksPage />} />
           <Route path="/tasks/:listId" element={<TasksPage />} />
+          <Route path="/tasks/group/:groupId" element={<TasksPage />} />
           <Route path="/memory" element={<MemoryPage />} />
           <Route path="/clipboard" element={<ClipboardPage />} />
           <Route path="/weekly-review" element={<WeeklyReviewPage />} />

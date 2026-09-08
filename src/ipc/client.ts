@@ -260,7 +260,50 @@ export type TaskList = {
   createdAt: string;
   updatedAt: string;
   revision: number;
+  /** 所属分组；null = 未分组。收件箱恒为 null（不可归组）。 */
+  groupId: string | null;
 };
+
+// --- 任务分组（分组 → 清单两级结构） ---
+
+export type TaskListGroup = {
+  id: string;
+  name: string;
+  sortOrder: number;
+  createdAt: string;
+  updatedAt: string;
+  revision: number;
+};
+
+export type TaskListSummary = {
+  id: string;
+  name: string;
+  kind: ListKind;
+  groupId: string | null;
+  openCount: number;
+};
+
+export type TaskListGroupNode = {
+  group: TaskListGroup;
+  lists: TaskListSummary[];
+  openCount: number;
+};
+
+export type TaskListGroupOverview = {
+  groups: TaskListGroupNode[];
+  ungrouped: TaskListSummary[];
+  inbox: TaskListSummary;
+};
+
+export type ListGroupDeleteUndo = {
+  group: TaskListGroup;
+  movedListIds: string[];
+};
+
+/** 今日页过滤 chips 的清单归属条件（不传 = 全部）。 */
+export type ListGroupScope =
+  | { kind: "group"; groupId: string }
+  | { kind: "ungrouped" };
 
 export type ListDeleteDisposition =
   | "moveToInbox"
@@ -336,6 +379,8 @@ export type UpdateTaskInput = {
 
 export type TaskQuery = {
   listId?: string;
+  /** 按清单所属分组过滤（任务页分组视图）。 */
+  listGroupId?: string;
   inboxOnly?: boolean;
   status?: TaskStatus;
   priority?: TaskPriority;
@@ -1022,13 +1067,33 @@ export const ipc = {
   smokeNoteDelete: (id: string) => invoke<void>("smoke_note_delete", { id }),
   taskListLists: () => invoke<TaskList[]>("task_list_lists"),
   taskListCreate: (name: string) => invoke<TaskList>("task_list_create", { name }),
-  taskListUpdate: (id: string, name: string) =>
-    invoke<TaskList>("task_list_update", { id, name }),
+  taskListUpdate: (
+    id: string,
+    name: string,
+    grouping?: { groupId?: string; clearGroup?: boolean },
+  ) =>
+    invoke<TaskList>("task_list_update", {
+      id,
+      name,
+      groupId: grouping?.groupId,
+      clearGroup: grouping?.clearGroup,
+    }),
   taskListTodoCount: (id: string) => invoke<number>("task_list_todo_count", { id }),
   taskListDelete: (id: string, disposition: ListDeleteDisposition) =>
     invoke<DeleteListResult>("task_list_delete", { id, disposition }),
   taskListUndoDelete: (result: DeleteListResult) =>
     invoke<TaskList>("task_list_undo_delete", { result }),
+  taskListGroupCreate: (name: string) =>
+    invoke<TaskListGroup>("task_list_group_create", { name }),
+  taskListGroupRename: (id: string, name: string) =>
+    invoke<TaskListGroup>("task_list_group_rename", { id, name }),
+  taskListGroupReorder: (orderedIds: string[]) =>
+    invoke<void>("task_list_group_reorder", { orderedIds }),
+  taskListGroupDelete: (id: string) =>
+    invoke<ListGroupDeleteUndo>("task_list_group_delete", { id }),
+  taskListGroupUndoDelete: (undo: ListGroupDeleteUndo) =>
+    invoke<TaskListGroup>("task_list_group_undo_delete", { undo }),
+  taskListOverview: () => invoke<TaskListGroupOverview>("task_list_overview"),
   taskCreate: (input: CreateTaskInput) => invoke<Task>("task_create", { input }),
   taskCreateRecurring: (input: CreateTaskInput, recurrence: RecurrenceRule) =>
     invoke<Task>("task_create_recurring", { input, recurrence }),
@@ -1036,7 +1101,8 @@ export const ipc = {
   taskGet: (id: string) => invoke<Task>("task_get", { id }),
   taskQuery: (query: TaskQuery = {}) =>
     invoke<PagedResult<Task>>("task_query", { query }),
-  taskToday: () => invoke<TodayTasks>("task_today"),
+  taskToday: (scope?: ListGroupScope | null) =>
+    invoke<TodayTasks>("task_today", { scope: scope ?? null }),
   todaySortSuggestions: () =>
     invoke<TodaySortSuggestions>("today_sort_suggestions"),
   todaySetSmartSortEnabled: (enabled: boolean) =>

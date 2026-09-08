@@ -44,6 +44,10 @@ const MIGRATIONS: &[(i64, &str)] = &[
         22,
         include_str!("../../../migrations/0022_task_subtasks.sql"),
     ),
+    (
+        23,
+        include_str!("../../../migrations/0023_task_list_groups.sql"),
+    ),
 ];
 
 #[derive(Debug, Error)]
@@ -214,7 +218,7 @@ mod tests {
         let db_path = dir.path().join("workbench.db");
         let db = Database::open(&db_path).unwrap();
         let health = db.health_check().unwrap();
-        assert_eq!(health.schema_version, 22);
+        assert_eq!(health.schema_version, 23);
         assert_eq!(health.journal_mode.to_lowercase(), "wal");
         assert!(health.fts5_available);
     }
@@ -226,7 +230,7 @@ mod tests {
         let db = Database::open(&db_path).unwrap();
         db.migrate(None).unwrap();
         db.migrate(None).unwrap();
-        assert_eq!(db.health_check().unwrap().schema_version, 22);
+        assert_eq!(db.health_check().unwrap().schema_version, 23);
     }
 
     #[test]
@@ -257,7 +261,7 @@ mod tests {
 
         let db = Database { path: db_path.clone() };
         db.migrate(Some(&backup_dir)).unwrap();
-        assert_eq!(db.health_check().unwrap().schema_version, 22);
+        assert_eq!(db.health_check().unwrap().schema_version, 23);
 
         let backups: Vec<_> = std::fs::read_dir(&backup_dir)
             .unwrap()
