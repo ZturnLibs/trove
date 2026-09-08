@@ -48,6 +48,11 @@ export function TaskDetailPanel({
     queryKey: ["task-lists"],
     queryFn: () => ipc.taskListLists(),
   });
+  // 清单切换器按 分组→清单 分层展示。
+  const overviewQuery = useQuery({
+    queryKey: ["task-list-overview"],
+    queryFn: () => ipc.taskListOverview(),
+  });
 
   const [draft, setDraft] = useState<UpdateTaskInput | null>(null);
   const [tagText, setTagText] = useState("");
@@ -212,6 +217,41 @@ export function TaskDetailPanel({
     saveMutation.mutate({ ...draft, tagNames });
   };
 
+  // 清单切换器选项：按 分组→清单 分层（overview 可用时），否则退回平铺清单。
+  const renderListOptions = () => {
+    const overview = overviewQuery.data;
+    if (!overview) {
+      return (listsQuery.data ?? []).map((list) => (
+        <option key={list.id} value={list.id}>
+          {list.name}
+        </option>
+      ));
+    }
+    return (
+      <>
+        <option value={overview.inbox.id}>{overview.inbox.name}</option>
+        {overview.groups.map((node) => (
+          <optgroup key={node.group.id} label={node.group.name}>
+            {node.lists.map((list) => (
+              <option key={list.id} value={list.id}>
+                {list.name}
+              </option>
+            ))}
+          </optgroup>
+        ))}
+        {overview.ungrouped.length > 0 ? (
+          <optgroup label="未分组">
+            {overview.ungrouped.map((list) => (
+              <option key={list.id} value={list.id}>
+                {list.name}
+              </option>
+            ))}
+          </optgroup>
+        ) : null}
+      </>
+    );
+  };
+
   return (
     <div className="flex h-full min-h-0 flex-col">
       <div className="flex items-center justify-between gap-2 border-b border-border px-3 py-2 text-[11px] text-muted">
@@ -291,11 +331,7 @@ export function TaskDetailPanel({
                 });
               }}
             >
-              {(listsQuery.data ?? []).map((list) => (
-                <option key={list.id} value={list.id}>
-                  {list.name}
-                </option>
-              ))}
+              {renderListOptions()}
             </select>
           </label>
           <label className="space-y-1 text-[11px] text-muted">

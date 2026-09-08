@@ -29,6 +29,7 @@ import { ConfirmButton } from "@/design-system/patterns/ConfirmButton";
 import { Input } from "@/design-system/primitives/Input";
 import {
   ipc,
+  type ListGroupScope,
   type Reminder,
   type Task,
   type TodayReminderItem,
@@ -42,6 +43,7 @@ import {
   SplitTaskLayout,
   TaskGroup,
 } from "@/features/tasks/TaskLayout";
+import { buildTodayScopes } from "@/features/tasks/listGroupTree";
 import { useDomainInvalidation } from "@/features/tasks/useDomainInvalidation";
 import { useTaskRename } from "@/features/tasks/useTaskRename";
 import { useRecentActions } from "@/stores/recent-actions";
@@ -53,6 +55,38 @@ import { FOCUS_MANY_COACH_KEY } from "@/lib/focus";
 import { addDays, localTodayString } from "@/lib/waiting";
 
 type TodayContainerId = "focus" | "due-today";
+
+const TODAY_GROUP_FILTER_KEY = "today.groupFilter";
+
+function readTodayGroupFilter(): ListGroupScope | null {
+  try {
+    const raw = localStorage.getItem(TODAY_GROUP_FILTER_KEY);
+    if (!raw) return null;
+    const parsed: unknown = JSON.parse(raw);
+    if (
+      parsed &&
+      typeof parsed === "object" &&
+      (parsed as { kind?: unknown }).kind === "group" &&
+      typeof (parsed as { groupId?: unknown }).groupId === "string"
+    ) {
+      return { kind: "group", groupId: (parsed as { groupId: string }).groupId };
+    }
+    if (parsed && typeof parsed === "object" && (parsed as { kind?: unknown }).kind === "ungrouped") {
+      return { kind: "ungrouped" };
+    }
+  } catch {
+    /* ignore */
+  }
+  return null;
+}
+
+function sameScope(a: ListGroupScope | null, b: ListGroupScope | null): boolean {
+  if (a === b) return true;
+  if (!a || !b) return false;
+  if (a.kind !== b.kind) return false;
+  if (a.kind === "group" && b.kind === "group") return a.groupId === b.groupId;
+  return true;
+}
 
 function findTodayContainer(
   id: string,
@@ -445,6 +479,24 @@ export function TodayPage() {
   const [wrapOpen, setWrapOpen] = useState(false);
   const [wrapSummaryOpen, setWrapSummaryOpen] = useState(false);
   const navigate = useNavigate();
+  // 今日页过滤 chips（全部/各分组/未分组），选择跨会话记忆，默认全部。
+  const [groupScope, setGroupScope] = useState<ListGroupScope | null>(() =>
+    readTodayGroupFilter(),
+  );
+  const overviewQuery = useQuery({
+    queryKey: ["task-list-overview"],
+    queryFn: () => ipc.taskListOverview(),
+  });
+
+  const applyGroupScope = (scope: ListGroupScope | null) => {
+    setGroupScope(scope);
+    try {
+      if (scope) localStorage.setItem(TODAY_GROUP_FILTER_KEY, JSON.stringify(scope));
+      else localStorage.removeItem(TODAY_GROUP_FILTER_KEY);
+    } catch {
+      /* ignore */
+    }
+  };
 
   useEffect(() => {
     try {
@@ -489,8 +541,8 @@ export function TodayPage() {
   const focusStarting = useFocusSession((s) => s.starting);
 
   const todayQuery = useQuery({
-    queryKey: ["tasks", "today"],
-    queryFn: () => ipc.taskToday(),
+    queryKey: ["tasks", "today", groupScope],
+    queryFn: () => ipc.taskToday(groupScope),
   });
 
   const settingsQuery = useQuery({
@@ -1018,6 +1070,10 @@ export function TodayPage() {
   };
 
   const data = todayQuery.data;
+  const todayScopes = useMemo(
+    () => (overviewQuery.data ? buildTodayScopes(overviewQuery.data) : []),
+    [overviewQuery.data],
+  );
   const showCarryBanner =
     !showAllReminders &&
     (data?.focusCarrySuggestions.length ?? 0) > 0 &&
@@ -1091,7 +1147,27 @@ export function TodayPage() {
         </>
       }
       list={
-        showAllReminders ? (
+        <div>
+          {!showAllReminders && todayScopes.length > 1 ? (
+            <div className="flex flex-wrap items-center gap-1 border-b border-border px-3 py-2">
+              {todayScopes.map((item) => (
+                <button
+                  key={item.label}
+                  type="button"
+                  className={cn(
+                    "rounded-full px-2.5 py-0.5 text-[11px]",
+                    sameScope(groupScope, item.scope)
+                      ? "bg-row-active text-foreground"
+                      : "text-muted hover:bg-row-hover hover:text-foreground",
+                  )}
+                  onClick={() => applyGroupScope(item.scope)}
+                >
+                  {item.label}
+                </button>
+              ))}
+            </div>
+          ) : null}
+          {showAllReminders ? (
           allRemindersQuery.isLoading ? (
             <div className="p-4 text-[12px] text-muted">加载中…</div>
           ) : (allRemindersQuery.data?.length ?? 0) === 0 ? (
@@ -1143,8 +1219,16 @@ export function TodayPage() {
           <div className="p-4 text-[12px] text-muted">加载中…</div>
         ) : empty ? (
           <EmptyState
-            title="今日还没有事项"
-            body="给任务加上今天的截止日期，或新建今日提醒。"
+            title={
+              groupScope
+                ? "该分组下今日没有事项"
+                : "今日还没有事项"
+            }
+            body={
+              groupScope
+                ? "换个分组，或给任务加上今天的截止日期。"
+                : "给任务加上今天的截止日期，或新建今日提醒。"
+            }
             primaryAction={{
               label: "新建任务",
               onClick: () => createMutation.mutate(),
@@ -1375,7 +1459,8 @@ export function TodayPage() {
               </DragOverlay>
             </DndContext>
           </div>
-        )
+        )}
+        </div>
       }
       detail={
         selectedAllReminder ? (

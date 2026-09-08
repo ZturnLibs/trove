@@ -27,6 +27,11 @@ Contracts for the `src-tauri` crate. Read the listed files before changing the m
   `#[serde(rename_all = "camelCase")]` on that struct too. Without it, camelCase
   keys (e.g. `subtaskAutoCompleteParent`) silently fall back to `default`, making
   toggles appear stuck "on".
+- **Joined filter dimensions must exclude soft-deleted rows**: when adding a filter
+  that resolves through a join (e.g. tasks → list → group) in `build_task_filters`,
+  require `deleted_at IS NULL` on **every** joined table — the task row is live, but a
+  soft-deleted list/group silently resurrects matches. Found in task-list-groups;
+  regression test: `group_filter_excludes_soft_deleted_list_and_group`.
 - **Subtask aggregation**: `complete_task` / `uncomplete_task` / `archive_task` /
   `unarchive_task` cascade and aggregate inside a single transaction; series spawn
   happens only for the explicitly targeted task. Both aggregation toggles live in

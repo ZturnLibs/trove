@@ -50,7 +50,7 @@ impl DailyWrapService {
         .format("%Y-%m-%d")
         .to_string();
 
-        let today_view = tasks.today_tasks()?;
+        let today_view = tasks.today_tasks(None)?;
         let unfinished_focus: Vec<Task> = today_view
             .focus
             .into_iter()

@@ -20,6 +20,7 @@ import { AboutDialog } from "@/components/AboutDialog";
 import { RecentActionToast } from "@/components/RecentActionToast";
 import { UpdateProgressBanner, UpdateToast } from "@/components/UpdateToast";
 import { FocusSessionHost } from "@/features/focus/FocusSessionHost";
+import { TaskSidebarTree } from "@/features/tasks/TaskSidebarTree";
 import { useAppUpdater } from "@/stores/app-updater";
 
 const navItems = [
@@ -124,14 +125,14 @@ export function MainShell() {
           <BrandLogo className="h-5 w-5" />
           <span className="truncate">Trove</span>
         </div>
-        <nav className="flex flex-1 flex-col gap-0.5 px-2 py-1">
+        <nav className="flex flex-1 flex-col overflow-y-auto px-2 py-1">
           {navItems.map(({ to, label, icon: Icon, badge }) => (
             <NavLink
               key={to}
               to={to}
               className={({ isActive }) =>
                 cn(
-                  "flex h-8 items-center gap-2 rounded-[var(--radius-control)] px-2 text-[13px] text-muted hover:bg-row-hover hover:text-foreground",
+                  "flex h-8 shrink-0 items-center gap-2 rounded-[var(--radius-control)] px-2 text-[13px] text-muted hover:bg-row-hover hover:text-foreground",
                   isActive && "bg-row-active text-foreground",
                 )
               }
@@ -145,7 +146,9 @@ export function MainShell() {
               ) : null}
             </NavLink>
           ))}
-          <div className="mt-auto border-t border-border pt-2">
+          {/* 任务区：分组 → 清单 两级树（收件箱保持上面的顶级导航项，不参与归组） */}
+          <TaskSidebarTree />
+          <div className="mt-auto shrink-0 border-t border-border pt-2">
             <NavLink
               to="/settings"
               className={({ isActive }) =>
