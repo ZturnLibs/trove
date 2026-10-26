@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import {
   DndContext,
+  DragOverlay,
   PointerSensor,
   useDroppable,
   useSensor,
@@ -10,8 +11,12 @@ import type { DragEndEvent, DragStartEvent } from "@dnd-kit/core";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useSearchParams } from "react-router-dom";
 import { TaskDetailPanel } from "@/design-system/patterns/TaskDetailPanel";
-import { BoardCard } from "@/features/board/BoardCard";
-import { buildGroupByListId, splitBoardColumns } from "@/features/board/splitBoardColumns";
+import { BoardCardBody, BoardCard } from "@/features/board/BoardCard";
+import {
+  buildGroupByListId,
+  defaultListIdForScope,
+  splitBoardColumns,
+} from "@/features/board/splitBoardColumns";
 import {
   buildTodayScopes,
   sameScope,
@@ -88,12 +93,14 @@ function BoardColumnView({
   title,
   hint,
   count,
+  footer,
   children,
 }: {
   columnId: BoardColumnId;
   title: string;
   hint?: string;
   count: number;
+  footer?: React.ReactNode;
   children: React.ReactNode;
 }) {
   const { setNodeRef, isOver } = useDroppable({ id: columnId });
@@ -115,7 +122,58 @@ function BoardColumnView({
       <div className="min-h-0 flex-1 space-y-2 overflow-y-auto px-2 pb-2">
         {children}
       </div>
+      {footer ? (
+        <div className="shrink-0 border-t border-border px-2 py-2">{footer}</div>
+      ) : null}
     </section>
+  );
+}
+
+/** 列内新建：折叠为「＋ 新建任务」，展开为行内标题输入（Enter 创建 / Esc 关闭）。 */
+function BoardQuickAdd({
+  open,
+  busy,
+  value,
+  onOpen,
+  onChange,
+  onSubmit,
+  onDismiss,
+}: {
+  open: boolean;
+  busy: boolean;
+  value: string;
+  onOpen: () => void;
+  onChange: (value: string) => void;
+  onSubmit: () => void;
+  onDismiss: () => void;
+}) {
+  if (!open) {
+    return (
+      <button
+        type="button"
+        onClick={onOpen}
+        className="w-full rounded-[var(--radius-control)] border border-dashed border-border px-2 py-1.5 text-left text-[11px] text-muted transition-colors hover:border-accent hover:text-foreground"
+      >
+        ＋ 新建任务
+      </button>
+    );
+  }
+  return (
+    <input
+      autoFocus
+      value={value}
+      disabled={busy}
+      placeholder="标题后回车创建，Esc 关闭"
+      onChange={(e) => onChange(e.target.value)}
+      onBlur={() => {
+        if (!value.trim()) onDismiss();
+      }}
+      onKeyDown={(e) => {
+        if (e.key === "Enter" && value.trim()) onSubmit();
+        if (e.key === "Escape") onDismiss();
+      }}
+      className="w-full rounded-[var(--radius-control)] border border-border bg-surface-raised px-2 py-1.5 text-[12px] outline-none focus:border-accent"
+    />
   );
 }
 
@@ -126,6 +184,11 @@ export function BoardPage() {
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [focusTitleId, setFocusTitleId] = useState<string | null>(null);
   const [activeDragId, setActiveDragId] = useState<string | null>(null);
+  const [composerColumn, setComposerColumn] = useState<"todo" | "doing" | null>(
+    null,
+  );
+  const [composerTitle, setComposerTitle] = useState("");
+  const [activeDragTask, setActiveDragTask] = useState<Task | null>(null);
   const suppressClickUntilRef = useRef(0);
   const today = localTodayString();
 
@@ -308,6 +371,45 @@ export function BoardPage() {
     },
   });
 
+  // 列内新建：标题即建，清单取当前作用域默认（分组 → 该组首个清单，否则收件箱）；
+  // 进行中列创建后立刻置 doing。成功清空输入并保持 composer 开启，便于连续添加；
+  // 失败保留已输标题供重试。
+  const createMutation = useMutation<
+    Task,
+    Error,
+    { title: string; column: "todo" | "doing" }
+  >({
+    mutationFn: async ({ title, column }) => {
+      const created = await ipc.taskCreate({
+        title,
+        listId:
+          overviewQuery.data
+            ? (defaultListIdForScope(groupScope, overviewQuery.data) ??
+              undefined)
+            : undefined,
+      });
+      if (column === "doing") {
+        return ipc.taskSetBoardStage(created.id, "doing");
+      }
+      return created;
+    },
+    onSuccess: () => {
+      setComposerTitle("");
+      invalidateTasks();
+    },
+  });
+
+  const submitComposer = (column: "todo" | "doing") => {
+    const title = composerTitle.trim();
+    if (!title || createMutation.isPending) return;
+    createMutation.mutate({ title, column });
+  };
+
+  const dismissComposer = () => {
+    setComposerColumn(null);
+    setComposerTitle("");
+  };
+
   const applyDefer = async (task: Task, availableAt: string | null) => {
     const prev = task.availableAt;
     await ipc.taskSetDefer(task.id, availableAt);
@@ -335,12 +437,15 @@ export function BoardPage() {
     allBoardTasks.find((task) => task.id === id) ?? null;
 
   const handleDragStart = (event: DragStartEvent) => {
+    const dragged = findTask(String(event.active.id));
     setActiveDragId(String(event.active.id));
+    setActiveDragTask(dragged);
   };
 
   const handleDragEnd = (event: DragEndEvent) => {
     const dragged = findTask(String(event.active.id));
     setActiveDragId(null);
+    setActiveDragTask(null);
     suppressClickUntilRef.current = Date.now() + 300;
     if (!dragged || !event.over) return;
     const target = String(event.over.id);
@@ -419,13 +524,27 @@ export function BoardPage() {
             sensors={sensors}
             onDragStart={handleDragStart}
             onDragEnd={handleDragEnd}
-            onDragCancel={() => setActiveDragId(null)}
+            onDragCancel={() => {
+              setActiveDragId(null);
+              setActiveDragTask(null);
+            }}
           >
             <div className="flex min-h-0 flex-1 gap-3 overflow-x-auto p-3">
               <BoardColumnView
                 columnId="col:todo"
                 title="待办"
                 count={columns.todo.length}
+                footer={
+                  <BoardQuickAdd
+                    open={composerColumn === "todo"}
+                    busy={createMutation.isPending}
+                    value={composerTitle}
+                    onOpen={() => setComposerColumn("todo")}
+                    onChange={setComposerTitle}
+                    onSubmit={() => submitComposer("todo")}
+                    onDismiss={dismissComposer}
+                  />
+                }
               >
                 {renderCards(columns.todo)}
               </BoardColumnView>
@@ -433,6 +552,17 @@ export function BoardPage() {
                 columnId="col:doing"
                 title="进行中"
                 count={columns.doing.length}
+                footer={
+                  <BoardQuickAdd
+                    open={composerColumn === "doing"}
+                    busy={createMutation.isPending}
+                    value={composerTitle}
+                    onOpen={() => setComposerColumn("doing")}
+                    onChange={setComposerTitle}
+                    onSubmit={() => submitComposer("doing")}
+                    onDismiss={dismissComposer}
+                  />
+                }
               >
                 {renderCards(columns.doing)}
               </BoardColumnView>
@@ -445,6 +575,13 @@ export function BoardPage() {
                 {renderCards(columns.done)}
               </BoardColumnView>
             </div>
+            <DragOverlay dropAnimation={null}>
+              {activeDragTask ? (
+                <div className="w-[240px] rotate-2 cursor-grabbing rounded-[var(--radius-control)] border border-accent/50 bg-surface p-2 shadow-xl ring-2 ring-accent/40">
+                  <BoardCardBody task={activeDragTask} />
+                </div>
+              ) : null}
+            </DragOverlay>
           </DndContext>
         </div>
       }

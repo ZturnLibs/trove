@@ -70,3 +70,16 @@ export function buildGroupByListId(
   }
   return map;
 }
+
+/**
+ * 列内新建的默认清单：分组作用域 → 该组首个清单（新建任务在当前 chips 过滤下可见）；
+ * 空组/全部/未分组 → null（后端默认收件箱）。
+ */
+export function defaultListIdForScope(
+  scope: ListGroupScope | null,
+  overview: TaskListGroupOverview,
+): string | null {
+  if (scope?.kind !== "group") return null;
+  const node = overview.groups.find((g) => g.group.id === scope.groupId);
+  return node?.lists[0]?.id ?? null;
+}
