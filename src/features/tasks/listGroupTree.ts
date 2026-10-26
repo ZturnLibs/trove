@@ -74,6 +74,18 @@ export function buildTodayScopes(overview: TaskListGroupOverview): {
   return scopes;
 }
 
+/** chips 选中态比较（null = 全部）。 */
+export function sameScope(
+  a: ListGroupScope | null,
+  b: ListGroupScope | null,
+): boolean {
+  if (a === b) return true;
+  if (!a || !b) return false;
+  if (a.kind !== b.kind) return false;
+  if (a.kind === "group" && b.kind === "group") return a.groupId === b.groupId;
+  return true;
+}
+
 /** 从 overview 中查找清单名（含收件箱），找不到时返回回退文案。 */
 export function listNameInOverview(
   overview: TaskListGroupOverview | undefined,

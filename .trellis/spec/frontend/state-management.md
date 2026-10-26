@@ -55,3 +55,4 @@ localStorage 读写一律 try/catch 吞掉 quota/private-mode 异常（全仓既
 - **URL↔state 双向 effect 循环**：过滤页只保留 URL→state 单向 + 页内 replace（见上节）。
 - **裸 localStorage 读写**：private mode / quota 抛异常会炸掉整个渲染路径，必须 try/catch。
 - **过滤参数漏出 queryKey**：缓存串页，表现为切换筛选后显示旧数据。
+- **乐观补丁判定条件 ≠ 渲染分流条件**：补丁改写字段后，若分流/分组函数不校验该字段对应的终态（如 board 看板按 `boardStage` 分流却忽略 `status`），行会滞留原列等 refetch——乐观更新空转。分流纯函数必须把「哪些行属于哪列」的判据与补丁会改变的字段对齐（board 看板 P2 教训：`splitBoardColumns` 需校验 `status`）。

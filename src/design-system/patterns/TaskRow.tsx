@@ -515,45 +515,79 @@ export function TaskRow({
         </div>
       ) : null}
       {contextMenu ? (
-        <div
-          className="fixed z-50 min-w-[10rem] rounded-[var(--radius-control)] border border-border bg-surface py-1 shadow-lg"
-          style={{ left: contextMenu.x, top: contextMenu.y }}
-          onClick={(event) => event.stopPropagation()}
-          onKeyDown={(event) => event.stopPropagation()}
-        >
-          {onSetDefer && !isWaiting ? (
-            <>
-              <div className="px-3 py-1 text-[10px] text-muted">推迟显示</div>
-              {deferPresets(localTodayString()).map((preset) => (
-                <button
-                  key={preset.label}
-                  type="button"
-                  className="block w-full px-3 py-1.5 text-left text-[12px] hover:bg-surface-raised"
-                  onClick={(event) => {
-                    event.stopPropagation();
-                    setContextMenu(null);
-                    void onSetDefer(task, preset.value);
-                  }}
-                >
-                  {preset.label}
-                </button>
-              ))}
-            </>
-          ) : null}
-          {onMarkWaiting && !isWaiting ? (
+        <TaskWorkflowContextMenu
+          x={contextMenu.x}
+          y={contextMenu.y}
+          task={task}
+          isWaiting={isWaiting}
+          onSetDefer={onSetDefer}
+          onMarkWaiting={onMarkWaiting}
+          onClose={() => setContextMenu(null)}
+        />
+      ) : null}
+    </div>
+  );
+}
+
+/**
+ * 任务右键菜单（推迟显示预设 + 标记等待）。TaskRow 与看板卡片共用；
+ * 外层负责定位关闭（outside click / Esc / 滚动），菜单项点击后自行 onClose。
+ */
+export function TaskWorkflowContextMenu({
+  x,
+  y,
+  task,
+  isWaiting,
+  onSetDefer,
+  onMarkWaiting,
+  onClose,
+}: {
+  x: number;
+  y: number;
+  task: Task;
+  isWaiting: boolean;
+  onSetDefer?: (task: Task, availableAt: string | null) => void | Promise<void>;
+  onMarkWaiting?: (task: Task) => void | Promise<void>;
+  onClose: () => void;
+}) {
+  return (
+    <div
+      className="fixed z-50 min-w-[10rem] rounded-[var(--radius-control)] border border-border bg-surface py-1 shadow-lg"
+      style={{ left: x, top: y }}
+      onClick={(event) => event.stopPropagation()}
+      onKeyDown={(event) => event.stopPropagation()}
+    >
+      {onSetDefer && !isWaiting ? (
+        <>
+          <div className="px-3 py-1 text-[10px] text-muted">推迟显示</div>
+          {deferPresets(localTodayString()).map((preset) => (
             <button
+              key={preset.label}
               type="button"
               className="block w-full px-3 py-1.5 text-left text-[12px] hover:bg-surface-raised"
               onClick={(event) => {
                 event.stopPropagation();
-                setContextMenu(null);
-                void onMarkWaiting(task);
+                onClose();
+                void onSetDefer(task, preset.value);
               }}
             >
-              标记等待…
+              {preset.label}
             </button>
-          ) : null}
-        </div>
+          ))}
+        </>
+      ) : null}
+      {onMarkWaiting && !isWaiting ? (
+        <button
+          type="button"
+          className="block w-full px-3 py-1.5 text-left text-[12px] hover:bg-surface-raised"
+          onClick={(event) => {
+            event.stopPropagation();
+            onClose();
+            void onMarkWaiting(task);
+          }}
+        >
+          标记等待…
+        </button>
       ) : null}
     </div>
   );

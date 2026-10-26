@@ -328,11 +328,15 @@ export type Tag = {
 
 export type TaskWorkflowState = "active" | "waiting";
 
+/** 看板阶段（迁移 0024）：仅 "doing"（进行中列）；null = 待办列。 */
+export type TaskBoardStage = "doing";
+
 export type Task = {
   id: string;
   title: string;
   notes: string;
   status: TaskStatus;
+  boardStage: TaskBoardStage | null;
   priority: TaskPriority;
   listId: string;
   listName: string;
@@ -1109,6 +1113,8 @@ export const ipc = {
     invoke<AppSettings>("today_set_smart_sort_enabled", { enabled }),
   taskComplete: (id: string) => invoke<Task>("task_complete", { id }),
   taskUncomplete: (id: string) => invoke<Task>("task_uncomplete", { id }),
+  taskSetBoardStage: (id: string, stage: TaskBoardStage | null) =>
+    invoke<Task>("task_set_board_stage", { id, stage }),
   taskArchive: (id: string) => invoke<Task>("task_archive", { id }),
   taskUnarchive: (id: string) => invoke<Task>("task_unarchive", { id }),
   taskDelete: (id: string) => invoke<void>("task_delete", { id }),

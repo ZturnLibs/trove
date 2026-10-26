@@ -152,6 +152,7 @@ mod tests {
             title: "t".into(),
             notes: String::new(),
             status: TaskStatus::Todo,
+            board_stage: None,
             priority,
             list_id: new_entity_id(),
             list_name: "inbox".into(),

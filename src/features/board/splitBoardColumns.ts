@@ -1,0 +1,72 @@
+import type {
+  ListGroupScope,
+  Task,
+  TaskListGroupOverview,
+} from "@/ipc/client";
+
+/**
+ * 看板三列的纯分流函数（unit-testable，沿用 listGroupTree.ts 模式）。
+ *
+ * 输入是两次 task_query 的结果：
+ * - todo 查询（status=todo，统一活跃定义已由后端过滤 waiting/deferred）
+ *   按客户端 `boardStage` 分流「待办 / 进行中」两列；
+ * - completed 查询（completedSince=今天）直接作为「已完成」列。
+ *
+ * 分组过滤：group 作用域由服务端 `listGroupId` 参数过滤（透传，不在此重复）；
+ * ungrouped 作用域服务端无对应参数，这里按 listId → groupId 映射客户端过滤。
+ * 各列保持查询返回的既有排序（清单内 sort_order → 创建时间 / 完成时间倒序）。
+ */
+
+export type BoardColumns = {
+  todo: Task[];
+  doing: Task[];
+  done: Task[];
+};
+
+export function splitBoardColumns(
+  todoTasks: Task[],
+  completedTasks: Task[],
+  scope: ListGroupScope | null,
+  groupByListId: ReadonlyMap<string, string | null>,
+): BoardColumns {
+  const inScope = (task: Task): boolean => {
+    if (scope?.kind === "ungrouped") {
+      // 未分组 = 清单不属于任何分组（收件箱视为未分组）。
+      return groupByListId.get(task.listId) === null;
+    }
+    // null = 全部；group = 服务端已按 listGroupId 过滤。
+    return true;
+  };
+
+  const todo: Task[] = [];
+  const doing: Task[] = [];
+  for (const task of todoTasks) {
+    // status 守卫：乐观补丁（完成/取消完成）会把行短暂改成终态，
+    // 必须立即将其移出所在列——否则卡片带删除线滞留到 refetch 返回。
+    if (task.status !== "todo") continue;
+    if (!inScope(task)) continue;
+    if (task.boardStage === "doing") doing.push(task);
+    else todo.push(task);
+  }
+  const done = completedTasks.filter(
+    (task) => task.status === "completed" && inScope(task),
+  );
+  return { todo, doing, done };
+}
+
+/** listId → groupId 映射（null = 未分组；收件箱恒未分组），供 ungrouped 过滤用。 */
+export function buildGroupByListId(
+  overview: TaskListGroupOverview,
+): Map<string, string | null> {
+  const map = new Map<string, string | null>();
+  map.set(overview.inbox.id, null);
+  for (const node of overview.groups) {
+    for (const list of node.lists) {
+      map.set(list.id, node.group.id);
+    }
+  }
+  for (const list of overview.ungrouped) {
+    map.set(list.id, null);
+  }
+  return map;
+}

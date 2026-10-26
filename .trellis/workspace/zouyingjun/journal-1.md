@@ -344,3 +344,24 @@
 ### Status
 
 [OK] **Completed**
+
+
+## Session 15: 任务看板实现：迁移0024+/board三列拖拽+审查修复
+
+**Date**: 2026-10-26
+**Task**: 任务看板实现：迁移0024+/board三列拖拽+审查修复
+**Branch**: `feat/task-kanban-board`
+
+### Summary
+
+独立/board看板页落地（阶段列迁移0024、三向拖拽、分组chips、乐观更新）；审查代理3条发现全修复（分流status守卫/UPDATE竞态守卫/15s refetch）；最终门禁 cargo 197+13、typecheck、59 unit 全绿；PR #20
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `c334641` | (see git log) |
+
+### Status
+
+[OK] **Completed**

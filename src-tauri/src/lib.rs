@@ -619,6 +619,7 @@ pub fn run() {
             commands::today_set_smart_sort_enabled,
             commands::task_complete,
             commands::task_uncomplete,
+            commands::task_set_board_stage,
             commands::task_archive,
             commands::task_unarchive,
             commands::task_delete,

@@ -2,10 +2,11 @@ use crate::domain::{
     compute_today_sort_suggestions, local_today, new_id, stamp, validate_due_date,
     validate_due_time, CreateTaskInput, DeleteListResult, DomainError, EntityId,
     ListDeleteDisposition, ListGroupScope, ListKind, PagedResult, should_apply_active_list_filter,
-    SmartListKind, SystemClock, Tag, Task, TaskList, TaskPriority, TaskQuery, TaskStatus,
-    TaskWorkflowState, ChecklistItem, ChecklistUpdateInput, TaskChecklist, CHECKLIST_MAX_ITEMS,
-    TodaySortSuggestions, TodayTasks, UpdateTaskInput, validate_checklist_content,
-    validate_due_vs_available, TaskDeleteDisposition, TaskTreeExpanded, validate_parent_depth,
+    SmartListKind, SystemClock, Tag, Task, TaskBoardStage, TaskList, TaskPriority, TaskQuery,
+    TaskStatus, TaskWorkflowState, ChecklistItem, ChecklistUpdateInput, TaskChecklist,
+    CHECKLIST_MAX_ITEMS, TodaySortSuggestions, TodayTasks, UpdateTaskInput,
+    validate_checklist_content, validate_due_vs_available, TaskDeleteDisposition,
+    TaskTreeExpanded, validate_parent_depth,
 };
 use crate::application::list_groups::list_group_scope_matches;
 use crate::domain::{page_limit, page_offset};
@@ -186,7 +187,8 @@ impl TaskService {
                     .collect::<Result<Vec<_>, _>>()
                     .map_err(internal)?;
                 conn.execute(
-                    "UPDATE tasks SET status = 'archived', updated_at = ?1, revision = revision + 1
+                    "UPDATE tasks SET status = 'archived', board_stage = NULL,
+                     updated_at = ?1, revision = revision + 1
                      WHERE list_id = ?2 AND status = 'todo' AND deleted_at IS NULL",
                     params![now, id.to_string()],
                 )
@@ -476,7 +478,8 @@ impl TaskService {
         let now = stamp(&self.clock);
         let tx = conn.unchecked_transaction().map_err(internal)?;
         tx.execute(
-            "UPDATE tasks SET status = 'archived', updated_at = ?1, revision = revision + 1
+            "UPDATE tasks SET status = 'archived', board_stage = NULL, updated_at = ?1,
+             revision = revision + 1
              WHERE id = ?2 AND deleted_at IS NULL",
             params![now, id.to_string()],
         )
@@ -681,6 +684,38 @@ impl TaskService {
         self.get_task(id)
     }
 
+    /// 看板拖拽写路径：置位 / 清空「进行中」阶段。
+    /// 仅待办任务可切换（stage 只在 status=todo 时有意义）；清空即回待办列。
+    pub fn set_task_board_stage(
+        &self,
+        id: EntityId,
+        stage: Option<TaskBoardStage>,
+    ) -> Result<Task, DomainError> {
+        let task = self.get_task(id)?;
+        if task.status != TaskStatus::Todo {
+            return Err(DomainError::Validation("仅待办任务可切换看板阶段".into()));
+        }
+        let conn = self.connect()?;
+        let now = stamp(&self.clock);
+        // WHERE 带 status 守卫：check-then-write 之间 complete/archive 可能并发提交，
+        // 无守卫会把 stage='doing' 落到已完结任务上（唯一可持久化脏值的路径）。
+        let updated = conn
+            .execute(
+                "UPDATE tasks SET board_stage = ?1, updated_at = ?2, revision = revision + 1
+                 WHERE id = ?3 AND status = 'todo' AND deleted_at IS NULL",
+                params![
+                    stage.map(|s| s.as_str().to_string()),
+                    now,
+                    id.to_string()
+                ],
+            )
+            .map_err(internal)?;
+        if updated == 0 {
+            return Err(DomainError::Validation("仅待办任务可切换看板阶段".into()));
+        }
+        self.get_task(id)
+    }
+
     pub fn unarchive_task(&self, id: EntityId) -> Result<Task, DomainError> {
         let task = self.get_task(id)?;
         if task.status != TaskStatus::Archived {
@@ -714,7 +749,8 @@ impl TaskService {
         let now = stamp(&self.clock);
         let tx = conn.unchecked_transaction().map_err(internal)?;
         tx.execute(
-            "UPDATE tasks SET status = 'archived', updated_at = ?1, revision = revision + 1
+            "UPDATE tasks SET status = 'archived', board_stage = NULL, updated_at = ?1,
+             revision = revision + 1
              WHERE id = ?2 AND deleted_at IS NULL",
             params![now, id.to_string()],
         )
@@ -722,7 +758,8 @@ impl TaskService {
         // Archive cascades to descendants so the subtree stays consistent.
         for d in self.descendant_ids(&tx, id)? {
             tx.execute(
-                "UPDATE tasks SET status = 'archived', updated_at = ?1, revision = revision + 1
+                "UPDATE tasks SET status = 'archived', board_stage = NULL, updated_at = ?1,
+                 revision = revision + 1
                  WHERE id = ?2 AND deleted_at IS NULL",
                 params![now, d.to_string()],
             )
@@ -2285,7 +2322,8 @@ impl TaskService {
         let mut affected = vec![id];
 
         tx.execute(
-            "UPDATE tasks SET status = 'completed', completed_at = ?1, updated_at = ?1, revision = revision + 1
+            "UPDATE tasks SET status = 'completed', completed_at = ?1, board_stage = NULL,
+             updated_at = ?1, revision = revision + 1
              WHERE id = ?2 AND deleted_at IS NULL",
             params![now, id.to_string()],
         )
@@ -2298,7 +2336,8 @@ impl TaskService {
         if cascade_children {
             for d in self.descendant_ids(tx, id)? {
                 tx.execute(
-                    "UPDATE tasks SET status = 'completed', completed_at = ?1, updated_at = ?1, revision = revision + 1
+                    "UPDATE tasks SET status = 'completed', completed_at = ?1, board_stage = NULL,
+                     updated_at = ?1, revision = revision + 1
                      WHERE id = ?2 AND deleted_at IS NULL",
                     params![now, d.to_string()],
                 )
@@ -2329,7 +2368,8 @@ impl TaskService {
                     break;
                 }
                 tx.execute(
-                    "UPDATE tasks SET status = 'completed', completed_at = ?1, updated_at = ?1, revision = revision + 1
+                    "UPDATE tasks SET status = 'completed', completed_at = ?1, board_stage = NULL,
+                     updated_at = ?1, revision = revision + 1
                      WHERE id = ?2 AND deleted_at IS NULL",
                     params![now, parent_id.to_string()],
                 )
@@ -2471,6 +2511,10 @@ fn map_task_row(row: &rusqlite::Row<'_>) -> Result<Task, rusqlite::Error> {
         title: row.get(1)?,
         notes: row.get(2)?,
         status,
+        board_stage: row
+            .get::<_, Option<String>>(22)?
+            .map(|raw| TaskBoardStage::parse(&raw).map_err(map_domain_sql))
+            .transpose()?,
         priority,
         list_id: parse_id(row.get(5)?)?,
         list_name: row.get(6)?,
@@ -2503,7 +2547,7 @@ fn map_task_row(row: &rusqlite::Row<'_>) -> Result<Task, rusqlite::Error> {
 const TASK_ROW_SELECT: &str = "t.id, t.title, t.notes, t.status, t.priority, t.list_id,
                     l.name, l.kind, t.due_date, t.due_time, t.completed_at, t.sort_order, t.series_id,
                     t.workflow_state, t.available_at, t.waiting_for, t.follow_up_date,
-                    t.created_at, t.updated_at, t.revision, t.parent_id, t.child_order";
+                    t.created_at, t.updated_at, t.revision, t.parent_id, t.child_order, t.board_stage";
 
 fn map_domain_sql(err: DomainError) -> rusqlite::Error {
     rusqlite::Error::ToSqlConversionFailure(Box::new(std::io::Error::other(err.to_string())))
@@ -4028,5 +4072,104 @@ mod tests {
         svc.set_tree_expanded(parent.id, false).unwrap();
         svc.delete_task(parent.id).unwrap();
         assert!(svc.tree_expanded_list().unwrap().is_empty());
+    }
+
+    // ------------------------------------------------------------------
+    // 看板阶段（board_stage，迁移 0024）
+    // ------------------------------------------------------------------
+
+    #[test]
+    fn board_stage_set_and_clear_roundtrip() {
+        let svc = open_service();
+        let task = svc.create_task(make_input("kanban")).unwrap();
+        // 迁移 0024 后存量/新建任务均为 NULL（待办列）。
+        assert_eq!(task.board_stage, None);
+
+        let doing = svc
+            .set_task_board_stage(task.id, Some(TaskBoardStage::Doing))
+            .unwrap();
+        assert_eq!(doing.status, TaskStatus::Todo);
+        assert_eq!(doing.board_stage, Some(TaskBoardStage::Doing));
+
+        let cleared = svc.set_task_board_stage(task.id, None).unwrap();
+        assert_eq!(cleared.status, TaskStatus::Todo);
+        assert_eq!(cleared.board_stage, None);
+    }
+
+    #[test]
+    fn board_stage_rejects_non_todo_tasks() {
+        let svc = open_service();
+        let task = svc.create_task(make_input("reject")).unwrap();
+        svc.complete_task(task.id).unwrap();
+        assert!(svc
+            .set_task_board_stage(task.id, Some(TaskBoardStage::Doing))
+            .is_err());
+
+        let archived = svc.create_task(make_input("reject2")).unwrap();
+        svc.archive_task(archived.id).unwrap();
+        assert!(svc
+            .set_task_board_stage(archived.id, Some(TaskBoardStage::Doing))
+            .is_err());
+    }
+
+    #[test]
+    fn complete_clears_board_stage_and_uncomplete_stays_clear() {
+        let svc = open_service();
+        let task = svc.create_task(make_input("done-flow")).unwrap();
+        svc.set_task_board_stage(task.id, Some(TaskBoardStage::Doing))
+            .unwrap();
+
+        let done = svc.complete_task(task.id).unwrap();
+        assert_eq!(done.status, TaskStatus::Completed);
+        assert_eq!(done.board_stage, None);
+
+        // 撤销完成回到待办列，且不恢复 stage（拖出完成列 = 回待办）。
+        let restored = svc.uncomplete_task(task.id).unwrap();
+        assert_eq!(restored.status, TaskStatus::Todo);
+        assert_eq!(restored.board_stage, None);
+    }
+
+    #[test]
+    fn recurring_spawn_next_instance_has_no_board_stage() {
+        let svc = open_service();
+        let today = local_today(&SystemClock);
+        let task = svc
+            .create_recurring_task(
+                CreateTaskInput {
+                    due_date: Some(today.clone()),
+                    ..make_input("recurring kanban")
+                },
+                crate::domain::RecurrenceRule {
+                    version: 1,
+                    frequency: crate::domain::RecurrenceFrequency::Daily,
+                    interval: 1,
+                    weekdays: None,
+                    monthday: None,
+                    timezone: "UTC".into(),
+                    end_at: None,
+                },
+            )
+            .unwrap();
+        let series_id = task.series_id.expect("recurring task has series id");
+
+        svc.set_task_board_stage(task.id, Some(TaskBoardStage::Doing))
+            .unwrap();
+        let done = svc.complete_task(task.id).unwrap();
+        assert_eq!(done.board_stage, None);
+
+        // 下一期实例落在待办列且无 stage 残留。
+        let open = svc
+            .query_tasks(TaskQuery {
+                status: Some(TaskStatus::Todo),
+                ..Default::default()
+            })
+            .unwrap();
+        let next = open
+            .items
+            .iter()
+            .find(|t| t.series_id == Some(series_id))
+            .expect("spawned next instance");
+        assert_ne!(next.id, task.id);
+        assert_eq!(next.board_stage, None);
     }
 }
