@@ -386,3 +386,24 @@
 ### Status
 
 [OK] **Completed**
+
+
+## Session 17: 看板拖拽 DragOverlay 修复 + 587ed78 补合（PR #22）
+
+**Date**: 2026-10-26
+**Task**: 看板拖拽 DragOverlay 修复 + 587ed78 补合（PR #22）
+**Branch**: `chore/archive-task-kanban-board`
+
+### Summary
+
+用户实测拖拽无跟随/被容器裁剪→改 DragOverlay 模式；发现 PR #20 合并未含 587ed78（列内新建）→ cherry-pick 补合为 PR #22 已合并；v2.2.0 缺该功能，待出 v2.2.1
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `bbc0a86` | (see git log) |
+
+### Status
+
+[OK] **Completed**
