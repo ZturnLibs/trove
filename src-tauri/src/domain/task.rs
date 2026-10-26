@@ -33,6 +33,30 @@ impl TaskStatus {
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
+pub enum TaskBoardStage {
+    /// 看板「进行中」列。仅此一态；NULL（None）= 待办列。
+    Doing,
+}
+
+impl TaskBoardStage {
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::Doing => "doing",
+        }
+    }
+
+    pub fn parse(value: &str) -> Result<Self, DomainError> {
+        match value {
+            "doing" => Ok(Self::Doing),
+            _ => Err(DomainError::Validation(format!(
+                "invalid board stage: {value}"
+            ))),
+        }
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
 pub enum TaskPriority {
     None,
     Low,
@@ -224,6 +248,8 @@ pub struct Task {
     pub title: String,
     pub notes: String,
     pub status: TaskStatus,
+    /// 看板阶段：Some(Doing) = 进行中列；None = 待办列。仅在 status == Todo 时有意义。
+    pub board_stage: Option<TaskBoardStage>,
     pub priority: TaskPriority,
     pub list_id: EntityId,
     pub list_name: String,

@@ -43,7 +43,7 @@ import {
   SplitTaskLayout,
   TaskGroup,
 } from "@/features/tasks/TaskLayout";
-import { buildTodayScopes } from "@/features/tasks/listGroupTree";
+import { buildTodayScopes, sameScope } from "@/features/tasks/listGroupTree";
 import { useDomainInvalidation } from "@/features/tasks/useDomainInvalidation";
 import { useTaskRename } from "@/features/tasks/useTaskRename";
 import { useRecentActions } from "@/stores/recent-actions";
@@ -78,14 +78,6 @@ function readTodayGroupFilter(): ListGroupScope | null {
     /* ignore */
   }
   return null;
-}
-
-function sameScope(a: ListGroupScope | null, b: ListGroupScope | null): boolean {
-  if (a === b) return true;
-  if (!a || !b) return false;
-  if (a.kind !== b.kind) return false;
-  if (a.kind === "group" && b.kind === "group") return a.groupId === b.groupId;
-  return true;
 }
 
 function findTodayContainer(

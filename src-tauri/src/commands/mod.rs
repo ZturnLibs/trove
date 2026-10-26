@@ -631,6 +631,23 @@ pub fn task_uncomplete(
     Ok(task)
 }
 
+/// 看板拖拽写路径：`stage` 传 `"doing"` 置「进行中」，传 null 回待办。
+#[tauri::command]
+pub fn task_set_board_stage(
+    app: AppHandle,
+    state: State<'_, AppState>,
+    id: EntityId,
+    stage: Option<String>,
+) -> Result<Task, AppError> {
+    let stage = match stage.as_deref() {
+        None => None,
+        Some(raw) => Some(crate::domain::TaskBoardStage::parse(raw)?),
+    };
+    let task = state.tasks.set_task_board_stage(id, stage)?;
+    emit_task_change(&app, &task, "updated");
+    Ok(task)
+}
+
 #[tauri::command]
 pub fn task_archive(
     app: AppHandle,

@@ -8,6 +8,7 @@ function makeTask(id: string, parentId: string | null, extra?: Partial<Task>): T
     title: id,
     notes: "",
     status: "todo",
+    boardStage: null,
     priority: "none",
     listId: "l1",
     listName: "清单",

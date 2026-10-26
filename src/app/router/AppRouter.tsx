@@ -6,6 +6,7 @@ import { MainShell } from "@/app/layouts/MainShell";
 import { TodayPage } from "@/features/today/TodayPage";
 import { InboxPage } from "@/features/inbox/InboxPage";
 import { TasksPage } from "@/features/tasks/TasksPage";
+import { BoardPage } from "@/features/board/BoardPage";
 import { MemoryPage } from "@/features/memory/MemoryPage";
 import { ClipboardPage } from "@/features/clipboard/ClipboardPage";
 import { SettingsPage } from "@/features/settings/SettingsPage";
@@ -69,6 +70,7 @@ function MainRoutes() {
           <Route path="/tasks" element={<TasksPage />} />
           <Route path="/tasks/:listId" element={<TasksPage />} />
           <Route path="/tasks/group/:groupId" element={<TasksPage />} />
+          <Route path="/board" element={<BoardPage />} />
           <Route path="/memory" element={<MemoryPage />} />
           <Route path="/clipboard" element={<ClipboardPage />} />
           <Route path="/weekly-review" element={<WeeklyReviewPage />} />

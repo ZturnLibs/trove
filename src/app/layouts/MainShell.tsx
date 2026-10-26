@@ -5,6 +5,7 @@ import { emit, listen } from "@tauri-apps/api/event";
 import {
   ClipboardList,
   Inbox,
+  KanbanSquare,
   ListTodo,
   NotebookPen,
   Settings,
@@ -27,6 +28,7 @@ const navItems = [
   { to: "/today", label: "今日", icon: SunMedium, badge: "overdue" as const },
   { to: "/inbox", label: "收件箱", icon: Inbox, badge: "inbox" as const },
   { to: "/tasks", label: "任务", icon: ListTodo, badge: null },
+  { to: "/board", label: "看板", icon: KanbanSquare, badge: null },
   { to: "/memory", label: "记忆", icon: NotebookPen, badge: null },
   { to: "/clipboard", label: "剪切板", icon: ClipboardList, badge: null },
 ] as const;
