@@ -323,3 +323,24 @@
 ### Next Steps
 
 - 可选：每任务覆盖完成策略、级联改动触发自动化规则、CSV 导入导出 parent 列
+
+
+## Session 14: 任务分组收尾：AC 核对全绿 + spec 回写 + PR #18
+
+**Date**: 2026-10-26
+**Task**: 任务分组收尾：AC 核对全绿 + spec 回写 + PR #18
+**Branch**: `feat/task-list-groups`
+
+### Summary
+
+复核 10 条 AC（cargo test 193+13/typecheck/test:unit 53 全绿）；spec 回写 tauri 三态更新语义坑位、frontend state-management 落地约定；推送并确认 PR #18 OPEN
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `c985ed0` | (see git log) |
+
+### Status
+
+[OK] **Completed**
