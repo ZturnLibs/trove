@@ -32,6 +32,13 @@ Contracts for the `src-tauri` crate. Read the listed files before changing the m
   require `deleted_at IS NULL` on **every** joined table — the task row is live, but a
   soft-deleted list/group silently resurrects matches. Found in task-list-groups;
   regression test: `group_filter_excludes_soft_deleted_list_and_group`.
+- **Clearing an optional relation needs an explicit flag, not a bare `Option`**: in
+  `task_list_update`, `group_id: Option<EntityId>` + `clear_group: Option<bool>` form a
+  three-state input — absent = don't change, `group_id = Some(x)` = assign, and
+  "unassign" (set to NULL) is only expressible via `clear_group = Some(true)`, which
+  takes priority. A bare `Option` cannot distinguish "unchanged" from "set to NULL";
+  any new command that can clear an optional FK must ship this pair (see
+  `commands/mod.rs` `task_list_update`).
 - **Subtask aggregation**: `complete_task` / `uncomplete_task` / `archive_task` /
   `unarchive_task` cascade and aggregate inside a single transaction; series spawn
   happens only for the explicitly targeted task. Both aggregation toggles live in
