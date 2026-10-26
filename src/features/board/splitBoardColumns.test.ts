@@ -1,5 +1,9 @@
 import { describe, expect, it } from "vitest";
-import { buildGroupByListId, splitBoardColumns } from "./splitBoardColumns";
+import {
+  buildGroupByListId,
+  defaultListIdForScope,
+  splitBoardColumns,
+} from "./splitBoardColumns";
 import type { Task, TaskListGroupOverview } from "@/ipc/client";
 
 function makeTask(
@@ -144,6 +148,24 @@ describe("splitBoardColumns", () => {
     // 空映射（overview 未加载）也不应吞掉服务端已过滤的结果。
     const cols = splitBoardColumns(todoTasks, [], { kind: "group", groupId: "g-work" }, new Map());
     expect(cols.todo.map((t) => t.id)).toEqual(["t1"]);
+  });
+});
+
+describe("defaultListIdForScope", () => {
+  const overview = makeOverview();
+
+  it("returns the first list of the scoped group", () => {
+    expect(
+      defaultListIdForScope({ kind: "group", groupId: "g-work" }, overview),
+    ).toBe("l1");
+  });
+
+  it("falls back to null (backend inbox) for empty group, ungrouped and null scope", () => {
+    expect(
+      defaultListIdForScope({ kind: "group", groupId: "g-empty" }, overview),
+    ).toBeNull();
+    expect(defaultListIdForScope({ kind: "ungrouped" }, overview)).toBeNull();
+    expect(defaultListIdForScope(null, overview)).toBeNull();
   });
 });
 

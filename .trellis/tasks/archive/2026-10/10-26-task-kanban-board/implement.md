@@ -36,10 +36,11 @@
 
 ## 6. BoardPage（src/features/board/）
 
-- [x] `splitBoardColumns` 纯函数 + vitest（todo 分流 / completed 列 / chips 透传）
+- [x] `splitBoardColumns` 纯函数 + vitest（todo 分流 / completed 列 / chips 透传；追加：status 守卫回归、`defaultListIdForScope` 作用域默认清单）
 - [x] `BoardPage.tsx`：三列布局、列头徽标、双查询 + overview chips（`board.groupFilter` 持久化、`?group=` 单向同步）
 - [x] `BoardCard.tsx`：精简卡片；点击详情面板、右键复用现有菜单
 - [x] DnD：单 DndContext + 列 droppable；onDragEnd 三向分发（stage 置位/清空、complete/uncomplete 含撤销 toast）；乐观更新 + invalidate
+- [x] 列内新建（2026-10-26 追加）：待办/进行中列 `BoardQuickAdd` composer + `createMutation`（分组 chips → 该组首个清单，否则收件箱；进行中列创建即置 doing）
 
 ## 7. 路由与侧边栏
 
@@ -48,7 +49,7 @@
 ## 8. 验证（review gate）
 
 - [x] `cd src-tauri && cargo test` 全绿（含 schema 断言 24；最终门禁 197 lib + 13 ai_eval）
-- [x] `pnpm typecheck`、`pnpm test:unit` 全绿（12 文件 / 59 测试，含 splitBoardColumns 6 项）
+- [x] `pnpm typecheck`、`pnpm test:unit` 全绿（12 文件 / **61** 测试，含 splitBoardColumns 8 项与列内新建默认清单 2 项；2026-10-26 列内新建追加后复验）
 - [x] 对照 prd.md Acceptance Criteria 逐条核对（2026-10-26：独立审查代理逐维度核对过——列映射、不变式路径、拖拽语义、chips 同步、复用改造零行为变更均「过」；三条发现已修复并加回归测试。纯 GUI 手感项（拖拽视觉、toast、真实窗口）留合并后人工过——本环境不运行 GUI）
 - [x] `python3 ./.trellis/scripts/task.py validate 10-26-task-kanban-board`
 
