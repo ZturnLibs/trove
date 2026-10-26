@@ -268,8 +268,12 @@ export function BoardPage() {
     [overviewQuery.data],
   );
 
-  const invalidateTasks = () => {
-    void queryClient.invalidateQueries({ queryKey: ["tasks"] });
+  // 失效面收窄到看板自身查询 + 侧栏徽标 overview。打全 ["tasks"] 前缀会连带
+  // 每张卡片的 SubtaskBadge 查询（["tasks","board","subtasks",id]）——一次落卡
+  // 触发 ~20 个 IPC 重查 + 全列重渲染，表现为落卡卡顿。
+  const invalidateBoard = () => {
+    void queryClient.invalidateQueries({ queryKey: ["tasks", "board"] });
+    void queryClient.invalidateQueries({ queryKey: ["task-list-overview"] });
   };
 
   const patchBoardCaches = (taskId: string, patch: Partial<Task>) => {
@@ -288,7 +292,7 @@ export function BoardPage() {
 
   // 乐观更新基建：cancel 进行中请求 → 快照两路缓存；失败时原样恢复。
   const snapshotBoardCaches = async (): Promise<BoardCacheSnapshot> => {
-    await queryClient.cancelQueries({ queryKey: ["tasks"] });
+    await queryClient.cancelQueries({ queryKey: ["tasks", "board"] });
     return {
       todoSnapshot: queryClient.getQueryData(todoQueryKey),
       doneSnapshot: queryClient.getQueryData(doneQueryKey),
@@ -316,7 +320,7 @@ export function BoardPage() {
     onError: (_error, _vars, context) => {
       restoreBoardCaches(context);
     },
-    onSettled: invalidateTasks,
+    onSettled: invalidateBoard,
   });
 
   const completeMutation = useMutation<Task, Error, Task, BoardCacheSnapshot>({
@@ -334,12 +338,12 @@ export function BoardPage() {
       restoreBoardCaches(context);
     },
     onSuccess: (_data, task) => {
-      invalidateTasks();
+      invalidateBoard();
       useRecentActions.getState().push({
         label: "完成",
         undo: async () => {
           await ipc.taskUncomplete(task.id);
-          invalidateTasks();
+          invalidateBoard();
         },
       });
     },
@@ -360,12 +364,12 @@ export function BoardPage() {
       restoreBoardCaches(context);
     },
     onSuccess: (_data, task) => {
-      invalidateTasks();
+      invalidateBoard();
       useRecentActions.getState().push({
         label: "取消完成",
         undo: async () => {
           await ipc.taskComplete(task.id);
-          invalidateTasks();
+          invalidateBoard();
         },
       });
     },
@@ -395,7 +399,7 @@ export function BoardPage() {
     },
     onSuccess: () => {
       setComposerTitle("");
-      invalidateTasks();
+      invalidateBoard();
     },
   });
 
@@ -413,12 +417,12 @@ export function BoardPage() {
   const applyDefer = async (task: Task, availableAt: string | null) => {
     const prev = task.availableAt;
     await ipc.taskSetDefer(task.id, availableAt);
-    invalidateTasks();
+    invalidateBoard();
     useRecentActions.getState().push({
       label: availableAt ? `推迟显示至 ${availableAt}` : "取消推迟显示",
       undo: async () => {
         await ipc.taskSetDefer(task.id, prev);
-        invalidateTasks();
+        invalidateBoard();
       },
     });
   };
@@ -575,7 +579,12 @@ export function BoardPage() {
                 {renderCards(columns.done)}
               </BoardColumnView>
             </div>
-            <DragOverlay dropAnimation={null}>
+            <DragOverlay
+              dropAnimation={{
+                duration: 180,
+                easing: "cubic-bezier(0.18, 0.67, 0.6, 0.22)",
+              }}
+            >
               {activeDragTask ? (
                 <div className="w-[240px] rotate-2 cursor-grabbing rounded-[var(--radius-control)] border border-accent/50 bg-surface p-2 shadow-xl ring-2 ring-accent/40">
                   <BoardCardBody task={activeDragTask} />
