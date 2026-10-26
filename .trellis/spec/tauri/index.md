@@ -12,7 +12,7 @@ Contracts for the `src-tauri` crate. Read the listed files before changing the m
 ## Quality Check
 
 - [ ] `cargo test --lib` in `src-tauri`
-- [ ] Schema assertion in `infrastructure/db/mod.rs` matches the latest migration number
+- [ ] Schema assertion for the latest migration number is bumped in **all five** places: three in `infrastructure/db/mod.rs` (health/idempotent/backup tests) **and two in `application/backup.rs`** (restore tests). Missing the backup.rs pair surfaces only as a failing `restore_old_schema_backup_then_migrates` test.
 - [ ] `tauri build` (or CI `release` workflow) still finds the **app** binary after extra bins exist
 - [ ] Database tests keep the `tempdir` alive for the whole `Database` lifetime
 
