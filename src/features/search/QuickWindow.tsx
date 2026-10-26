@@ -11,6 +11,7 @@ import {
   type SearchHit,
   type TaskPriority,
   type RecurrenceRule,
+  type TaskListGroupOverview,
 } from "@/ipc/client";
 import {
   buildFireAtFromParsed,
@@ -47,6 +48,8 @@ export function QuickWindow() {
   const [fireAt, setFireAt] = useState("");
   const [priority, setPriority] = useState<TaskPriority>("none");
   const [recurrence, setRecurrence] = useState<RecurrenceRule | null>(null);
+  // 任务捕获目标清单：默认收件箱；不记忆上次选择（防止误归档）。
+  const [captureListId, setCaptureListId] = useState("");
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [searchText, setSearchText] = useState("");
@@ -95,6 +98,7 @@ export function QuickWindow() {
         setFireAt("");
         setPriority("none");
         setRecurrence(null);
+        setCaptureListId("");
         setAmbiguous([]);
         setParsedHint(null);
         setError(null);
@@ -170,6 +174,15 @@ export function QuickWindow() {
     queryFn: () => ipc.templateList(),
     enabled: mode === "search",
   });
+
+  // 任务捕获模式的目标清单选择器数据（按分组分层；仅任务模式请求）。
+  const captureOverviewQuery = useQuery({
+    queryKey: ["task-list-overview"],
+    queryFn: () => ipc.taskListOverview(),
+    enabled: mode === "capture" && captureType === "task",
+  });
+  const captureOverview: TaskListGroupOverview | undefined =
+    captureOverviewQuery.data;
 
   const searchQuery = useQuery({
     queryKey: ["search", searchText],
@@ -462,6 +475,7 @@ export function QuickWindow() {
           await ipc.taskCreateRecurring(
             {
               title: finalTitle,
+              listId: captureListId || undefined,
               dueDate: finalDue,
               dueTime: finalDueTime,
               priority: finalPriority,
@@ -472,6 +486,7 @@ export function QuickWindow() {
         } else {
           await ipc.taskCreate({
             title: finalTitle,
+            listId: captureListId || undefined,
             dueDate: finalDue,
             dueTime: finalDueTime,
             priority: finalPriority,
@@ -508,6 +523,7 @@ export function QuickWindow() {
       setFireAt("");
       setPriority("none");
       setRecurrence(null);
+      setCaptureListId("");
       setAmbiguous([]);
       setParsedHint(null);
       await ipc.windowHideQuick();
@@ -628,7 +644,38 @@ export function QuickWindow() {
               </div>
             ) : null}
             {captureType === "task" ? (
+              <>
               <div className="grid grid-cols-2 gap-2">
+                <label className="col-span-2 space-y-1 text-[11px] text-muted">
+                  清单
+                  <select
+                    className="h-8 w-full rounded-[var(--radius-control)] border border-border bg-surface-raised px-2 text-[13px] text-foreground"
+                    value={captureListId}
+                    onChange={(e) => setCaptureListId(e.target.value)}
+                  >
+                    <option value="">
+                      {captureOverview?.inbox.name ?? "收件箱"}
+                    </option>
+                    {(captureOverview?.groups ?? []).map((node) => (
+                      <optgroup key={node.group.id} label={node.group.name}>
+                        {node.lists.map((list) => (
+                          <option key={list.id} value={list.id}>
+                            {list.name}
+                          </option>
+                        ))}
+                      </optgroup>
+                    ))}
+                    {(captureOverview?.ungrouped ?? []).length > 0 ? (
+                      <optgroup label="未分组">
+                        {(captureOverview?.ungrouped ?? []).map((list) => (
+                          <option key={list.id} value={list.id}>
+                            {list.name}
+                          </option>
+                        ))}
+                      </optgroup>
+                    ) : null}
+                  </select>
+                </label>
                 <label className="space-y-1 text-[11px] text-muted">
                   截止日期 <span className="text-muted/70">⌘2</span>
                   <Input
@@ -685,6 +732,7 @@ export function QuickWindow() {
                   </select>
                 </label>
               </div>
+              </>
             ) : null}
             {(captureType === "task" || captureType === "reminder") && parsedHint ? (
               <p className="text-[11px] text-muted">{parsedHint}</p>

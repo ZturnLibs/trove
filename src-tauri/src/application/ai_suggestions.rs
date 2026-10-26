@@ -784,7 +784,7 @@ impl AISuggestionService {
         self.dismiss_stale_daily_pending()?;
         self.dismiss_pending(AIFeature::Suggest, DAILY_SOURCE_ID)?;
 
-        let today = tasks.today_tasks()?;
+        let today = tasks.today_tasks(None)?;
         let excluded: std::collections::HashSet<String> = today
             .focus
             .iter()
@@ -2174,7 +2174,7 @@ mod tests {
         assert_eq!(record.sources[0].entity_id, task.id.to_string());
 
         // §9.3: no automatic focus membership — task stays outside focus.
-        let today = tasks.today_tasks().unwrap();
+        let today = tasks.today_tasks(None).unwrap();
         assert!(today.focus.iter().all(|t| t.id != task.id));
         // And no task rows were modified (still Todo, untouched).
         let reloaded = tasks.get_task(task.id).unwrap();

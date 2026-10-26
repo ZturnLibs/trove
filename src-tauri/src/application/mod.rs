@@ -12,6 +12,7 @@ pub mod health_dashboard;
 pub mod weekly_review;
 pub mod data_port;
 pub mod links;
+pub mod list_groups;
 pub mod memories;
 pub mod reminders;
 pub mod saved_views;

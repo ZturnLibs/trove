@@ -99,6 +99,68 @@ pub struct TaskList {
     pub created_at: String,
     pub updated_at: String,
     pub revision: Revision,
+    /// 所属分组；None = 未分组。收件箱恒为 None（不可归组）。
+    pub group_id: Option<EntityId>,
+}
+
+// ---------------------------------------------------------------------------
+// 任务分组（分组 → 清单两级结构）
+// ---------------------------------------------------------------------------
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct TaskListGroup {
+    pub id: EntityId,
+    pub name: String,
+    pub sort_order: f64,
+    pub created_at: String,
+    pub updated_at: String,
+    pub revision: Revision,
+}
+
+/// 清单行摘要（侧边栏 / 下拉分层用），带未完成任务数。
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct TaskListSummary {
+    pub id: EntityId,
+    pub name: String,
+    pub kind: ListKind,
+    pub group_id: Option<EntityId>,
+    pub open_count: u64,
+}
+
+/// 分组节点：组信息 + 组内清单（按 sort_order）+ 组内未完成任务总数。
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct TaskListGroupNode {
+    pub group: TaskListGroup,
+    pub lists: Vec<TaskListSummary>,
+    pub open_count: u64,
+}
+
+/// 侧边栏任务区全量数据：收件箱固定顶部，未分组清单平铺在后。
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct TaskListGroupOverview {
+    pub groups: Vec<TaskListGroupNode>,
+    pub ungrouped: Vec<TaskListSummary>,
+    pub inbox: TaskListSummary,
+}
+
+/// 删除分组（解散）的撤销数据：恢复分组 + 回链组内清单。
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ListGroupDeleteUndo {
+    pub group: TaskListGroup,
+    pub moved_list_ids: Vec<EntityId>,
+}
+
+/// 今日页过滤 chips 的清单归属条件（不传 = 全部）。
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(tag = "kind", rename_all = "camelCase")]
+pub enum ListGroupScope {
+    Group { group_id: EntityId },
+    Ungrouped,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
@@ -214,6 +276,8 @@ pub struct UpdateTaskInput {
 #[serde(rename_all = "camelCase")]
 pub struct TaskQuery {
     pub list_id: Option<EntityId>,
+    /// 按清单所属分组过滤（含未分组清单的任务时用 inbox/ungrouped 组合，这里只做精确组匹配）。
+    pub list_group_id: Option<EntityId>,
     pub inbox_only: Option<bool>,
     pub status: Option<TaskStatus>,
     pub priority: Option<TaskPriority>,

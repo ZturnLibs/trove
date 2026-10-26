@@ -90,7 +90,7 @@ pub fn dispatch(
         }
         WorkbenchAction::QueryToday => {
             let state = state.ok_or_else(|| DomainError::Validation("应用未就绪".into()))?;
-            let today = state.tasks.today_tasks()?;
+            let today = state.tasks.today_tasks(None)?;
             Ok(ActionOutcome::TodayQueried {
                 data: ActionTodayHit {
                     today: today.today,

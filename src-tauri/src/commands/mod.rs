@@ -20,10 +20,11 @@ use crate::domain::{
     ExtractApplyResult, ProbeReport, SuggestionStatus, TaskChecklist,
     AutomationRun, ClipboardItem, ClipboardKind, ClipboardQuery,
     ConvertMemoryToTaskResult, CreateAutomationRuleInput, CreateMemoryInput, CreateReminderInput,
-    CreateTaskInput, EntityId, EntityLink, LinkInput, Memory, MemoryQuery, PagedResult,
-    ParsedCapture, RecurrenceRule, Reminder, ReminderOccurrence, SearchEntityType, SearchQuery,
-    SearchResults, SmartListKind, SnoozePreset, Tag, Task, TaskList, TaskQuery, TodaySortSuggestions,
-    TodayTasks, UpdateAutomationRuleInput, UpdateMemoryInput, UpdateReminderInput, UpdateTaskInput,
+    CreateTaskInput, EntityId, EntityLink, LinkInput, ListGroupDeleteUndo, ListGroupScope, Memory,
+    MemoryQuery, PagedResult, ParsedCapture, RecurrenceRule, Reminder, ReminderOccurrence,
+    SearchEntityType, SearchQuery, SearchResults, SmartListKind, SnoozePreset, Tag, Task,
+    TaskList, TaskListGroup, TaskListGroupOverview, TaskQuery, TodaySortSuggestions, TodayTasks,
+    UpdateAutomationRuleInput, UpdateMemoryInput, UpdateReminderInput, UpdateTaskInput,
     DeleteListResult, ListDeleteDisposition, ActionDispatchOptions, ActionOutcome, WorkbenchAction,
     TaskDeleteDisposition, TaskTreeExpanded,
 };
@@ -62,6 +63,32 @@ fn emit_task_change(app: &AppHandle, task: &Task, change: &str) {
             entity_id: task.id.to_string(),
             change: change.into(),
             revision: task.revision,
+        },
+    );
+}
+
+fn emit_list_group_change(app: &AppHandle, group: &crate::domain::TaskListGroup, change: &str) {
+    let _ = app.emit(
+        "domain://changed",
+        DomainChangeEvent {
+            entity_type: "task_list_group".into(),
+            entity_id: group.id.to_string(),
+            change: change.into(),
+            revision: group.revision,
+        },
+    );
+}
+
+/// 无单一实体 id 的批量变更（如分组排序）也广播一次 domain://changed，
+/// 让所有窗口的侧边栏/任务查询失效刷新。
+fn emit_entities_changed(app: &AppHandle, entity_type: &str, change: &str) {
+    let _ = app.emit(
+        "domain://changed",
+        DomainChangeEvent {
+            entity_type: entity_type.into(),
+            entity_id: String::new(),
+            change: change.into(),
+            revision: 0,
         },
     );
 }
@@ -231,8 +258,20 @@ pub fn task_list_update(
     state: State<'_, AppState>,
     id: EntityId,
     name: String,
+    group_id: Option<EntityId>,
+    clear_group: Option<bool>,
 ) -> Result<TaskList, AppError> {
-    state.tasks.update_list(id, name).map_err(Into::into)
+    let list = state.tasks.update_list(id, name)?;
+    // 归组语义（与现有 Update 输入的 Option 语义对齐）：
+    // clear_group = Some(true) → 移出分组（优先）；group_id = Some(x) → 归入组 x；
+    // 两者都缺省 → 不改动归组关系。
+    if clear_group.unwrap_or(false) {
+        return state.tasks.set_list_group(id, None).map_err(Into::into);
+    }
+    if let Some(gid) = group_id {
+        return state.tasks.set_list_group(id, Some(gid)).map_err(Into::into);
+    }
+    Ok(list)
 }
 
 #[tauri::command]
@@ -258,6 +297,69 @@ pub fn task_list_undo_delete(
         .tasks
         .undo_delete_list(result)
         .map_err(Into::into)
+}
+
+#[tauri::command]
+pub fn task_list_group_create(
+    app: AppHandle,
+    state: State<'_, AppState>,
+    name: String,
+) -> Result<TaskListGroup, AppError> {
+    let group = state.tasks.create_list_group(name)?;
+    emit_list_group_change(&app, &group, "created");
+    Ok(group)
+}
+
+#[tauri::command]
+pub fn task_list_group_rename(
+    app: AppHandle,
+    state: State<'_, AppState>,
+    id: EntityId,
+    name: String,
+) -> Result<TaskListGroup, AppError> {
+    let group = state.tasks.rename_list_group(id, name)?;
+    emit_list_group_change(&app, &group, "updated");
+    Ok(group)
+}
+
+#[tauri::command]
+pub fn task_list_group_reorder(
+    app: AppHandle,
+    state: State<'_, AppState>,
+    ordered_ids: Vec<EntityId>,
+) -> Result<(), AppError> {
+    state.tasks.reorder_list_groups(ordered_ids)?;
+    emit_entities_changed(&app, "task_list_group", "reordered");
+    Ok(())
+}
+
+#[tauri::command]
+pub fn task_list_group_delete(
+    app: AppHandle,
+    state: State<'_, AppState>,
+    id: EntityId,
+) -> Result<ListGroupDeleteUndo, AppError> {
+    let undo = state.tasks.delete_list_group(id)?;
+    emit_list_group_change(&app, &undo.group, "deleted");
+    Ok(undo)
+}
+
+#[tauri::command]
+pub fn task_list_group_undo_delete(
+    app: AppHandle,
+    state: State<'_, AppState>,
+    undo: ListGroupDeleteUndo,
+) -> Result<TaskListGroup, AppError> {
+    let group = state.tasks.undo_delete_list_group(undo)?;
+    emit_list_group_change(&app, &group, "restored");
+    Ok(group)
+}
+
+#[tauri::command]
+pub fn task_list_overview(
+    state: State<'_, AppState>,
+) -> Result<TaskListGroupOverview, AppError> {
+    state.tasks.task_list_overview().map_err(Into::into)
 }
 
 #[tauri::command]
@@ -301,9 +403,26 @@ pub fn task_query(
 }
 
 #[tauri::command]
-pub fn task_today(state: State<'_, AppState>) -> Result<TodayTasks, AppError> {
-    let mut today = state.tasks.today_tasks()?;
+pub fn task_today(
+    state: State<'_, AppState>,
+    scope: Option<ListGroupScope>,
+) -> Result<TodayTasks, AppError> {
+    let mut today = state.tasks.today_tasks(scope)?;
     today.reminders_today = state.reminders.today_items()?;
+    if scope.is_some() {
+        // 提醒无清单归属：按关联任务的清单分组过滤；未关联任务的提醒仅在「全部」显示。
+        let group_by_task = state.tasks.list_group_by_task()?;
+        today.reminders_today.retain(|item| {
+            match item.reminder.task_id {
+                Some(task_id) => crate::application::list_groups::list_group_scope_matches(
+                    task_id,
+                    &group_by_task,
+                    scope,
+                ),
+                None => false,
+            }
+        });
+    }
     Ok(today)
 }
 
@@ -315,7 +434,7 @@ pub fn today_sort_suggestions(
     let today = crate::domain::local_today(&crate::domain::SystemClock);
     let due_ids: Vec<EntityId> = state
         .tasks
-        .today_tasks()?
+        .today_tasks(None)?
         .due_today
         .into_iter()
         .map(|t| t.id)

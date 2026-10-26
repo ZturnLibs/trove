@@ -1,13 +1,13 @@
 use crate::domain::{
     compute_today_sort_suggestions, local_today, new_id, stamp, validate_due_date,
     validate_due_time, CreateTaskInput, DeleteListResult, DomainError, EntityId,
-    ListDeleteDisposition, ListKind, PagedResult, should_apply_active_list_filter, SmartListKind,
-    SystemClock, Tag, Task, TaskList, TaskPriority, TaskQuery, TaskStatus, TaskWorkflowState,
-    ChecklistItem, ChecklistUpdateInput, TaskChecklist, CHECKLIST_MAX_ITEMS,
+    ListDeleteDisposition, ListGroupScope, ListKind, PagedResult, should_apply_active_list_filter,
+    SmartListKind, SystemClock, Tag, Task, TaskList, TaskPriority, TaskQuery, TaskStatus,
+    TaskWorkflowState, ChecklistItem, ChecklistUpdateInput, TaskChecklist, CHECKLIST_MAX_ITEMS,
     TodaySortSuggestions, TodayTasks, UpdateTaskInput, validate_checklist_content,
-    validate_due_vs_available, TaskDeleteDisposition, TaskTreeExpanded,
-    validate_parent_depth,
+    validate_due_vs_available, TaskDeleteDisposition, TaskTreeExpanded, validate_parent_depth,
 };
+use crate::application::list_groups::list_group_scope_matches;
 use crate::domain::{page_limit, page_offset};
 use crate::infrastructure::db::Database;
 use rusqlite::{params, Connection, OptionalExtension};
@@ -49,15 +49,19 @@ impl TaskService {
         Ok(())
     }
 
-    fn connect(&self) -> Result<Connection, DomainError> {
+    pub(crate) fn connect(&self) -> Result<Connection, DomainError> {
         self.db.connect().map_err(internal)
+    }
+
+    pub(crate) fn clock_ref(&self) -> &SystemClock {
+        &self.clock
     }
 
     pub fn list_lists(&self) -> Result<Vec<TaskList>, DomainError> {
         let conn = self.connect()?;
         let mut stmt = conn
             .prepare(
-                "SELECT id, name, kind, sort_order, created_at, updated_at, revision
+                "SELECT id, name, kind, sort_order, created_at, updated_at, revision, group_id
                  FROM task_lists
                  WHERE deleted_at IS NULL
                  ORDER BY CASE kind WHEN 'inbox' THEN 0 ELSE 1 END, sort_order, name",
@@ -94,7 +98,7 @@ impl TaskService {
     pub fn get_list(&self, id: EntityId) -> Result<TaskList, DomainError> {
         let conn = self.connect()?;
         conn.query_row(
-            "SELECT id, name, kind, sort_order, created_at, updated_at, revision
+            "SELECT id, name, kind, sort_order, created_at, updated_at, revision, group_id
              FROM task_lists WHERE id = ?1 AND deleted_at IS NULL",
             [id.to_string()],
             map_list_row,
@@ -1215,6 +1219,18 @@ impl TaskService {
             filters.push_str(" AND t.list_id = ?");
             values.push(Box::new(list_id.to_string()));
         }
+        if let Some(group_id) = query.list_group_id {
+            // 任务页按分组过滤：任务所属清单挂在目标分组下。
+            // 软删清单/软删分组一律不命中（归档任务可能仍挂在软删清单上，
+            // 解散分组也只清理活跃清单的 group_id），与今日页内存过滤语义一致。
+            filters.push_str(
+                " AND EXISTS (SELECT 1 FROM task_lists lg
+                     JOIN task_list_groups lgg ON lgg.id = lg.group_id
+                     WHERE lg.id = t.list_id AND lg.deleted_at IS NULL
+                       AND lgg.deleted_at IS NULL AND lgg.id = ?)",
+            );
+            values.push(Box::new(group_id.to_string()));
+        }
         if let Some(status) = query.status {
             filters.push_str(" AND t.status = ?");
             values.push(Box::new(status.as_str().to_string()));
@@ -1794,9 +1810,13 @@ impl TaskService {
         Ok(carried)
     }
 
-    pub fn today_tasks(&self) -> Result<TodayTasks, DomainError> {
+    /// 今日页聚合。`scope` 来自今日页过滤 chips：None = 全部（现状语义）；
+    /// Group/Ungrouped 时五个任务区块（重点/等待/逾期/今日任务/已完成）统一
+    /// 按任务所属清单的分组过滤；提醒区块在命令层按关联任务的分组过滤。
+    pub fn today_tasks(&self, scope: Option<ListGroupScope>) -> Result<TodayTasks, DomainError> {
         let today = local_today(&self.clock);
         let conn = self.connect()?;
+        let group_by_list = self.list_group_map(&conn)?;
 
         let mut overdue = self.query_today_bucket(
             &conn,
@@ -1852,6 +1872,18 @@ impl TaskService {
             .chain(focus_carry_suggestions.iter_mut())
         {
             self.attach_tags(&conn, task)?;
+        }
+
+        if scope.is_some() {
+            let keep = |t: &Task| {
+                list_group_scope_matches(t.list_id, &group_by_list, scope)
+            };
+            overdue.retain(keep);
+            due_today.retain(keep);
+            completed_today.retain(keep);
+            waiting_follow_up.retain(keep);
+            focus.retain(keep);
+            focus_carry_suggestions.retain(keep);
         }
 
         Ok(TodayTasks {
@@ -1920,7 +1952,7 @@ impl TaskService {
                 suggestions: Vec::new(),
             });
         }
-        let today_view = self.today_tasks()?;
+        let today_view = self.today_tasks(None)?;
         let due_today = today_view.due_today;
         if due_today.is_empty() {
             return Ok(TodaySortSuggestions {
@@ -2392,7 +2424,7 @@ pub struct TaskCounts {
     pub overdue: i64,
 }
 
-fn internal<E: std::fmt::Display>(err: E) -> DomainError {
+pub(crate) fn internal<E: std::fmt::Display>(err: E) -> DomainError {
     DomainError::Internal(err.to_string())
 }
 
@@ -2403,13 +2435,13 @@ fn escape_like(value: &str) -> String {
         .replace('_', "\\_")
 }
 
-fn parse_id(value: String) -> Result<EntityId, rusqlite::Error> {
+pub(crate) fn parse_id(value: String) -> Result<EntityId, rusqlite::Error> {
     value.parse().map_err(|e| {
         rusqlite::Error::FromSqlConversionFailure(0, rusqlite::types::Type::Text, Box::new(e))
     })
 }
 
-fn map_list_row(row: &rusqlite::Row<'_>) -> Result<TaskList, rusqlite::Error> {
+pub(crate) fn map_list_row(row: &rusqlite::Row<'_>) -> Result<TaskList, rusqlite::Error> {
     Ok(TaskList {
         id: parse_id(row.get(0)?)?,
         name: row.get(1)?,
@@ -2420,6 +2452,11 @@ fn map_list_row(row: &rusqlite::Row<'_>) -> Result<TaskList, rusqlite::Error> {
         created_at: row.get(4)?,
         updated_at: row.get(5)?,
         revision: row.get(6)?,
+        // Nullable column: must be read as Option (spec pitfall).
+        group_id: row
+            .get::<_, Option<String>>(7)?
+            .map(parse_id)
+            .transpose()?,
     })
 }
 
@@ -2472,7 +2509,7 @@ fn map_domain_sql(err: DomainError) -> rusqlite::Error {
     rusqlite::Error::ToSqlConversionFailure(Box::new(std::io::Error::other(err.to_string())))
 }
 
-fn collect_rows<T, E>(rows: impl IntoIterator<Item = Result<T, E>>) -> Result<Vec<T>, DomainError>
+pub(crate) fn collect_rows<T, E>(rows: impl IntoIterator<Item = Result<T, E>>) -> Result<Vec<T>, DomainError>
 where
     E: std::fmt::Display,
 {
@@ -2860,7 +2897,7 @@ mod tests {
             })
             .unwrap();
 
-        let today_view = svc.today_tasks().unwrap();
+        let today_view = svc.today_tasks(None).unwrap();
         assert_eq!(today_view.today, today);
         assert!(today_view.overdue.iter().any(|t| t.id == overdue.id));
         assert!(today_view.due_today.iter().any(|t| t.id == due.id));
@@ -2874,7 +2911,7 @@ mod tests {
         );
 
         svc.complete_task(due.id).unwrap();
-        let today_view = svc.today_tasks().unwrap();
+        let today_view = svc.today_tasks(None).unwrap();
         assert!(today_view.completed_today.iter().any(|t| t.id == due.id));
         assert!(!today_view.due_today.iter().any(|t| t.id == due.id));
     }
@@ -3265,7 +3302,7 @@ mod tests {
             .unwrap();
         assert!(!active.items.iter().any(|t| t.id == task.id));
 
-        let today_view = svc.today_tasks().unwrap();
+        let today_view = svc.today_tasks(None).unwrap();
         assert!(!today_view.due_today.iter().any(|t| t.id == task.id));
         assert!(today_view
             .waiting_follow_up
@@ -3301,7 +3338,7 @@ mod tests {
         svc.set_task_waiting(task.id, Some("Bob".into()), None)
             .unwrap();
 
-        let today_view = svc.today_tasks().unwrap();
+        let today_view = svc.today_tasks(None).unwrap();
         assert!(!today_view.waiting_follow_up.iter().any(|t| t.id == task.id));
     }
 
@@ -3328,11 +3365,11 @@ mod tests {
             .unwrap();
 
         svc.daily_focus_add(task.id, Some(today.clone())).unwrap();
-        let view = svc.today_tasks().unwrap();
+        let view = svc.today_tasks(None).unwrap();
         assert!(view.focus.iter().any(|t| t.id == task.id));
 
         svc.daily_focus_remove(task.id, Some(today.clone())).unwrap();
-        let view2 = svc.today_tasks().unwrap();
+        let view2 = svc.today_tasks(None).unwrap();
         assert!(!view2.focus.iter().any(|t| t.id == task.id));
 
         svc.daily_focus_add(task.id, Some(yesterday.clone())).unwrap();
@@ -3341,7 +3378,7 @@ mod tests {
             .unwrap();
         assert_eq!(carried.len(), 1);
         assert_eq!(carried[0].id, task.id);
-        let view3 = svc.today_tasks().unwrap();
+        let view3 = svc.today_tasks(None).unwrap();
         assert!(view3.focus.iter().any(|t| t.id == task.id));
         assert!(view3.focus_carry_suggestions.is_empty());
     }
@@ -3370,7 +3407,7 @@ mod tests {
 
         svc.daily_focus_add(task.id, None).unwrap();
         svc.set_task_defer(task.id, Some(tomorrow)).unwrap();
-        let view = svc.today_tasks().unwrap();
+        let view = svc.today_tasks(None).unwrap();
         assert!(!view.focus.iter().any(|t| t.id == task.id));
     }
 
