@@ -68,10 +68,6 @@ export function BoardCard({
   const [contextMenu, setContextMenu] = useState<{ x: number; y: number } | null>(
     null,
   );
-  const overdue =
-    task.status !== "completed" &&
-    task.dueDate !== null &&
-    task.dueDate < localTodayString();
   const dragging = isDragging || dndDragging;
 
   // 菜单关闭时机与 TaskRow 一致：outside click / 滚动 / Esc。
@@ -90,8 +86,6 @@ export function BoardCard({
       window.removeEventListener("keydown", onKeyDown);
     };
   }, [contextMenu]);
-
-  const dot = priorityDot[task.priority];
 
   return (
     <div
@@ -118,43 +112,13 @@ export function BoardCard({
         setContextMenu({ x: event.clientX, y: event.clientY });
       }}
       className={cn(
-        "group cursor-grab touch-none rounded-[var(--radius-control)] border border-border bg-surface p-2 text-left shadow-sm hover:border-accent/40 hover:bg-row-hover",
+        "group touch-none rounded-[var(--radius-control)] border border-border bg-surface p-2 text-left shadow-sm hover:border-accent/40 hover:bg-row-hover",
+        dragging ? "cursor-grabbing opacity-40" : "cursor-grab",
         selected && "border-accent bg-row-active",
-        dragging && "opacity-50",
         task.status === "completed" && "opacity-70",
       )}
     >
-      <div className="flex items-start gap-1.5">
-        {dot ? (
-          <span
-            aria-hidden
-            title={priorityLabel[task.priority]}
-            className={cn("mt-1.5 h-2 w-2 shrink-0 rounded-full", dot)}
-          />
-        ) : null}
-        <div className="min-w-0 flex-1">
-          <div
-            className={cn(
-              "truncate text-[13px]",
-              task.status === "completed" && "text-muted line-through",
-              overdue && "text-danger",
-            )}
-          >
-            {task.title}
-          </div>
-          <div className="mt-1 flex items-center gap-1.5 text-[11px] text-muted">
-            <span className="min-w-0 truncate">{task.listName}</span>
-            {task.dueDate ? (
-              <span className={cn("shrink-0", overdue && "text-danger")}>
-                {task.dueDate}
-                {task.dueTime ? ` ${task.dueTime}` : ""}
-              </span>
-            ) : null}
-            {task.seriesId ? <span className="shrink-0">重复</span> : null}
-            <SubtaskBadge taskId={task.id} />
-          </div>
-        </div>
-      </div>
+      <BoardCardBody task={task} />
       {contextMenu ? (
         <TaskWorkflowContextMenu
           x={contextMenu.x}
@@ -166,6 +130,49 @@ export function BoardCard({
           onClose={() => setContextMenu(null)}
         />
       ) : null}
+    </div>
+  );
+}
+
+/** 卡片内容（无交互），BoardCard 与 DragOverlay 浮层共用。 */
+export function BoardCardBody({ task }: { task: Task }) {
+  const overdue =
+    task.status !== "completed" &&
+    task.dueDate !== null &&
+    task.dueDate < localTodayString();
+  const dot = priorityDot[task.priority];
+
+  return (
+    <div className="flex items-start gap-1.5">
+      {dot ? (
+        <span
+          aria-hidden
+          title={priorityLabel[task.priority]}
+          className={cn("mt-1.5 h-2 w-2 shrink-0 rounded-full", dot)}
+        />
+      ) : null}
+      <div className="min-w-0 flex-1">
+        <div
+          className={cn(
+            "truncate text-[13px]",
+            task.status === "completed" && "text-muted line-through",
+            overdue && "text-danger",
+          )}
+        >
+          {task.title}
+        </div>
+        <div className="mt-1 flex items-center gap-1.5 text-[11px] text-muted">
+          <span className="min-w-0 truncate">{task.listName}</span>
+          {task.dueDate ? (
+            <span className={cn("shrink-0", overdue && "text-danger")}>
+              {task.dueDate}
+              {task.dueTime ? ` ${task.dueTime}` : ""}
+            </span>
+          ) : null}
+          {task.seriesId ? <span className="shrink-0">重复</span> : null}
+          <SubtaskBadge taskId={task.id} />
+        </div>
+      </div>
     </div>
   );
 }

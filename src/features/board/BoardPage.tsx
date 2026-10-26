@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import {
   DndContext,
+  DragOverlay,
   PointerSensor,
   useDroppable,
   useSensor,
@@ -10,7 +11,7 @@ import type { DragEndEvent, DragStartEvent } from "@dnd-kit/core";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useSearchParams } from "react-router-dom";
 import { TaskDetailPanel } from "@/design-system/patterns/TaskDetailPanel";
-import { BoardCard } from "@/features/board/BoardCard";
+import { BoardCardBody, BoardCard } from "@/features/board/BoardCard";
 import {
   buildGroupByListId,
   defaultListIdForScope,
@@ -187,6 +188,7 @@ export function BoardPage() {
     null,
   );
   const [composerTitle, setComposerTitle] = useState("");
+  const [activeDragTask, setActiveDragTask] = useState<Task | null>(null);
   const suppressClickUntilRef = useRef(0);
   const today = localTodayString();
 
@@ -435,12 +437,15 @@ export function BoardPage() {
     allBoardTasks.find((task) => task.id === id) ?? null;
 
   const handleDragStart = (event: DragStartEvent) => {
+    const dragged = findTask(String(event.active.id));
     setActiveDragId(String(event.active.id));
+    setActiveDragTask(dragged);
   };
 
   const handleDragEnd = (event: DragEndEvent) => {
     const dragged = findTask(String(event.active.id));
     setActiveDragId(null);
+    setActiveDragTask(null);
     suppressClickUntilRef.current = Date.now() + 300;
     if (!dragged || !event.over) return;
     const target = String(event.over.id);
@@ -519,7 +524,10 @@ export function BoardPage() {
             sensors={sensors}
             onDragStart={handleDragStart}
             onDragEnd={handleDragEnd}
-            onDragCancel={() => setActiveDragId(null)}
+            onDragCancel={() => {
+              setActiveDragId(null);
+              setActiveDragTask(null);
+            }}
           >
             <div className="flex min-h-0 flex-1 gap-3 overflow-x-auto p-3">
               <BoardColumnView
@@ -567,6 +575,13 @@ export function BoardPage() {
                 {renderCards(columns.done)}
               </BoardColumnView>
             </div>
+            <DragOverlay dropAnimation={null}>
+              {activeDragTask ? (
+                <div className="w-[240px] rotate-2 cursor-grabbing rounded-[var(--radius-control)] border border-accent/50 bg-surface p-2 shadow-xl ring-2 ring-accent/40">
+                  <BoardCardBody task={activeDragTask} />
+                </div>
+              ) : null}
+            </DragOverlay>
           </DndContext>
         </div>
       }
