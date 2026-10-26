@@ -365,3 +365,24 @@
 ### Status
 
 [OK] **Completed**
+
+
+## Session 16: 任务看板：列内新建 + v2.2.0 发布
+
+**Date**: 2026-10-26
+**Task**: 任务看板：列内新建 + v2.2.0 发布
+**Branch**: `chore/archive-task-kanban-board`
+
+### Summary
+
+看板列内新建（composer+作用域默认清单，61 unit 绿）并入 PR #20；合并后走 chore PR #21 出 v2.2.0（minor），tag 已推、release 工作流构建中；任务归档
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `587ed78` | (see git log) |
+
+### Status
+
+[OK] **Completed**

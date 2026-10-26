@@ -8,7 +8,7 @@
 
 <!-- @@@auto:current-status -->
 - **Active File**: `journal-1.md`
-- **Total Sessions**: 15
+- **Total Sessions**: 16
 - **Last Active**: 2026-10-26
 <!-- @@@/auto:current-status -->
 
@@ -19,7 +19,7 @@
 <!-- @@@auto:active-documents -->
 | File | Lines | Status |
 |------|-------|--------|
-| `journal-1.md` | ~367 | Active |
+| `journal-1.md` | ~388 | Active |
 <!-- @@@/auto:active-documents -->
 
 ---
@@ -29,6 +29,7 @@
 <!-- @@@auto:session-history -->
 | # | Date | Title | Commits | Branch |
 |---|------|-------|---------|--------|
+| 16 | 2026-10-26 | 任务看板：列内新建 + v2.2.0 发布 | `587ed78` | `chore/archive-task-kanban-board` |
 | 15 | 2026-10-26 | 任务看板实现：迁移0024+/board三列拖拽+审查修复 | `c334641` | `feat/task-kanban-board` |
 | 14 | 2026-10-26 | 任务分组收尾：AC 核对全绿 + spec 回写 + PR #18 | `c985ed0` | `feat/task-list-groups` |
 | 13 | 2026-08-31 | 任务支持多层嵌套子任务（v2.1 切片） | `0d71881`, `467f184`, `bec7517` | `allan852/feat-sub-task` |
