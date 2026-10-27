@@ -1,3 +1,4 @@
+import { arrayMove } from "@dnd-kit/sortable";
 import type {
   ListGroupScope,
   Task,
@@ -82,4 +83,26 @@ export function defaultListIdForScope(
   if (scope?.kind !== "group") return null;
   const node = overview.groups.find((g) => g.group.id === scope.groupId);
   return node?.lists[0]?.id ?? null;
+}
+
+/**
+ * 同清单拖动排序：拖拽卡落在同清单卡上时，返回该清单在列内的完整新 id 序列
+ * （交给 `task_reorder` 按清单分组重写 sort_order，其他清单不受影响）。
+ * 落点是其他清单的卡片 / 找不到卡 / 该清单不足两张 → null（无清单内排序语义，不动作）。
+ */
+export function sameListReorderIds(
+  columnTasks: Task[],
+  activeId: string,
+  overId: string,
+): string[] | null {
+  const from = columnTasks.findIndex((t) => t.id === activeId);
+  const to = columnTasks.findIndex((t) => t.id === overId);
+  if (from === -1 || to === -1 || from === to) return null;
+  const moved = columnTasks[from];
+  const segment = columnTasks.filter((t) => t.listId === moved.listId);
+  if (segment.length < 2) return null;
+  const segFrom = segment.findIndex((t) => t.id === activeId);
+  const segTo = segment.findIndex((t) => t.id === overId);
+  if (segTo === -1) return null;
+  return arrayMove(segment, segFrom, segTo).map((t) => t.id);
 }

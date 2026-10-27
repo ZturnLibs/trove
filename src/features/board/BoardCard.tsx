@@ -1,5 +1,6 @@
 import { useEffect, useState } from "react";
-import { useDraggable } from "@dnd-kit/core";
+import { useSortable } from "@dnd-kit/sortable";
+import { CSS } from "@dnd-kit/utilities";
 import { useQuery } from "@tanstack/react-query";
 import { TaskWorkflowContextMenu } from "@/design-system/patterns/TaskRow";
 import { ipc, type Task } from "@/ipc/client";
@@ -63,8 +64,15 @@ export function BoardCard({
   onMarkWaiting?: (task: Task) => void | Promise<void>;
   suppressClickUntilRef: { current: number };
 }) {
-  const { attributes, listeners, setNodeRef, isDragging: dndDragging } =
-    useDraggable({ id: task.id });
+  // useSortable = 拖拽手柄 + 落点目标：同列拖动时兄弟卡片通过 transform 让位。
+  // 自身处于拖拽态时不应用 transform（浮层负责跟随），保留半透明占位。
+  const {
+    attributes,
+    listeners,
+    setNodeRef,
+    transform,
+    isDragging: dndDragging,
+  } = useSortable({ id: task.id });
   const [contextMenu, setContextMenu] = useState<{ x: number; y: number } | null>(
     null,
   );
@@ -92,6 +100,11 @@ export function BoardCard({
       ref={setNodeRef}
       {...attributes}
       {...listeners}
+      style={{
+        transform:
+          !dragging && transform ? CSS.Translate.toString(transform) : undefined,
+        transition: "transform 180ms ease",
+      }}
       role="button"
       tabIndex={0}
       onClick={() => {

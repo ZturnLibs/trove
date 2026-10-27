@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import {
   buildGroupByListId,
   defaultListIdForScope,
+  sameListReorderIds,
   splitBoardColumns,
 } from "./splitBoardColumns";
 import type { Task, TaskListGroupOverview } from "@/ipc/client";
@@ -166,6 +167,27 @@ describe("defaultListIdForScope", () => {
     ).toBeNull();
     expect(defaultListIdForScope({ kind: "ungrouped" }, overview)).toBeNull();
     expect(defaultListIdForScope(null, overview)).toBeNull();
+  });
+});
+
+describe("sameListReorderIds", () => {
+  const column = [
+    makeTask("a", { sortOrder: 0 }),
+    makeTask("b", { sortOrder: 1 }),
+    makeTask("c", { sortOrder: 2 }),
+    makeTask("other", { listId: "l2", sortOrder: 0 }),
+  ];
+
+  it("returns the same-list segment in new order when dropping on a same-list card", () => {
+    expect(sameListReorderIds(column, "a", "c")).toEqual(["b", "c", "a"]);
+    expect(sameListReorderIds(column, "c", "a")).toEqual(["c", "a", "b"]);
+    expect(sameListReorderIds(column, "b", "a")).toEqual(["b", "a", "c"]);
+  });
+
+  it("returns null for cross-list drops, single-item lists, and unknown cards", () => {
+    expect(sameListReorderIds(column, "a", "other")).toBeNull();
+    expect(sameListReorderIds([makeTask("solo")], "solo", "solo")).toBeNull();
+    expect(sameListReorderIds(column, "a", "missing")).toBeNull();
   });
 });
 

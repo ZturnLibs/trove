@@ -3,10 +3,16 @@ import {
   DndContext,
   DragOverlay,
   PointerSensor,
+  pointerWithin,
   useDroppable,
   useSensor,
   useSensors,
 } from "@dnd-kit/core";
+import {
+  SortableContext,
+  arrayMove,
+  verticalListSortingStrategy,
+} from "@dnd-kit/sortable";
 import type { DragEndEvent, DragStartEvent } from "@dnd-kit/core";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useSearchParams } from "react-router-dom";
@@ -15,6 +21,7 @@ import { BoardCardBody, BoardCard } from "@/features/board/BoardCard";
 import {
   buildGroupByListId,
   defaultListIdForScope,
+  sameListReorderIds,
   splitBoardColumns,
 } from "@/features/board/splitBoardColumns";
 import {
@@ -36,6 +43,8 @@ import { localTodayString } from "@/lib/defer";
 const BOARD_GROUP_FILTER_KEY = "board.groupFilter";
 
 type BoardColumnId = "col:todo" | "col:doing" | "col:done";
+
+type BoardColumnKey = "todo" | "doing" | "done";
 
 type BoardCacheSnapshot = { todoSnapshot: unknown; doneSnapshot: unknown };
 
@@ -403,6 +412,42 @@ export function BoardPage() {
     },
   });
 
+  // 同清单列内排序：乐观重排缓存数组（split 按输入顺序分流，数组序即列序），
+  // 持久化交给 task_reorder——后端按清单分组重写 sort_order，其他清单不动。
+  const reorderMutation = useMutation<
+    void,
+    Error,
+    { activeId: string; overId: string; orderedIds: string[] },
+    BoardCacheSnapshot
+  >({
+    mutationFn: ({ orderedIds }) => ipc.taskReorder(orderedIds),
+    onMutate: async (vars) => {
+      const snapshot = await snapshotBoardCaches();
+      const reorderIn = (old: { items: Task[] } | undefined) => {
+        if (!old) return old;
+        const from = old.items.findIndex((t) => t.id === vars.activeId);
+        const to = old.items.findIndex((t) => t.id === vars.overId);
+        if (from === -1 || to === -1) return old;
+        const items = arrayMove(old.items, from, to);
+        const movedListId = items[to]?.listId;
+        let seq = 0;
+        for (const t of items) {
+          if (t.listId === movedListId && vars.orderedIds.includes(t.id)) {
+            t.sortOrder = seq++;
+          }
+        }
+        return { ...old, items };
+      };
+      queryClient.setQueryData(todoQueryKey, reorderIn);
+      queryClient.setQueryData(doneQueryKey, reorderIn);
+      return snapshot;
+    },
+    onError: (_error, _vars, context) => {
+      restoreBoardCaches(context);
+    },
+    onSettled: invalidateBoard,
+  });
+
   const submitComposer = (column: "todo" | "doing") => {
     const title = composerTitle.trim();
     if (!title || createMutation.isPending) return;
@@ -446,21 +491,56 @@ export function BoardPage() {
     setActiveDragTask(dragged);
   };
 
+  const columnOf = (taskId: string): BoardColumnKey | null => {
+    if (columns.todo.some((t) => t.id === taskId)) return "todo";
+    if (columns.doing.some((t) => t.id === taskId)) return "doing";
+    if (columns.done.some((t) => t.id === taskId)) return "done";
+    return null;
+  };
+
   const handleDragEnd = (event: DragEndEvent) => {
     const dragged = findTask(String(event.active.id));
     setActiveDragId(null);
     setActiveDragTask(null);
     suppressClickUntilRef.current = Date.now() + 300;
     if (!dragged || !event.over) return;
-    const target = String(event.over.id);
+    const overId = String(event.over.id);
+    const source = columnOf(dragged.id);
+    // over 可能是卡片（useSortable）或列 droppable（空白区/空列）。
+    const target: BoardColumnKey | null =
+      columnOf(overId) ??
+      (overId === "col:todo" || overId === "col:doing" || overId === "col:done"
+        ? (overId.slice(4) as BoardColumnKey)
+        : null);
+    if (!source || !target) return;
 
-    if (target === "col:doing") {
+    // 同列：仅同清单段支持手动排序（sort_order 是清单内维度）；
+    // 完成列按完成时间排序，不支持手动重排。
+    if (target === source) {
+      if (source === "done") return;
+      if (overId === dragged.id || overId.startsWith("col:")) return;
+      const orderedIds = sameListReorderIds(
+        columns[source],
+        dragged.id,
+        overId,
+      );
+      if (orderedIds) {
+        reorderMutation.mutate({
+          activeId: dragged.id,
+          overId,
+          orderedIds,
+        });
+      }
+      return;
+    }
+
+    if (target === "doing") {
       if (dragged.status === "todo" && dragged.boardStage !== "doing") {
         stageMutation.mutate({ id: dragged.id, stage: "doing" });
       }
       return;
     }
-    if (target === "col:todo") {
+    if (target === "todo") {
       if (dragged.status === "completed") {
         uncompleteMutation.mutate(dragged);
       } else if (dragged.boardStage === "doing") {
@@ -468,7 +548,7 @@ export function BoardPage() {
       }
       return;
     }
-    if (target === "col:done" && dragged.status === "todo") {
+    if (target === "done" && dragged.status === "todo") {
       completeMutation.mutate(dragged);
     }
   };
@@ -526,6 +606,7 @@ export function BoardPage() {
           </div>
           <DndContext
             sensors={sensors}
+            collisionDetection={pointerWithin}
             onDragStart={handleDragStart}
             onDragEnd={handleDragEnd}
             onDragCancel={() => {
@@ -550,7 +631,12 @@ export function BoardPage() {
                   />
                 }
               >
-                {renderCards(columns.todo)}
+                <SortableContext
+                  items={columns.todo.map((t) => t.id)}
+                  strategy={verticalListSortingStrategy}
+                >
+                  {renderCards(columns.todo)}
+                </SortableContext>
               </BoardColumnView>
               <BoardColumnView
                 columnId="col:doing"
@@ -568,7 +654,12 @@ export function BoardPage() {
                   />
                 }
               >
-                {renderCards(columns.doing)}
+                <SortableContext
+                  items={columns.doing.map((t) => t.id)}
+                  strategy={verticalListSortingStrategy}
+                >
+                  {renderCards(columns.doing)}
+                </SortableContext>
               </BoardColumnView>
               <BoardColumnView
                 columnId="col:done"
@@ -576,7 +667,12 @@ export function BoardPage() {
                 hint="今日"
                 count={columns.done.length}
               >
-                {renderCards(columns.done)}
+                <SortableContext
+                  items={columns.done.map((t) => t.id)}
+                  strategy={verticalListSortingStrategy}
+                >
+                  {renderCards(columns.done)}
+                </SortableContext>
               </BoardColumnView>
             </div>
             <DragOverlay
