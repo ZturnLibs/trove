@@ -125,6 +125,9 @@ pub fn acquire_lock(case: &str) -> Option<MutexGuard<'static, ()>> {
         return None;
     }
     let guard = global_lock().lock().unwrap_or_else(|e| e.into_inner());
+    // fantoccini(rustls-tls) 不带默认 CryptoProvider：首个 TLS 连接会 panic。
+    // 幂等安装 ring provider（已设置时返回 Err，忽略即可）。
+    let _ = rustls::crypto::ring::default_provider().install_default();
     Some(guard)
 }
 

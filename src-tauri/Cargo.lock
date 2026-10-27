@@ -5515,6 +5515,7 @@ dependencies = [
  "reqwest 0.12.28",
  "rfd",
  "rusqlite",
+ "rustls",
  "serde",
  "serde_json",
  "sha2",
