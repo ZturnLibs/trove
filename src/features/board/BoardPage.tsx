@@ -448,6 +448,35 @@ export function BoardPage() {
     onSettled: invalidateBoard,
   });
 
+  // 双击改名：全字段保留的 taskUpdate（TaskRow 默认持久化模式）+ 乐观标题。
+  const renameMutation = useMutation<
+    Task,
+    Error,
+    { task: Task; title: string },
+    BoardCacheSnapshot
+  >({
+    mutationFn: ({ task, title }) =>
+      ipc.taskUpdate({
+        id: task.id,
+        title,
+        notes: task.notes,
+        priority: task.priority,
+        listId: task.listId,
+        dueDate: task.dueDate,
+        dueTime: task.dueTime,
+        tagNames: task.tagNames,
+      }),
+    onMutate: async ({ task, title }) => {
+      const snapshot = await snapshotBoardCaches();
+      patchBoardCaches(task.id, { title });
+      return snapshot;
+    },
+    onError: (_error, _vars, context) => {
+      restoreBoardCaches(context);
+    },
+    onSettled: invalidateBoard,
+  });
+
   const submitComposer = (column: "todo" | "doing") => {
     const title = composerTitle.trim();
     if (!title || createMutation.isPending) return;
@@ -567,6 +596,7 @@ export function BoardPage() {
         task={task}
         selected={task.id === selectedId}
         isDragging={task.id === activeDragId}
+        onRename={(renamed, title) => renameMutation.mutate({ task: renamed, title })}
         onSelect={(selected) => {
           setSelectedId(selected.id);
           setFocusTitleId(null);

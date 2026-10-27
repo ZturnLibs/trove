@@ -51,6 +51,7 @@ export function BoardCard({
   task,
   selected,
   isDragging,
+  onRename,
   onSelect,
   onSetDefer,
   onMarkWaiting,
@@ -59,6 +60,8 @@ export function BoardCard({
   task: Task;
   selected?: boolean;
   isDragging?: boolean;
+  /** 双击标题行内改名（乐观）。 */
+  onRename?: (task: Task, title: string) => void | Promise<void>;
   onSelect: (task: Task) => void;
   onSetDefer?: (task: Task, availableAt: string | null) => void | Promise<void>;
   onMarkWaiting?: (task: Task) => void | Promise<void>;
@@ -131,7 +134,7 @@ export function BoardCard({
         task.status === "completed" && "opacity-70",
       )}
     >
-      <BoardCardBody task={task} />
+      <BoardCardBody task={task} onRename={onRename} />
       {contextMenu ? (
         <TaskWorkflowContextMenu
           x={contextMenu.x}
@@ -147,13 +150,29 @@ export function BoardCard({
   );
 }
 
-/** 卡片内容（无交互），BoardCard 与 DragOverlay 浮层共用。 */
-export function BoardCardBody({ task }: { task: Task }) {
+/** 卡片内容。传 onRename 时标题支持双击行内编辑（与 TaskRow 同模式）。 */
+export function BoardCardBody({
+  task,
+  onRename,
+}: {
+  task: Task;
+  onRename?: (task: Task, title: string) => void | Promise<void>;
+}) {
+  const [editing, setEditing] = useState(false);
   const overdue =
     task.status !== "completed" &&
     task.dueDate !== null &&
     task.dueDate < localTodayString();
   const dot = priorityDot[task.priority];
+
+  // 提交：trim 后与现值不同才落库；Esc 直接退出（值未变，blur 提交为 no-op）。
+  const commit = (value: string) => {
+    const trimmed = value.trim();
+    if (trimmed && trimmed !== task.title) {
+      void onRename?.(task, trimmed);
+    }
+    setEditing(false);
+  };
 
   return (
     <div className="flex items-start gap-1.5">
@@ -165,15 +184,38 @@ export function BoardCardBody({ task }: { task: Task }) {
         />
       ) : null}
       <div className="min-w-0 flex-1">
-        <div
-          className={cn(
-            "truncate text-[13px]",
-            task.status === "completed" && "text-muted line-through",
-            overdue && "text-danger",
-          )}
-        >
-          {task.title}
-        </div>
+        {editing && onRename ? (
+          <input
+            autoFocus
+            defaultValue={task.title}
+            onClick={(event) => event.stopPropagation()}
+            onDoubleClick={(event) => event.stopPropagation()}
+            onPointerDown={(event) => event.stopPropagation()}
+            onBlur={(event) => commit(event.target.value)}
+            onKeyDown={(event) => {
+              // 按键留在输入框内（卡片层 Enter/Space 是选中、指针监听是拖拽）。
+              event.stopPropagation();
+              if (event.key === "Enter") commit(event.currentTarget.value);
+              if (event.key === "Escape") setEditing(false);
+            }}
+            className="w-full rounded-[var(--radius-control)] border border-accent/60 bg-surface-raised px-1 py-0.5 text-[13px] outline-none"
+          />
+        ) : (
+          <div
+            className={cn(
+              "truncate text-[13px]",
+              task.status === "completed" && "text-muted line-through",
+              overdue && "text-danger",
+            )}
+            onDoubleClick={(event) => {
+              if (!onRename) return;
+              event.stopPropagation();
+              setEditing(true);
+            }}
+          >
+            {task.title}
+          </div>
+        )}
         <div className="mt-1 flex items-center gap-1.5 text-[11px] text-muted">
           <span className="min-w-0 truncate">{task.listName}</span>
           {task.dueDate ? (
