@@ -45,6 +45,10 @@ trove-cli --json query overdue --limit 10
 trove-cli --json query inbox
 trove-cli --json query memories "周报"
 trove-cli --json query snippets
+
+# 导出任务 CSV（经运行中的应用，与设置页「导出任务 CSV」同源）
+trove-cli export-csv --out ./tasks.csv
+trove-cli --json export-csv
 ```
 
 ## 协议

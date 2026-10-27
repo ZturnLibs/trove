@@ -38,3 +38,36 @@ jobs:
           sudo apt-get update
           sudo apt-get install -y libwebkit2gtk-4.1-dev libappindicator3-dev librsvg2-dev patchelf
       - run: cargo test
+
+  e2e:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: src-tauri
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: src-tauri
+      - name: Install Linux Tauri deps + WebDriver
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libwebkit2gtk-4.1-dev libappindicator3-dev librsvg2-dev patchelf webkit2gtk-driver
+          cargo install tauri-driver --locked
+      - name: Build app + e2e tests
+        run: |
+          cargo build
+          cargo test --test e2e --no-run
+      - name: Run e2e smoke
+        env:
+          E2E: "1"
+          E2E_ARTIFACT_DIR: ${{ github.workspace }}/e2e-artifacts
+        run: cargo test --test e2e -- --ignored --nocapture
+      - name: Upload failure artifacts
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: e2e-artifacts
+          path: e2e-artifacts
+          if-no-files-found: ignore

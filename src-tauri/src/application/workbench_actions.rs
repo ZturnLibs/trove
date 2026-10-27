@@ -169,6 +169,11 @@ pub fn dispatch(
                 total: page.total,
             })
         }
+        WorkbenchAction::ExportTasksCsv => {
+            let state = state.ok_or_else(|| DomainError::Validation("应用未就绪".into()))?;
+            let csv = state.csv_tasks.export_csv()?;
+            Ok(ActionOutcome::TasksCsvExported { csv })
+        }
     }
 }
 
