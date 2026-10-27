@@ -27,14 +27,36 @@ body {
   box-sizing: border-box;
 }
 
+/* 滚动条：细窄内衬式。透明轨道 + 2px 透明内衬让 thumb 与内容留出呼吸边；
+   hover/active 加深反馈。WebKit（Tauri WKWebView）全应用生效。 */
 ::-webkit-scrollbar {
-  width: 10px;
-  height: 10px;
+  width: 8px;
+  height: 8px;
+}
+
+::-webkit-scrollbar-track {
+  background: transparent;
 }
 
 ::-webkit-scrollbar-thumb {
-  background: color-mix(in oklab, var(--workbench-muted) 45%, transparent);
-  border-radius: 8px;
+  background: color-mix(in oklab, var(--workbench-muted) 40%, transparent);
+  border: 2px solid transparent;
+  border-radius: 999px;
+  background-clip: padding-box;
+}
+
+::-webkit-scrollbar-thumb:hover {
+  background: color-mix(in oklab, var(--workbench-muted) 65%, transparent);
+  background-clip: padding-box;
+}
+
+::-webkit-scrollbar-thumb:active {
+  background: color-mix(in oklab, var(--workbench-muted) 80%, transparent);
+  background-clip: padding-box;
+}
+
+::-webkit-scrollbar-corner {
+  background: transparent;
 }
 
 /* Markdown 预览基础样式（MarkdownView 渲染结果的排版）。 */
