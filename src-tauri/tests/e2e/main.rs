@@ -130,34 +130,45 @@ async fn case04_double_click_rename() {
         // 注意效果定位：进入编辑态后行的 text content 不再含标题（标题 div
         // 被替换成 input），不能用 contains(.,title) 定位编辑框——改用其
         // 类特征（h-7 text-[13px]）。
-        let input = ctx
-            .double_click_until(
-                &ctx.task_title("e2e 改名前"),
-                "//div[@role='button']//input[contains(@class,'text-[13px]')]",
-                "双击改名",
-            )
-            .await?;
-        input.click().await.map_err(|e| format!("聚焦改名输入框失败: {e}"))?;
-        let active = ctx
-            .client
-            .active_element()
-            .await
-            .map_err(|e| format!("定位改名输入焦点失败: {e}"))?;
-        // 全选后输入替换（Ctrl+A）。
-        active
-            .send_keys("\u{E009}a")
-            .await
-            .map_err(|e| format!("全选失败: {e}"))?;
-        active
-            .send_keys("e2e 改名后")
-            .await
-            .map_err(|e| format!("输入新名失败: {e}"))?;
-        tokio::time::sleep(Duration::from_millis(250)).await;
-        active
-            .send_keys(ENTER)
-            .await
-            .map_err(|e| format!("回车提交改名失败: {e}"))?;
-        ctx.wait_for(&ctx.task_row("e2e 改名后"), "改名持久化的任务").await?;
+        // 直接对找到的元素键入（WebDriver send_keys 语义自带聚焦）；
+        // 键入/提交任一步脱钩则整轮重试（重开编辑态拿新节点）。
+        let mut last = String::new();
+        let mut renamed: Result<(), String> = Err("未尝试".into());
+        for _ in 0..3 {
+            let input = match ctx
+                .double_click_until(
+                    &ctx.task_title("e2e 改名前"),
+                    "//div[@role='button']//input[contains(@class,'text-[13px]')]",
+                    "双击改名",
+                )
+                .await
+            {
+                Ok(i) => i,
+                Err(e) => return Err(format!("双击改名失败: {e}；last={last}")),
+            };
+            if let Err(e) = input.send_keys("\u{E009}a").await {
+                last = format!("全选失败: {e}");
+                continue;
+            }
+            if let Err(e) = input.send_keys("e2e 改名后").await {
+                last = format!("输入新名失败: {e}");
+                continue;
+            }
+            tokio::time::sleep(Duration::from_millis(250)).await;
+            if let Err(e) = input.send_keys(ENTER).await {
+                last = format!("回车提交改名失败: {e}");
+                continue;
+            }
+            renamed = ctx
+                .wait_for(&ctx.task_row("e2e 改名后"), "改名持久化的任务")
+                .await
+                .map(|_| ());
+            if renamed.is_ok() {
+                break;
+            }
+            last = renamed.as_ref().unwrap_err().clone();
+        }
+        renamed.map_err(|e| format!("双击改名失败: {e}；last={last}"))?;
         Ok(())
     });
     let r = result.await;
