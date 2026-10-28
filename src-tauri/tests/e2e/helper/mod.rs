@@ -25,8 +25,9 @@ use fantoccini::{Client, ClientBuilder, Locator};
 
 /// 单个用例的总超时（CI 冷启动偏慢，给足余量）。
 const CASE_TIMEOUT: Duration = Duration::from_secs(180);
-/// 连接 tauri-driver / 启动 app 的等待上限。
-const CONNECT_TIMEOUT: Duration = Duration::from_secs(30);
+/// 连接 tauri-driver / 启动 app 的等待上限。CI 首启要冷建 GTK/字体缓存，
+/// 30s 不够（run 40703046029 实测 app 已起但握手在 30s 处被掐）。
+const CONNECT_TIMEOUT: Duration = Duration::from_secs(90);
 /// trove-cli 单实例转发上限（app 卡死时不无限等）。
 const CLI_TIMEOUT: Duration = Duration::from_secs(30);
 const POLL: Duration = Duration::from_millis(250);

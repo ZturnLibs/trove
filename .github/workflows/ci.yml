@@ -41,9 +41,9 @@ jobs:
 
   e2e:
     runs-on: ubuntu-latest
-    # 兜底：任何残留挂起最多烧 35min（最坏合法情形：8 条用例各 180s 上限 + 构建 ≈30min），
+    # 兜底：任何残留挂起最多烧 45min（最坏合法情形：8 条用例各 270s 上限 + 构建），
     # 超时属 failure，artifact 上传仍会执行；此前无显示服务器时曾挂满 6h job 上限。
-    timeout-minutes: 35
+    timeout-minutes: 45
     defaults:
       run:
         working-directory: src-tauri
@@ -56,8 +56,10 @@ jobs:
       - name: Install Linux Tauri deps + WebDriver
         run: |
           sudo apt-get update
-          sudo apt-get install -y libwebkit2gtk-4.1-dev libappindicator3-dev librsvg2-dev patchelf webkit2gtk-driver xvfb
+          sudo apt-get install -y libwebkit2gtk-4.1-dev libappindicator3-dev librsvg2-dev patchelf webkit2gtk-driver xvfb dbus at-spi2-core
           cargo install tauri-driver --locked
+          # 预热字体缓存：WebKitGTK 首启冷建 fc 缓存可达数十秒，避免首个用例撞连接超时
+          fc-cache -f
       - name: Build app + e2e tests
         run: |
           cargo build
@@ -66,9 +68,13 @@ jobs:
         env:
           E2E: "1"
           E2E_ARTIFACT_DIR: ${{ github.workspace }}/e2e-artifacts
-        # ubuntu-latest 无显示服务器：WebKitGTK 的 app 必须有 X 才能开窗，
-        # 否则 WebKitWebDriver 会话创建永不返回（官方 CI 指南即 xvfb-run 方案）。
-        run: xvfb-run -a cargo test --test e2e -- --ignored --nocapture
+          # 无 GPU 环境 WebKitGTK DMABUF 渲染路径可能卡死/花屏；软件渲染兜底。
+          WEBKIT_DISABLE_DMABUF_RENDERER: "1"
+        # ubuntu-latest 无显示服务器也无 session DBus：WebKitGTK 自动化走 AT-SPI
+        # 可访问性树（run 40703046029 的 tauri-driver.log：org.a11y.Bus ServiceUnknown
+        # 后握手永不返回），dbus-run-session 提供 session bus；xvfb-run 提供假显示
+        # （官方 CI 指南方案）。fc-cache 预热首启的字体缓存，避免首用例冷启超时。
+        run: dbus-run-session -- xvfb-run -a cargo test --test e2e -- --ignored --nocapture
       - name: Upload failure artifacts
         if: failure()
         uses: actions/upload-artifact@v4

@@ -28,7 +28,8 @@
 ## 4. CI
 
 - [x] `ci.yml` 加 `e2e` job（ubuntu：`webkit2gtk-driver` + `cargo install tauri-driver` + build + 运行 + 失败 artifact）
-- [x] CI 挂死修复（run 40489217286 诊断）：ubuntu-latest 无显示服务器，WebKitGTK app 开不了窗 → WebKitWebDriver 会话创建永不返回。修复 = 官方方案：装 `xvfb` + `xvfb-run -a` 包裹；`timeout-minutes: 35` 兜底（超时属 failure，artifact 仍上传）；helper `connect()` 加 `CONNECT_TIMEOUT`（此前裸 await 曾挂满 6h job 上限）、失败截图/取源码加 5s 限时、`run_cli` 加 30s 超时强杀
+- [x] CI 挂死修复（run 40489217286 诊断）：ubuntu-latest 无显示服务器，WebKitGTK app 开不了窗 → WebKitWebDriver 会话创建永不返回。修复 = 官方方案：装 `xvfb` + `xvfb-run -a` 包裹；`timeout-minutes` 兜底（超时属 failure，artifact 仍上传）；helper `connect()` 加 `CONNECT_TIMEOUT`（此前裸 await 曾挂满 6h job 上限）、失败截图/取源码加 5s 限时、`run_cli` 加 30s 超时强杀
+- [x] CI 握手超时修复（run 40703046029 诊断，artifact tauri-driver.log：`org.a11y.Bus ServiceUnknown` 后 `IncompleteMessage`）：xvfb 后 app 已起，但 CI 无 session DBus → WebKitGTK 自动化依赖的 AT-SPI 可访问性总线解析失败，握手挂到超时。修复 = `dbus-run-session -- xvfb-run -a` 包裹 + 显式装 `dbus`/`at-spi2-core`；`WEBKIT_DISABLE_DMABUF_RENDERER=1`（无 GPU 软渲染兜底）；`fc-cache -f` 预热 + `CONNECT_TIMEOUT` 30→90s（首启冷建缓存）
 
 ## 5. 验证
 
