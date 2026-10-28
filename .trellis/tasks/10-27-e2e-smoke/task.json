@@ -1,7 +1,7 @@
 {
-  "id": "weekly-review-processing",
-  "name": "weekly-review-processing",
-  "title": "周回顾处理模式",
+  "id": "e2e-smoke",
+  "name": "e2e-smoke",
+  "title": "核心流 e2e 冒烟测试",
   "description": "",
   "status": "in_progress",
   "dev_type": null,
