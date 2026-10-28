@@ -428,3 +428,24 @@
 ### Status
 
 [OK] **Completed**
+
+
+## Session 19: 核心流 e2e 冒烟：tauri-driver 10 条用例 CI 全绿（PR #31）
+
+**Date**: 2026-10-29
+**Task**: 核心流 e2e 冒烟：tauri-driver 10 条用例 CI 全绿（PR #31）
+**Branch**: `main`
+
+### Summary
+
+6 轮 CI 迭代修通 Linux e2e：xvfb（无显示）→ dbus-run-session（AT-SPI 握手）→ custom-protocol（内嵌前端）→ 定位竞态/键入落点/ onBlur 提交 → 页内驻留监听抓编辑框 + reconnect 同目录。事件管线故障期以 workflow_dispatch API 直发验证。最终 run 40753626139：10 passed / 41.3s；lib 199、unit 63 不受影响。spec 新增 tauri/e2e-webdriver.md
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `5783bb5` | (see git log) |
+
+### Status
+
+[OK] **Completed**

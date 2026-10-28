@@ -8,8 +8,8 @@
 
 <!-- @@@auto:current-status -->
 - **Active File**: `journal-1.md`
-- **Total Sessions**: 18
-- **Last Active**: 2026-10-28
+- **Total Sessions**: 19
+- **Last Active**: 2026-10-29
 <!-- @@@/auto:current-status -->
 
 ---
@@ -19,7 +19,7 @@
 <!-- @@@auto:active-documents -->
 | File | Lines | Status |
 |------|-------|--------|
-| `journal-1.md` | ~430 | Active |
+| `journal-1.md` | ~451 | Active |
 <!-- @@@/auto:active-documents -->
 
 ---
@@ -29,6 +29,7 @@
 <!-- @@@auto:session-history -->
 | # | Date | Title | Commits | Branch |
 |---|------|-------|---------|--------|
+| 19 | 2026-10-29 | 核心流 e2e 冒烟：tauri-driver 10 条用例 CI 全绿（PR #31） | `5783bb5` | `main` |
 | 18 | 2026-10-28 | 周回顾处理模式：四队列单条出牌（PR #30） | `91f14ec` | `main` |
 | 17 | 2026-10-26 | 看板拖拽 DragOverlay 修复 + 587ed78 补合（PR #22） | `bbc0a86` | `chore/archive-task-kanban-board` |
 | 16 | 2026-10-26 | 任务看板：列内新建 + v2.2.0 发布 | `587ed78` | `chore/archive-task-kanban-board` |
