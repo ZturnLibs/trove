@@ -183,6 +183,14 @@ impl Ctx {
         )
     }
 
+    /// 任务行内标题展示元素（div.truncate，双击改名的目标）。
+    pub fn task_title(&self, title: &str) -> String {
+        format!(
+            "//div[@role='button'][contains(normalize-space(.),'{title}')]\
+             //div[contains(@class,'truncate') and normalize-space()='{title}']"
+        )
+    }
+
     /// 任务行内指定 aria-label 的按钮（如 完成 / 取消完成）。
     pub fn row_button(&self, title: &str, aria: &str) -> String {
         format!(
@@ -209,7 +217,8 @@ impl Ctx {
     }
 
     /// 点击 = 先 wait_for（20s 重试窗口，覆盖视图切换渲染）再点；
-    /// WebKitGTK 下 React 重渲染会让已获节点失效（stale），重试重新等待再点。
+    /// WebKitGTK 偶发空错误消息（Stale/会话抖动）不匹配任何文案特征，
+    /// 因此任何点击错误都重试（重新等待再点）。
     pub async fn click(&self, xpath: &str, what: &str) -> Result<(), String> {
         let mut last = String::new();
         for _ in 0..3 {
@@ -217,13 +226,8 @@ impl Ctx {
             match el.click().await {
                 Ok(()) => return Ok(()),
                 Err(e) => {
-                    let msg = e.to_string();
-                    last = msg.clone();
-                    if msg.contains("not found") || msg.contains("stale") {
-                        tokio::time::sleep(POLL).await;
-                        continue;
-                    }
-                    return Err(format!("点击 {what} 失败: {msg}"));
+                    last = e.to_string();
+                    tokio::time::sleep(POLL).await;
                 }
             }
         }

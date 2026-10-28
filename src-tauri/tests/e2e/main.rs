@@ -91,15 +91,24 @@ async fn case03_complete_then_undo() {
         ctx.wait_main_ready().await?;
         ctx.dismiss_onboarding().await?;
         create_task(ctx, "e2e 完成与撤销").await?;
-        // 完成：行内「完成」按钮（TaskRow aria-label）。
-        ctx.click(&ctx.row_button("e2e 完成与撤销", "完成"), "完成按钮")
-            .await?;
-        // 完成后行内按钮翻转为「取消完成」。
-        ctx.wait_for(
-            &ctx.row_button("e2e 完成与撤销", "取消完成"),
-            "取消完成按钮",
-        )
-        .await?;
+        // 完成：行内「完成」按钮（TaskRow aria-label）。点击可能因
+        // rename-refetch 布局位移落到旧坐标（静默落空），点击+翻转断言
+        // 整体重试；若已翻转再点会回退，故先断言再决定是否重试。
+        let mut undone = Err("未尝试".into());
+        for _ in 0..3 {
+            ctx.click(&ctx.row_button("e2e 完成与撤销", "完成"), "完成按钮")
+                .await?;
+            undone = ctx
+                .wait_for(
+                    &ctx.row_button("e2e 完成与撤销", "取消完成"),
+                    "取消完成按钮",
+                )
+                .await;
+            if undone.is_ok() {
+                break;
+            }
+        }
+        undone.map_err(|e| e)?;
         // 撤销：recent-actions toast。
         ctx.click(&ctx.button_with_text("撤销"), "撤销按钮").await?;
         ctx.wait_for(&ctx.row_button("e2e 完成与撤销", "完成"), "恢复的完成按钮")
@@ -121,28 +130,37 @@ async fn case04_double_click_rename() {
         ctx.wait_main_ready().await?;
         ctx.dismiss_onboarding().await?;
         create_task(ctx, "e2e 改名前").await?;
-        // 双击标题（JS 合成 dblclick，React onDoubleClick 可触发）。
-        let row = ctx.find(&ctx.task_row("e2e 改名前"), "任务行").await?;
-        ctx.double_click(&row).await?;
-        // 行内输入框出现（TaskRow/BoardCard 同模式：非受控 defaultValue）。
+        // 双击标题展示元素（div.truncate 的 onDoubleClick → startEdit）；
+        // 行内输入是受控 Input（commit 读 React state），必须真实键入让
+        // onChange 更新 draft，再 Enter 提交。
+        let title_el = ctx.wait_for(&ctx.task_title("e2e 改名前"), "标题展示元素").await?;
+        ctx.double_click(&title_el).await?;
         let input = ctx
             .wait_for(
                 "//div[@role='button'][contains(normalize-space(.),'e2e 改名前')]//input",
                 "改名输入框",
             )
             .await?;
-        // 非受控输入：直接置 value 后派发 Enter keydown，React onKeyDown 读取 currentTarget.value。
-        ctx.client
-            .execute(
-                "arguments[0].value = arguments[1]; \
-                 arguments[0].dispatchEvent(new KeyboardEvent('keydown', {key: 'Enter', bubbles: true}));",
-                vec![
-                    serde_json::to_value(input).map_err(|e| e.to_string())?,
-                    serde_json::json!("e2e 改名后"),
-                ],
-            )
+        input.click().await.map_err(|e| format!("聚焦改名输入框失败: {e}"))?;
+        let active = ctx
+            .client
+            .active_element()
             .await
-            .map_err(|e| format!("提交改名失败: {e}"))?;
+            .map_err(|e| format!("定位改名输入焦点失败: {e}"))?;
+        // 全选后输入替换（Ctrl+A）。
+        active
+            .send_keys("\u{E009}a")
+            .await
+            .map_err(|e| format!("全选失败: {e}"))?;
+        active
+            .send_keys("e2e 改名后")
+            .await
+            .map_err(|e| format!("输入新名失败: {e}"))?;
+        tokio::time::sleep(Duration::from_millis(250)).await;
+        active
+            .send_keys(ENTER)
+            .await
+            .map_err(|e| format!("回车提交改名失败: {e}"))?;
         ctx.wait_for(&ctx.task_row("e2e 改名后"), "改名持久化的任务").await?;
         Ok(())
     });
