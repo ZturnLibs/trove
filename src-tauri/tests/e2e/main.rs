@@ -8,7 +8,7 @@
 
 mod helper;
 
-use std::time::Duration;
+use std::time::{Duration, Instant};
 
 use helper::Harness;
 
@@ -124,58 +124,51 @@ async fn case04_double_click_rename() {
         ctx.wait_main_ready().await?;
         ctx.dismiss_onboarding().await?;
         create_task(ctx, "e2e 改名前").await?;
-        // 双击标题展示元素（div.truncate 的 onDoubleClick → startEdit）；
-        // 行内输入是受控 Input（commit 读 React state），必须真实键入让
-        // onChange 更新 draft，再 Enter 提交。
-        // 注意效果定位：进入编辑态后行的 text content 不再含标题（标题 div
-        // 被替换成 input），不能用 contains(.,title) 定位编辑框——改用其
-        // 类特征（h-7 text-[13px]）。
-        // 编辑框节点在 WebKitGTK 上毫秒级被替换（跨命令元素句柄必脱钩）——
-        // 双击进编辑态后，用单条页内 JS 原子完成「置值 + input 事件 + Enter」。
-        // 受控输入必须走原型 value setter + input 事件，React 才接受变更。
-        const SET_AND_SUBMIT: &str = r#"
-            const input = document.querySelector("div[role='button'] input.h-7");
-            if (!input) throw new Error("no editing input");
-            const setter = Object.getOwnPropertyDescriptor(
-                window.HTMLInputElement.prototype, "value").set;
-            setter.call(input, arguments[0]);
-            input.dispatchEvent(new Event("input", { bubbles: true }));
-            input.dispatchEvent(new KeyboardEvent("keydown", {
-                key: "Enter", bubbles: true, cancelable: true }));
-        "#;
+        // 双击行内改名。编辑框节点毫秒级失效，跨命令句柄必脱钩——先预埋页内
+        // 驻留监听（30ms 粒度，编辑框一出现立即置值+input+Enter 原子提交），
+        // 再做真实指针双击，最后轮读监听结果。
+        helper::Ctx::arm_editor_submit(&ctx.client, "e2e 改名后", 8000).await?;
         let mut last = String::new();
-        let mut renamed: Result<(), String> = Err("未尝试".into());
-        for _ in 0..3 {
+        let mut opened = false;
+        for _ in 0..4 {
             match ctx
-                .double_click_until(
-                    &ctx.task_title("e2e 改名前"),
-                    "//div[@role='button']//input[contains(@class,'text-[13px]')]",
-                    "双击改名",
-                )
+                .double_click_retry(&ctx.task_title("e2e 改名前"), "标题展示元素")
                 .await
             {
-                Ok(_) => {}
-                Err(e) => return Err(format!("双击改名失败: {e}；last={last}")),
+                Ok(()) => {
+                    opened = true;
+                    break;
+                }
+                Err(e) => last = e,
             }
-            if let Err(e) = ctx
-                .client
-                .execute(SET_AND_SUBMIT, vec![serde_json::json!("e2e 改名后")])
-                .await
-            {
-                last = format!("置值提交失败: {e}");
-                continue;
-            }
-            tokio::time::sleep(Duration::from_millis(250)).await;
-            renamed = ctx
-                .wait_for(&ctx.task_row("e2e 改名后"), "改名持久化的任务")
-                .await
-                .map(|_| ());
-            if renamed.is_ok() {
-                break;
-            }
-            last = renamed.as_ref().unwrap_err().clone();
         }
-        renamed.map_err(|e| format!("双击改名失败: {e}；last={last}"))?;
+        if !opened {
+            return Err(format!("双击改名失败（重试耗尽）: {last}"));
+        }
+        let mut submitted: Result<Option<serde_json::Value>, String> = Ok(None);
+        let deadline = Instant::now() + Duration::from_secs(12);
+        loop {
+            submitted = helper::Ctx::editor_submit_status(&ctx.client).await;
+            match submitted.as_ref().map(|s| s.as_ref()) {
+                Ok(Some(_)) => break,
+                _ if Instant::now() > deadline => break,
+                _ => {}
+            }
+            tokio::time::sleep(Duration::from_millis(200)).await;
+        }
+        let status = submitted.map_err(|e| format!("读状态失败: {e}"))?;
+        let is_true = status.as_ref().and_then(|v| v.as_bool()) == Some(true);
+        if !is_true {
+            let display = status
+                .as_ref()
+                .map(|v| v.to_string())
+                .unwrap_or_else(|| "null".into());
+            return Err(format!("双击改名失败: 页内提交状态 {display}；last={last}"));
+        }
+        tokio::time::sleep(Duration::from_millis(250)).await;
+        ctx.wait_for(&ctx.task_row("e2e 改名后"), "改名持久化的任务")
+            .await
+            .map(|_| ())?;
         Ok(())
     });
     let r = result.await;

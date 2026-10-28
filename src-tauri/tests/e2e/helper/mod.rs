@@ -328,33 +328,82 @@ impl Ctx {
             .map_err(|e| format!("右键 {what} 失败: {e}"))
     }
 
-    /// 双击目标元素直到效果元素出现。用 W3C Actions 真实指针序列
-    /// （MoveTo+Down/Up×2，WebKit 合成原生 click×2+dblclick）——JS 合成
-    /// dblclick 事件实测不触发 React onDoubleClick（WebKitGTK CI 多轮实证）。
-    /// 每轮重找目标（防脱钩）并短轮询验证效果。
-    pub async fn double_click_until(
+    /// 双击目标元素（W3C Actions 真实指针双击，每轮重找防脱钩）。
+    pub async fn double_click_retry(
         &self,
         target: &str,
-        effect: &str,
         what: &str,
-    ) -> Result<Element, String> {
+    ) -> Result<(), String> {
         let mut last = String::new();
         for _ in 0..4 {
             let el = self.wait_for(target, what).await?;
-            if let Err(e) = self.native_double_click(&el).await {
-                last = e;
-                continue;
-            }
-            let deadline = Instant::now() + Duration::from_millis(1200);
-            while Instant::now() < deadline {
-                if let Ok(found) = self.client.find(Locator::XPath(effect)).await {
-                    return Ok(found);
+            match self.native_double_click(&el).await {
+                Ok(()) => return Ok(()),
+                Err(e) => {
+                    last = e;
+                    tokio::time::sleep(POLL).await;
                 }
-                std::thread::sleep(POLL);
             }
-            last = "dblclick 未产生效果元素".into();
         }
         Err(format!("{what} 失败（重试耗尽）: {last}"))
+    }
+
+    /// 预埋页内编辑框监听（立即返回，不占命令队列）：30ms 粒度轮询行内
+    /// 编辑框，一出现立即原子「置值 + input 事件 + Enter」，结果写入
+    /// window.__e2eEditorSubmitted（true=已提交 / "timeout"=期限内未出现）。
+    /// 编辑框节点毫秒级失效，跨命令句柄必脱钩——轮询必须驻留页面内。
+    pub async fn arm_editor_submit(
+        client: &Client,
+        value: &str,
+        timeout_ms: u64,
+    ) -> Result<(), String> {
+        let script = r#"
+            window.__e2eEditorSubmitted = null;
+            const value = arguments[0];
+            const deadline = Date.now() + arguments[1];
+            const poll = () => {
+                const input = document.querySelector(
+                    "div[role='button'] input.h-7");
+                if (input) {
+                    const setter = Object.getOwnPropertyDescriptor(
+                        window.HTMLInputElement.prototype, "value").set;
+                    setter.call(input, value);
+                    input.dispatchEvent(new Event("input", { bubbles: true }));
+                    input.dispatchEvent(new KeyboardEvent("keydown", {
+                        key: "Enter", bubbles: true, cancelable: true }));
+                    window.__e2eEditorSubmitted = true;
+                    return;
+                }
+                if (Date.now() > deadline) {
+                    window.__e2eEditorSubmitted = "timeout";
+                    return;
+                }
+                setTimeout(poll, 30);
+            };
+            poll();
+        "#;
+        client
+            .execute(
+                script,
+                vec![serde_json::json!(value), serde_json::json!(timeout_ms)],
+            )
+            .await
+            .map(|_| ())
+            .map_err(|e| format!("预埋监听失败: {e}"))
+    }
+
+    /// 读取页内编辑框监听状态（None=尚未出现结果）。
+    pub async fn editor_submit_status(
+        client: &Client,
+    ) -> Result<Option<serde_json::Value>, String> {
+        client
+            .execute("return window.__e2eEditorSubmitted;", vec![])
+            .await
+            .map_err(|e| format!("读取状态失败: {e}"))
+            .and_then(|v| {
+                serde_json::from_value::<Option<serde_json::Value>>(v)
+                    .map_err(|e| e.to_string())
+            })
     }
 
     /// W3C Actions 真实指针双击（viewport 坐标取元素中心）。
