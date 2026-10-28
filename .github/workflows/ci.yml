@@ -4,6 +4,8 @@ on:
   push:
     branches: [main]
   pull_request:
+  # 手动/API 直发 run：事件管线故障时可绕过 webhook 入队（`gh workflow run ci -R <repo> --ref <branch>`）
+  workflow_dispatch:
 
 jobs:
   frontend:
