@@ -23,31 +23,45 @@ use tauri::{
 };
 use tauri_plugin_autostart::{MacosLauncher, ManagerExt};
 
-fn resolve_db_path(app: &tauri::AppHandle) -> Result<std::path::PathBuf, String> {
+/// Testing/e2e override: when set, every data path (db, backups, assets, app
+/// data dir) is rooted under this directory instead of the OS app-data dir.
+/// Used by the WebDriver e2e suite (`tests/e2e`) so test runs never touch the
+/// real user library; empty values are ignored.
+fn data_dir_override() -> Option<std::path::PathBuf> {
+    let dir = std::env::var_os("TROVE_DATA_DIR")?;
+    if dir.is_empty() {
+        None
+    } else {
+        Some(std::path::PathBuf::from(dir))
+    }
+}
+
+fn base_data_dir(app: &tauri::AppHandle) -> Result<std::path::PathBuf, String> {
+    if let Some(dir) = data_dir_override() {
+        std::fs::create_dir_all(&dir).map_err(|e| format!("create data dir override: {e}"))?;
+        return Ok(dir);
+    }
     let dir = app
         .path()
         .app_data_dir()
         .map_err(|e| format!("resolve app data dir: {e}"))?;
     std::fs::create_dir_all(&dir).map_err(|e| format!("create app data dir: {e}"))?;
+    Ok(dir)
+}
+
+fn resolve_db_path(app: &tauri::AppHandle) -> Result<std::path::PathBuf, String> {
+    let dir = base_data_dir(app)?;
     Ok(dir.join("workbench.db"))
 }
 
 fn resolve_backup_dir(app: &tauri::AppHandle) -> Result<std::path::PathBuf, String> {
-    let dir = app
-        .path()
-        .app_data_dir()
-        .map_err(|e| format!("resolve app data dir: {e}"))?
-        .join("backups");
+    let dir = base_data_dir(app)?.join("backups");
     std::fs::create_dir_all(&dir).map_err(|e| format!("create backup dir: {e}"))?;
     Ok(dir)
 }
 
 fn resolve_assets_dir(app: &tauri::AppHandle) -> Result<std::path::PathBuf, String> {
-    let dir = app
-        .path()
-        .app_data_dir()
-        .map_err(|e| format!("resolve app data dir: {e}"))?
-        .join("assets");
+    let dir = base_data_dir(app)?.join("assets");
     std::fs::create_dir_all(&dir).map_err(|e| format!("create assets dir: {e}"))?;
     Ok(dir)
 }
@@ -481,10 +495,7 @@ pub fn run() {
             let db_path = resolve_db_path(app.handle())?;
             let backup_dir = resolve_backup_dir(app.handle())?;
             let assets_dir = resolve_assets_dir(app.handle())?;
-            let data_dir = app
-                .path()
-                .app_data_dir()
-                .map_err(|e| e.to_string())?;
+            let data_dir = base_data_dir(app.handle())?;
             std::fs::create_dir_all(&data_dir).map_err(|e| e.to_string())?;
             tracing::info!(path = %db_path.display(), "opening database");
             let db = Database::open_with_backup_dir(db_path, Some(backup_dir.clone()))
@@ -761,4 +772,33 @@ pub fn run() {
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
+}
+
+#[cfg(test)]
+mod tests {
+    use super::data_dir_override;
+
+    /// `TROVE_DATA_DIR` must reroute every data path so e2e runs stay inside a
+    /// tempdir. One test fn on purpose: the env is process-global and cargo
+    /// runs tests on parallel threads, so the set/unset pairs must not race.
+    #[test]
+    fn data_dir_override_priority() {
+        // Unset → no override → callers fall through to the OS app-data dir.
+        std::env::remove_var("TROVE_DATA_DIR");
+        assert_eq!(data_dir_override(), None);
+
+        std::env::set_var("TROVE_DATA_DIR", "/tmp/trove-e2e-fixture");
+        assert_eq!(
+            data_dir_override(),
+            Some(std::path::PathBuf::from("/tmp/trove-e2e-fixture"))
+        );
+
+        // Empty value is treated as unset so a stray `TROVE_DATA_DIR=` in the
+        // environment cannot silently redirect the real app.
+        std::env::set_var("TROVE_DATA_DIR", "");
+        assert_eq!(data_dir_override(), None);
+
+        std::env::remove_var("TROVE_DATA_DIR");
+        assert_eq!(data_dir_override(), None);
+    }
 }

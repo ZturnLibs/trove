@@ -92,6 +92,8 @@ pub enum WorkbenchAction {
         #[serde(default, skip_serializing_if = "Option::is_none")]
         limit: Option<i64>,
     },
+    /// Read-only: export the task CSV (same columns as the Settings export).
+    ExportTasksCsv,
 }
 
 const PREVIEW_LEN: usize = 120;
@@ -306,6 +308,9 @@ pub enum ActionOutcome {
         items: Vec<ActionSnippetHit>,
         total: i64,
     },
+    TasksCsvExported {
+        csv: String,
+    },
     Rejected {
         reason: String,
     },
@@ -340,6 +345,7 @@ pub fn workbench_action_description(action: &WorkbenchAction) -> String {
             Some(q) if !q.trim().is_empty() => format!("查询文本片段：{q}"),
             _ => "查询收藏文本片段".into(),
         },
+        WorkbenchAction::ExportTasksCsv => "导出任务 CSV".into(),
     }
 }
 
@@ -396,5 +402,32 @@ mod tests {
         assert_eq!(query_limit(None), 20);
         assert_eq!(query_limit(Some(0)), 1);
         assert_eq!(query_limit(Some(500)), 100);
+    }
+
+    #[test]
+    fn export_tasks_csv_round_trips() {
+        let action: WorkbenchAction =
+            serde_json::from_value(serde_json::json!({ "action": "exportTasksCsv" })).unwrap();
+        assert!(matches!(action, WorkbenchAction::ExportTasksCsv));
+        assert_eq!(
+            serde_json::to_value(&action).unwrap(),
+            serde_json::json!({ "action": "exportTasksCsv" })
+        );
+        // Read-only: no confirmation gate (same as the Query* variants).
+        assert!(!action.requires_confirmation());
+
+        let wire = serde_json::to_value(&ActionOutcome::TasksCsvExported {
+            csv: "title\n".into(),
+        })
+        .unwrap();
+        assert_eq!(
+            wire,
+            serde_json::json!({ "outcome": "tasksCsvExported", "csv": "title\n" })
+        );
+        let outcome: ActionOutcome = serde_json::from_value(wire).unwrap();
+        assert!(matches!(
+            outcome,
+            ActionOutcome::TasksCsvExported { ref csv } if csv == "title\n"
+        ));
     }
 }

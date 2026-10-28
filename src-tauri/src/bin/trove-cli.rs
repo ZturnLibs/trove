@@ -71,6 +71,12 @@ enum Commands {
         #[command(subcommand)]
         target: QueryTarget,
     },
+    /// 导出任务 CSV 到文件（经运行中的应用，与设置页导出同源）
+    ExportCsv {
+        /// 输出文件路径（缺省 ./trove-tasks-<日期>.csv）
+        #[arg(long)]
+        out: Option<PathBuf>,
+    },
 }
 
 #[derive(Subcommand)]
@@ -198,6 +204,7 @@ fn run() -> Result<(), String> {
             let action = query_action(target)?;
             dispatch_action(&cli, action)
         }
+        Commands::ExportCsv { out } => export_csv(&cli, out.clone()),
     }
 }
 
@@ -301,7 +308,14 @@ fn dispatch_action(cli: &Cli, action: WorkbenchAction) -> Result<(), String> {
     if cli.dry_run {
         return print_outcome(cli, dry_run_outcome(&action));
     }
+    let outcome = dispatch_for_outcome(cli, action)?;
+    print_outcome(cli, outcome)
+}
 
+/// Forward the action to the running app and wait for its outcome. The CLI
+/// never opens SQLite itself; the app (via single-instance forwarding or its
+/// own startup argv handling) executes the action and writes the response.
+fn dispatch_for_outcome(cli: &Cli, action: WorkbenchAction) -> Result<ActionOutcome, String> {
     let response_path = std::env::temp_dir().join(format!(
         "trove-cli-{}.json",
         uuid::Uuid::new_v4()
@@ -321,13 +335,42 @@ fn dispatch_action(cli: &Cli, action: WorkbenchAction) -> Result<(), String> {
     match wait_for_response(&response_path, Duration::from_secs(15)) {
         Some(outcome) => {
             let _ = std::fs::remove_file(&response_path);
-            print_outcome(cli, outcome)
+            Ok(outcome)
         }
         None => Err(format!(
             "等待应用响应超时（{}）",
             response_path.display()
         )),
     }
+}
+
+fn export_csv(cli: &Cli, out: Option<PathBuf>) -> Result<(), String> {
+    if cli.dry_run {
+        return print_outcome(cli, dry_run_outcome(&WorkbenchAction::ExportTasksCsv));
+    }
+    let outcome = dispatch_for_outcome(cli, WorkbenchAction::ExportTasksCsv)?;
+    let csv = match outcome {
+        ActionOutcome::TasksCsvExported { csv } => csv,
+        ActionOutcome::Rejected { reason } => return Err(format!("动作被拒绝：{reason}")),
+        other => return Err(format!("意外的返回结果：{other:?}")),
+    };
+    if csv.trim().is_empty() {
+        return Err("导出结果为空".into());
+    }
+    let out = out.unwrap_or_else(|| {
+        PathBuf::from(format!("trove-tasks-{}.csv", chrono::Local::now().format("%Y-%m-%d")))
+    });
+    std::fs::write(&out, &csv).map_err(|e| format!("写入 {}: {e}", out.display()))?;
+    let rows = csv.lines().count().saturating_sub(1);
+    if cli.json {
+        println!(
+            "{}",
+            serde_json::json!({ "ok": true, "path": out.display().to_string(), "rows": rows, "bytes": csv.len() })
+        );
+    } else {
+        println!("已导出 {rows} 条任务到 {}（{} 字节）", out.display(), csv.len());
+    }
+    Ok(())
 }
 
 fn wait_for_response(path: &Path, timeout: Duration) -> Option<ActionOutcome> {
@@ -384,6 +427,9 @@ fn format_outcome_human(outcome: &ActionOutcome) -> String {
         }
         ActionOutcome::SnippetsQueried { items, total } => {
             format!("片段 {}/{} 条", items.len(), total)
+        }
+        ActionOutcome::TasksCsvExported { csv } => {
+            format!("任务 CSV {} 字节", csv.len())
         }
         ActionOutcome::Rejected { reason } => format!("拒绝：{reason}"),
     }
