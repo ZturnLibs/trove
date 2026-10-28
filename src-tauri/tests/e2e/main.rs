@@ -127,10 +127,13 @@ async fn case04_double_click_rename() {
         // 双击标题展示元素（div.truncate 的 onDoubleClick → startEdit）；
         // 行内输入是受控 Input（commit 读 React state），必须真实键入让
         // onChange 更新 draft，再 Enter 提交。
+        // 注意效果定位：进入编辑态后行的 text content 不再含标题（标题 div
+        // 被替换成 input），不能用 contains(.,title) 定位编辑框——改用其
+        // 类特征（h-7 text-[13px]）。
         let input = ctx
             .double_click_until(
                 &ctx.task_title("e2e 改名前"),
-                "//div[@role='button'][contains(normalize-space(.),'e2e 改名前')]//input",
+                "//div[@role='button']//input[contains(@class,'text-[13px]')]",
                 "双击改名",
             )
             .await?;
