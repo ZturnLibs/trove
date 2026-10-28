@@ -3,6 +3,11 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useNavigate } from "react-router-dom";
 import { PageScaffold } from "@/components/PageScaffold";
 import { WeeklySummaryCard } from "@/features/weekly-review/WeeklySummaryCard";
+import { ProcessingSession } from "@/features/weekly-review/ProcessingSession";
+import {
+  flattenQueues,
+  type ProcessingSummary,
+} from "@/features/weekly-review/processingSummary";
 import { TaskDetailPanel } from "@/design-system/patterns/TaskDetailPanel";
 import { Button } from "@/design-system/primitives/Button";
 import {
@@ -130,6 +135,9 @@ export function WeeklyReviewPage() {
   const startFocus = useFocusSession((s) => s.start);
   const [selectedTaskId, setSelectedTaskId] = useState<string | null>(null);
   const [sessionId, setSessionId] = useState<string | null>(null);
+  const [processing, setProcessing] = useState(false);
+  const [processingResult, setProcessingResult] =
+    useState<ProcessingSummary | null>(null);
 
   const lastQuery = useQuery({
     queryKey: ["weekly-review", "last"],
@@ -160,6 +168,17 @@ export function WeeklyReviewPage() {
           completedLast7DaysCount: snap.completedLast7DaysCount,
           upcomingRecurringCount: snap.upcomingRecurringCount,
           largeClipboardCount: snap.largeClipboardCount,
+          ...(processingResult
+            ? {
+                processing: {
+                  completed: processingResult.completed,
+                  deferred: processingResult.deferred,
+                  waiting: processingResult.waiting,
+                  skipped: processingResult.skipped,
+                  total: processingResult.total,
+                },
+              }
+            : {}),
         },
       });
     },
@@ -203,6 +222,7 @@ export function WeeklyReviewPage() {
     : "首次每周回顾";
 
   const snap = snapshotQuery.data;
+  const processingItems = snap ? flattenQueues(snap) : [];
 
   return (
     <div className="flex h-full min-h-0">
@@ -211,13 +231,28 @@ export function WeeklyReviewPage() {
           title="每周回顾"
           description={headerHint}
           actions={
-            <Button
-              size="sm"
-              disabled={completeReview.isPending || !sessionId}
-              onClick={() => completeReview.mutate()}
-            >
-              {completeReview.isPending ? "保存中…" : "完成本次回顾"}
-            </Button>
+            <>
+              <Button
+                size="sm"
+                variant="ghost"
+                disabled={processingItems.length === 0 || completeReview.isPending}
+                title={
+                  processingItems.length === 0
+                    ? "四条队列全为空，无需逐条处理"
+                    : undefined
+                }
+                onClick={() => setProcessing(true)}
+              >
+                开始处理
+              </Button>
+              <Button
+                size="sm"
+                disabled={completeReview.isPending || !sessionId}
+                onClick={() => completeReview.mutate()}
+              >
+                {completeReview.isPending ? "保存中…" : "完成本次回顾"}
+              </Button>
+            </>
           }
         >
           {snapshotQuery.isLoading ? (
@@ -228,14 +263,24 @@ export function WeeklyReviewPage() {
                 以下信号由本地数据聚合，不含效率评分。逐项处理后计数会自动更新。
               </p>
               <WeeklySummaryCard snap={snap} />
-              <ReviewCards
+              {processing ? (
+                <ProcessingSession
+                  items={processingItems}
+                  onFinish={setProcessingResult}
+                  onCompleteReview={() => completeReview.mutate()}
+                  onSelectTask={setSelectedTaskId}
+                  onExit={() => setProcessing(false)}
+                />
+              ) : (
+                <ReviewCards
                 snap={snap}
                 selectedTaskId={selectedTaskId}
                 onSelectTask={setSelectedTaskId}
                 onCompleteTask={(task) => completeTask.mutate(task)}
                 onFavoriteClipboard={(id) => favoriteClipboard.mutate(id)}
                 onNavigate={navigate}
-              />
+                />
+              )}
             </div>
           ) : (
             <p className="p-4 text-[12px] text-danger">加载失败</p>
