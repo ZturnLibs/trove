@@ -8,8 +8,6 @@
 
 mod helper;
 
-use fantoccini::Locator;
-
 use helper::Harness;
 
 const ENTER: &str = "\u{E007}";
@@ -41,6 +39,12 @@ async fn create_task(
         .send_keys(ENTER)
         .await
         .map_err(|e| format!("回车提交失败: {e}"))?;
+    // 详情面板标题输入是 onBlur={save} 提交（无 Enter 处理）：
+    // 发 Tab 移焦触发 blur，rename 才落库。
+    active
+        .send_keys("\u{E003}") // Tab
+        .await
+        .map_err(|e| format!("失焦提交失败: {e}"))?;
     ctx.wait_for(&ctx.task_row(title), "新建的任务").await?;
     Ok(())
 }
@@ -185,29 +189,20 @@ async fn case07_create_group() {
         ctx.wait_main_ready().await?;
         ctx.dismiss_onboarding().await?;
         // 菜单受「window click 即关闭」约束（TaskSidebarTree useEffect），
-        // WebDriver 事件时序下可能瞬闭：点入口后立刻抓菜单项并点击，
-        // 未命中（瞬闭）则重开入口再试，最多 5 轮。
-        let menu_item = ctx.button_with_text("新建分组");
-        let mut opened = false;
-        for _ in 0..5 {
-            ctx.click(&ctx.button_aria("新建分组或清单"), "新建分组或清单入口")
-                .await?;
-            if let Ok(el) = ctx.client.find(Locator::XPath(&menu_item)).await {
-                if el.click().await.is_ok() {
-                    opened = true;
-                    break;
-                }
-            }
-        }
-        if !opened {
-            // 兜底等待，失败信息可诊断（菜单始终未能存活）
-            ctx.wait_for(&menu_item, "新建分组菜单项").await?;
-        }
-        // 行内命名输入（占位符区分分组/清单）。
-        let input = ctx
-            .wait_for("//input[contains(@placeholder,'分组名称')]", "分组命名输入框")
+        // WebDriver 点击残留事件会让菜单瞬闭（CI 5 轮瞬时抓取全空实证）。
+        // 改走 contextmenu 分支打开同一菜单：无后续 click，菜单稳定存活。
+        let entry = ctx
+            .wait_for(&ctx.button_aria("新建分组或清单"), "新建分组或清单入口")
             .await?;
-        input.click().await.map_err(|e| format!("聚焦分组输入框失败: {e}"))?;
+        ctx.context_click(&entry, "新建分组或清单入口").await?;
+        ctx.click(&ctx.button_with_text("新建分组"), "新建分组菜单项")
+            .await?;
+        // 行内命名输入（占位符区分分组/清单）。
+        ctx.click(
+            "//input[contains(@placeholder,'分组名称')]",
+            "分组命名输入框",
+        )
+        .await?;
         let active = ctx
             .client
             .active_element()

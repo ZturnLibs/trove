@@ -272,7 +272,7 @@ impl Ctx {
         self.switch_to_window(&self.nav_link("今日"), "main").await
     }
 
-    /// 用 JS `dblclick` 事件触发双击（React onDoubleClick）。
+    /// 用 JS 合成 dblclick 事件触发双击（React onDoubleClick）。
     /// 说明：dnd-kit PointerSensor 不响应 WebDriver 合成拖拽（已实测），
     /// 但 dblclick 重命名不经过 dnd-kit，合成事件可触发。
     pub async fn double_click(&self, el: &Element) -> Result<(), String> {
@@ -286,6 +286,21 @@ impl Ctx {
             .await
             .map(|_| ())
             .map_err(|e| format!("双击失败: {e}"))
+    }
+
+    /// 用 JS 合成 contextmenu 事件打开右键菜单。菜单的 window-click 关闭
+    /// 约束只监听 click，contextmenu 分支打开后不会被残留事件瞬闭。
+    pub async fn context_click(&self, el: &Element, what: &str) -> Result<(), String> {
+        let args = vec![serde_json::to_value(el).map_err(|e| e.to_string())?];
+        self.client
+            .execute(
+                "arguments[0].dispatchEvent(new MouseEvent('contextmenu', {\
+                 bubbles: true, cancelable: true}))",
+                args,
+            )
+            .await
+            .map(|_| ())
+            .map_err(|e| format!("右键 {what} 失败: {e}"))
     }
 
     /// 回车键（WebDriver Return 码点）。
