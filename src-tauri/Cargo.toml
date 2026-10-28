@@ -61,6 +61,13 @@ windows = { version = "0.58", features = [
     "Storage_Streams",
 ] }
 
+[features]
+# 生产构建（tauri build 自动启用）：tauri v2 以此区分 dev/prod——未启用时 debug
+# 二进制加载 build.devUrl（tauri.conf.json），启用后 codegen 内嵌 frontendDist。
+# e2e（tests/e2e）依赖此 feature 内嵌前端资产；build 与 test 须带同一 feature 集
+# （cargo test 会重编 bin，指纹不一致会把 trove 退回 dev 模式）。
+custom-protocol = ["tauri/custom-protocol"]
+
 [dev-dependencies]
 tempfile = "3"
 # e2e (`tests/e2e`): WebDriver client + async runtime; gated behind `E2E=1`
