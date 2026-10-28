@@ -209,6 +209,20 @@ impl Ctx {
             .map_err(|e| format!("等待 {what} 超时: {e}"))
     }
 
+    /// 轮询直到元素从 DOM 消失（完成类操作会让任务离开 todo 视图）。
+    pub async fn wait_gone(&self, xpath: &str, what: &str) -> Result<(), String> {
+        let deadline = Instant::now() + Duration::from_secs(20);
+        loop {
+            if self.client.find(Locator::XPath(xpath)).await.is_err() {
+                return Ok(());
+            }
+            if Instant::now() > deadline {
+                return Err(format!("等待 {what} 超时（元素仍在）"));
+            }
+            std::thread::sleep(POLL);
+        }
+    }
+
     pub async fn find(&self, xpath: &str, what: &str) -> Result<Element, String> {
         self.client
             .find(Locator::XPath(xpath))
@@ -539,6 +553,10 @@ impl Harness {
         if let Ok(Ok(page)) = html {
             let _ = std::fs::write(dir.join("page.html"), page);
         }
+        // 诊断：DB 任务快照（经运行中 app 转发导出）——判定任务消失/搬迁/完成态。
+        let _ = self
+            .ctx
+            .run_cli(&["export-csv", "--out", dir.join("tasks-on-failure.csv").to_string_lossy().as_ref()]);
         eprintln!(
             "[e2e:{}] 失败，artifact：{}",
             self.ctx.case,

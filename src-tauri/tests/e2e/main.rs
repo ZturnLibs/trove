@@ -33,6 +33,11 @@ async fn create_task(
         .active_element()
         .await
         .map_err(|e| format!("定位标题输入焦点失败: {e}"))?;
+    // 全选默认标题「新任务」，键入即替换（点击后 caret 在尾部，直接键入会追加）。
+    active
+        .send_keys("\u{E009}a") // Ctrl+A
+        .await
+        .map_err(|e| format!("全选失败: {e}"))?;
     active
         .send_keys(title)
         .await
@@ -91,27 +96,15 @@ async fn case03_complete_then_undo() {
         ctx.wait_main_ready().await?;
         ctx.dismiss_onboarding().await?;
         create_task(ctx, "e2e 完成与撤销").await?;
-        // 完成：行内「完成」按钮（TaskRow aria-label）。点击可能因
-        // rename-refetch 布局位移落到旧坐标（静默落空），点击+翻转断言
-        // 整体重试；若已翻转再点会回退，故先断言再决定是否重试。
-        let mut undone = Err("未尝试".into());
-        for _ in 0..3 {
-            ctx.click(&ctx.row_button("e2e 完成与撤销", "完成"), "完成按钮")
-                .await?;
-            undone = ctx
-                .wait_for(
-                    &ctx.row_button("e2e 完成与撤销", "取消完成"),
-                    "取消完成按钮",
-                )
-                .await;
-            if undone.is_ok() {
-                break;
-            }
-        }
-        undone.map_err(|e| e)?;
-        // 撤销：recent-actions toast。
+        // 完成：行内「完成」按钮（TaskRow aria-label）。inbox 查询过滤
+        // status=todo——完成后任务离开收件箱视图，以「行消失」为完成断言。
+        ctx.click(&ctx.row_button("e2e 完成与撤销", "完成"), "完成按钮")
+            .await?;
+        ctx.wait_gone(&ctx.task_row("e2e 完成与撤销"), "完成的任务离开收件箱")
+            .await?;
+        // 撤销：recent-actions toast；任务回归收件箱。
         ctx.click(&ctx.button_with_text("撤销"), "撤销按钮").await?;
-        ctx.wait_for(&ctx.row_button("e2e 完成与撤销", "完成"), "恢复的完成按钮")
+        ctx.wait_for(&ctx.task_row("e2e 完成与撤销"), "撤销后任务回归收件箱")
             .await?;
         Ok(())
     });
