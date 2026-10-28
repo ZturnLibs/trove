@@ -164,6 +164,12 @@ impl Ctx {
         format!("//button[@aria-label='{aria}']")
     }
 
+    /// 详情面板标题输入：aside 内首个无 type 的 input（日期/时间均有 type，
+    /// 标签输入有 placeholder；标题是文档序第一个）。
+    pub fn title_input(&self) -> String {
+        "(//aside//input[not(@type)])[1]".into()
+    }
+
     /// 任务行（TaskRow 外层是 `div[role=button]`），按标题包含匹配。
     pub fn task_row(&self, title: &str) -> String {
         format!(

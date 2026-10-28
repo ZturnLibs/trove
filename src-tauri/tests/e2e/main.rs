@@ -8,20 +8,26 @@
 
 mod helper;
 
+use fantoccini::Locator;
+
 use helper::Harness;
 
 const ENTER: &str = "\u{E007}";
 
 const NAV_LINKS: [&str; 6] = ["今日", "收件箱", "任务", "看板", "记忆", "剪切板"];
 
-/// 收件箱空态「新建任务」→ 详情面板标题输入（autofocus）→ 输入标题提交。
+/// 收件箱空态「新建任务」→ 详情面板标题输入 → 输入标题提交。
 /// 新库（tempdir）收件箱必为空，入口确定存在。
+/// 注意：点击「新建任务」即以默认标题「新任务」建卡并开详情面板，但焦点
+/// 不保证移入输入框（CI 实证 DOM 停在 value="新任务"）——必须显式点进
+/// 标题输入框再键入。
 async fn create_task(
     ctx: &helper::Ctx,
     title: &str,
 ) -> Result<(), String> {
     ctx.click(&ctx.nav_link("收件箱"), "收件箱导航").await?;
     ctx.click(&ctx.button_with_text("新建任务"), "新建任务").await?;
+    ctx.click(&ctx.title_input(), "标题输入框").await?;
     let active = ctx
         .client
         .active_element()
@@ -178,21 +184,40 @@ async fn case07_create_group() {
     let result = h.run(|ctx| async {
         ctx.wait_main_ready().await?;
         ctx.dismiss_onboarding().await?;
-        ctx.click(
-            &ctx.button_aria("新建分组或清单"),
-            "新建分组或清单入口",
-        )
-        .await?;
-        // 弹层里的「新建分组」项（MainShell 右键/入口菜单）。
-        ctx.click(&ctx.button_with_text("新建分组"), "新建分组菜单项")
+        // 菜单受「window click 即关闭」约束（TaskSidebarTree useEffect），
+        // WebDriver 事件时序下可能瞬闭：点入口后立刻抓菜单项并点击，
+        // 未命中（瞬闭）则重开入口再试，最多 5 轮。
+        let menu_item = ctx.button_with_text("新建分组");
+        let mut opened = false;
+        for _ in 0..5 {
+            ctx.click(&ctx.button_aria("新建分组或清单"), "新建分组或清单入口")
+                .await?;
+            if let Ok(el) = ctx.client.find(Locator::XPath(&menu_item)).await {
+                if el.click().await.is_ok() {
+                    opened = true;
+                    break;
+                }
+            }
+        }
+        if !opened {
+            // 兜底等待，失败信息可诊断（菜单始终未能存活）
+            ctx.wait_for(&menu_item, "新建分组菜单项").await?;
+        }
+        // 行内命名输入（占位符区分分组/清单）。
+        let input = ctx
+            .wait_for("//input[contains(@placeholder,'分组名称')]", "分组命名输入框")
             .await?;
-        // 行内命名输入：输入分组名后回车。
-        let input = ctx.wait_for("//input", "分组命名输入框").await?;
-        input
+        input.click().await.map_err(|e| format!("聚焦分组输入框失败: {e}"))?;
+        let active = ctx
+            .client
+            .active_element()
+            .await
+            .map_err(|e| format!("定位分组输入焦点失败: {e}"))?;
+        active
             .send_keys("e2e 分组")
             .await
             .map_err(|e| format!("输入分组名失败: {e}"))?;
-        input
+        active
             .send_keys(ENTER)
             .await
             .map_err(|e| format!("回车提交分组失败: {e}"))?;
