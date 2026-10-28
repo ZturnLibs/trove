@@ -548,8 +548,12 @@ impl Harness {
 
     /// 第二次连接同一数据目录（用例 #4「重开保持」）。
     pub async fn reconnect(&mut self) -> Result<(), String> {
-        // 旧会话随旧 Client drop 关闭（fantoccini drop 即关会话），
-        // app 随会话退出；再起新会话复用同一 tauri-driver。
+        // 必须显式关旧会话：Client drop 静默不关，WebKitWebDriver 单会话上限
+        // 会拒绝新会话（Maximum number of active sessions，CI 实证）。
+        // close() 消费 Client——用 clone 出的句柄关会话，ctx 里留壳无碍
+        //（后续整体替换）。
+        let old = self.ctx.client.clone();
+        let _ = tokio::time::timeout(Duration::from_secs(10), old.close()).await;
         wait_app_exit(&self.ctx.trove_bin);
         let port = self.driver_port()?;
         let client = connect(&self.ctx.trove_bin, port).await?;
