@@ -179,18 +179,28 @@ async fn case04_double_click_rename() {
         Ok(())
     });
     let r = result.await;
-    h.finish(r).await;
-    // 重开保持：同数据目录第二连。
-    let Some(mut h) = Harness::acquire("04-rename-reopen").await.expect("acquire") else {
-        return;
-    };
-    let result = h.run(|ctx| async {
-        ctx.wait_main_ready().await?;
-        ctx.find(&ctx.task_row("e2e 改名后"), "改名持久化的任务").await?;
-        Ok(())
-    });
-    let r = result.await;
-    h.finish(r).await;
+    if r.is_ok() {
+        // 重开保持：**同一数据目录**二次连接。必须复用 h（reconnect 同 driver +
+        // tempdir）——重新 acquire 会开全新 tempdir（空库），持久化断言永假
+        //（run 40749589555 的 tasks-on-failure.csv 实证 reopen 库为空）。
+        if let Err(e) = h.reconnect().await {
+            h.finish(Err(format!("重连失败: {e}"))).await;
+            return;
+        }
+        let reopen = h
+            .run(|ctx| async {
+                ctx.wait_main_ready().await?;
+                // 冷启后收件箱列表异步加载，用带重试的 wait_for。
+                ctx.wait_for(&ctx.task_row("e2e 改名后"), "改名持久化的任务")
+                    .await
+                    .map(|_| ());
+                Ok(())
+            })
+            .await;
+        h.finish(reopen).await;
+    } else {
+        h.finish(r).await;
+    }
 }
 
 /// 用例 #5：看板跨列拖拽。dnd-kit PointerSensor 不响应 WebDriver 合成拖拽（已实测）。
