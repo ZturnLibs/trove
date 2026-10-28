@@ -37,7 +37,7 @@
 
 - [x] 本地 macOS：`E2E=1 cargo test --test e2e -- --ignored` → 10 passed（全部经平台门控跳过，证明门控/装配/编译正确）；真实执行在 CI ubuntu
 - [x] 默认 `cargo test` 不受影响（e2e `#[ignore]`，lib 199 绿）；`pnpm test:unit` 63 绿
-- [ ] CI `e2e` job 绿（PR 上观察；选择器首跑可能需迭代）
+- [x] CI `e2e` job 绿：run 40753626139 **10 passed / 41.3s 全绿**（xvfb+dbus/custom-protocol/页内驻留监听全链路迭代后）；默认 `cargo test`/`pnpm test:unit` 不受影响已复验（lib 199 / unit 63）
 
 ## 回滚点
 
