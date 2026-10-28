@@ -8,6 +8,8 @@
 
 mod helper;
 
+use std::time::Duration;
+
 use helper::Harness;
 
 const ENTER: &str = "\u{E007}";
@@ -35,16 +37,11 @@ async fn create_task(
         .send_keys(title)
         .await
         .map_err(|e| format!("输入标题失败: {e}"))?;
-    active
-        .send_keys(ENTER)
-        .await
-        .map_err(|e| format!("回车提交失败: {e}"))?;
-    // 详情面板标题输入是 onBlur={save} 提交（无 Enter 处理）：
-    // 发 Tab 移焦触发 blur，rename 才落库。
-    active
-        .send_keys("\u{E003}") // Tab
-        .await
-        .map_err(|e| format!("失焦提交失败: {e}"))?;
+    // 详情面板标题输入是 onBlur={save} 提交（无 Enter 处理）。实测 ENTER+TAB
+    // 连发会与末字键入竞态（丢尾字）且键语义 blur 不可靠：静置后用 JS 直接
+    // blur 触发 save。
+    tokio::time::sleep(Duration::from_millis(250)).await;
+    ctx.blur_active().await?;
     ctx.wait_for(&ctx.task_row(title), "新建的任务").await?;
     Ok(())
 }
@@ -216,7 +213,7 @@ async fn case07_create_group() {
             .send_keys(ENTER)
             .await
             .map_err(|e| format!("回车提交分组失败: {e}"))?;
-        ctx.wait_for(&ctx.nav_link("e2e 分组"), "侧栏分组节点").await?;
+        ctx.wait_for(&ctx.sidebar_node("e2e 分组"), "侧栏分组节点").await?;
         Ok(())
     });
     let r = result.await;

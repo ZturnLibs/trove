@@ -170,6 +170,12 @@ impl Ctx {
         "(//aside//input[not(@type)])[1]".into()
     }
 
+    /// 侧栏树节点（分组/清单 GroupRow/ListRow）：无 role 的 div + span 叶子；
+    /// 固定六入口用 nav_link（nav>a），动态节点用此定位。
+    pub fn sidebar_node(&self, label: &str) -> String {
+        format!("//span[normalize-space()='{}']", label)
+    }
+
     /// 任务行（TaskRow 外层是 `div[role=button]`），按标题包含匹配。
     pub fn task_row(&self, title: &str) -> String {
         format!(
@@ -305,6 +311,16 @@ impl Ctx {
 
     /// 回车键（WebDriver Return 码点）。
     pub const ENTER: &'static str = "\u{E007}";
+
+    /// 失焦当前活动元素（触发 onBlur 提交类逻辑）。比键语义 Tab 可靠：
+    /// 不依赖浏览器对功能键默认行为的处理，也不与键入末字竞态。
+    pub async fn blur_active(&self) -> Result<(), String> {
+        self.client
+            .execute("document.activeElement && document.activeElement.blur()", vec![])
+            .await
+            .map(|_| ())
+            .map_err(|e| format!("blur 失败: {e}"))
+    }
 
     /// 运行 `trove-cli`（继承 TROVE_DATA_DIR；--app 指向被测二进制）。
     /// CLI 不直接读写 DB，经运行中的 app（单实例转发）执行动作；
