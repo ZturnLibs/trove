@@ -55,16 +55,30 @@ jobs:
       - uses: Swatinem/rust-cache@v2
         with:
           workspaces: src-tauri
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 11
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+      - run: pnpm install
+        working-directory: ${{ github.workspace }}
       - name: Install Linux Tauri deps + WebDriver
         run: |
           sudo apt-get update
           sudo apt-get install -y libwebkit2gtk-4.1-dev libappindicator3-dev librsvg2-dev patchelf webkit2gtk-driver xvfb dbus at-spi2-core
           cargo install tauri-driver --locked
+          cargo install tauri-cli --locked
           # 预热字体缓存：WebKitGTK 首启冷建 fc 缓存可达数十秒，避免首个用例撞连接超时
           fc-cache -f
       - name: Build app + e2e tests
+        # 必须 tauri build --debug（设计文档指定路径）：纯 cargo build 的 debug 二进制
+        # 走 devUrl（CI 无 vite dev server）→ 白窗 → 侧栏永不出现（run 40727225974）。
+        # --debug=未优化二进制，--no-bundle=跳过打包；beforeBuildCommand 自动 pnpm build
+        # 产出 dist/ 内嵌进二进制。
         run: |
-          cargo build
+          cargo tauri build --debug --no-bundle
           cargo test --test e2e --no-run
       - name: Run e2e smoke
         env:
