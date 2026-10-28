@@ -20,6 +20,7 @@ use std::process::{Child, Command, Stdio};
 use std::sync::{Mutex, MutexGuard, OnceLock};
 use std::time::{Duration, Instant};
 
+use fantoccini::actions::{InputSource, MouseActions, PointerAction, MOUSE_BUTTON_LEFT};
 use fantoccini::elements::Element;
 use fantoccini::{Client, ClientBuilder, Locator};
 
@@ -327,8 +328,10 @@ impl Ctx {
             .map_err(|e| format!("右键 {what} 失败: {e}"))
     }
 
-    /// 双击目标元素直到效果元素出现：合成 dblclick 可能派发在 React 重渲染
-    /// 后的脱钩节点上（事件不到达根代理），重找重发并短轮询验证效果。
+    /// 双击目标元素直到效果元素出现。用 W3C Actions 真实指针序列
+    /// （MoveTo+Down/Up×2，WebKit 合成原生 click×2+dblclick）——JS 合成
+    /// dblclick 事件实测不触发 React onDoubleClick（WebKitGTK CI 多轮实证）。
+    /// 每轮重找目标（防脱钩）并短轮询验证效果。
     pub async fn double_click_until(
         &self,
         target: &str,
@@ -338,7 +341,7 @@ impl Ctx {
         let mut last = String::new();
         for _ in 0..4 {
             let el = self.wait_for(target, what).await?;
-            if let Err(e) = self.double_click(&el).await {
+            if let Err(e) = self.native_double_click(&el).await {
                 last = e;
                 continue;
             }
@@ -352,6 +355,39 @@ impl Ctx {
             last = "dblclick 未产生效果元素".into();
         }
         Err(format!("{what} 失败（重试耗尽）: {last}"))
+    }
+
+    /// W3C Actions 真实指针双击（viewport 坐标取元素中心）。
+    async fn native_double_click(&self, el: &Element) -> Result<(), String> {
+        let (x, y, w, h) = el
+            .rectangle()
+            .await
+            .map_err(|e| format!("获取元素位置失败: {e}"))?;
+        let mouse = MouseActions::new("e2e-double-click".into())
+            .then(PointerAction::MoveTo {
+                duration: None,
+                x: x + w / 2.0,
+                y: y + h / 2.0,
+            })
+            .then(PointerAction::Down {
+                button: MOUSE_BUTTON_LEFT,
+            })
+            .then(PointerAction::Up {
+                button: MOUSE_BUTTON_LEFT,
+            })
+            .then(PointerAction::Pause {
+                duration: Duration::from_millis(80),
+            })
+            .then(PointerAction::Down {
+                button: MOUSE_BUTTON_LEFT,
+            })
+            .then(PointerAction::Up {
+                button: MOUSE_BUTTON_LEFT,
+            });
+        self.client
+            .perform_actions(mouse)
+            .await
+            .map_err(|e| format!("双击失败: {e}"))
     }
 
     /// 回车键（WebDriver Return 码点）。
