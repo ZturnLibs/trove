@@ -96,13 +96,14 @@ async fn case03_complete_then_undo() {
         ctx.wait_main_ready().await?;
         ctx.dismiss_onboarding().await?;
         create_task(ctx, "e2e 完成与撤销").await?;
-        // 完成：行内「完成」按钮（TaskRow aria-label）。inbox 查询过滤
-        // status=todo——完成后任务离开收件箱视图，以「行消失」为完成断言。
-        ctx.click(&ctx.row_button("e2e 完成与撤销", "完成"), "完成按钮")
+        // 完成：走详情面板「完成」按钮——只有该路径 push recent-action
+        // （行内按钮静默完成，撤销 toast 无从弹出）。inbox 查询过滤
+        // status=todo，完成后任务离开视图，以「行消失」为完成断言。
+        ctx.click(&ctx.button_with_text("完成"), "详情面板完成按钮")
             .await?;
         ctx.wait_gone(&ctx.task_row("e2e 完成与撤销"), "完成的任务离开收件箱")
             .await?;
-        // 撤销：recent-actions toast；任务回归收件箱。
+        // 撤销：recent-actions toast（5s 自动消失）；任务回归收件箱。
         ctx.click(&ctx.button_with_text("撤销"), "撤销按钮").await?;
         ctx.wait_for(&ctx.task_row("e2e 完成与撤销"), "撤销后任务回归收件箱")
             .await?;
@@ -126,12 +127,11 @@ async fn case04_double_click_rename() {
         // 双击标题展示元素（div.truncate 的 onDoubleClick → startEdit）；
         // 行内输入是受控 Input（commit 读 React state），必须真实键入让
         // onChange 更新 draft，再 Enter 提交。
-        let title_el = ctx.wait_for(&ctx.task_title("e2e 改名前"), "标题展示元素").await?;
-        ctx.double_click(&title_el).await?;
         let input = ctx
-            .wait_for(
+            .double_click_until(
+                &ctx.task_title("e2e 改名前"),
                 "//div[@role='button'][contains(normalize-space(.),'e2e 改名前')]//input",
-                "改名输入框",
+                "双击改名",
             )
             .await?;
         input.click().await.map_err(|e| format!("聚焦改名输入框失败: {e}"))?;

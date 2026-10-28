@@ -327,6 +327,33 @@ impl Ctx {
             .map_err(|e| format!("右键 {what} 失败: {e}"))
     }
 
+    /// 双击目标元素直到效果元素出现：合成 dblclick 可能派发在 React 重渲染
+    /// 后的脱钩节点上（事件不到达根代理），重找重发并短轮询验证效果。
+    pub async fn double_click_until(
+        &self,
+        target: &str,
+        effect: &str,
+        what: &str,
+    ) -> Result<Element, String> {
+        let mut last = String::new();
+        for _ in 0..4 {
+            let el = self.wait_for(target, what).await?;
+            if let Err(e) = self.double_click(&el).await {
+                last = e;
+                continue;
+            }
+            let deadline = Instant::now() + Duration::from_millis(1200);
+            while Instant::now() < deadline {
+                if let Ok(found) = self.client.find(Locator::XPath(effect)).await {
+                    return Ok(found);
+                }
+                std::thread::sleep(POLL);
+            }
+            last = "dblclick 未产生效果元素".into();
+        }
+        Err(format!("{what} 失败（重试耗尽）: {last}"))
+    }
+
     /// 回车键（WebDriver Return 码点）。
     pub const ENTER: &'static str = "\u{E007}";
 
