@@ -28,11 +28,12 @@
 ## 4. CI
 
 - [x] `ci.yml` 加 `e2e` job（ubuntu：`webkit2gtk-driver` + `cargo install tauri-driver` + build + 运行 + 失败 artifact）
+- [x] CI 挂死修复（run 40489217286 诊断）：ubuntu-latest 无显示服务器，WebKitGTK app 开不了窗 → WebKitWebDriver 会话创建永不返回。修复 = 官方方案：装 `xvfb` + `xvfb-run -a` 包裹；`timeout-minutes: 35` 兜底（超时属 failure，artifact 仍上传）；helper `connect()` 加 `CONNECT_TIMEOUT`（此前裸 await 曾挂满 6h job 上限）、失败截图/取源码加 5s 限时、`run_cli` 加 30s 超时强杀
 
 ## 5. 验证
 
 - [x] 本地 macOS：`E2E=1 cargo test --test e2e -- --ignored` → 10 passed（全部经平台门控跳过，证明门控/装配/编译正确）；真实执行在 CI ubuntu
-- [x] 默认 `cargo test` 不受影响（e2e `#[ignore]`，lib 199 绿）；`pnpm test:unit` 不涉及
+- [x] 默认 `cargo test` 不受影响（e2e `#[ignore]`，lib 199 绿）；`pnpm test:unit` 63 绿
 - [ ] CI `e2e` job 绿（PR 上观察；选择器首跑可能需迭代）
 
 ## 回滚点

@@ -27,6 +27,8 @@ use fantoccini::{Client, ClientBuilder, Locator};
 const CASE_TIMEOUT: Duration = Duration::from_secs(180);
 /// 连接 tauri-driver / 启动 app 的等待上限。
 const CONNECT_TIMEOUT: Duration = Duration::from_secs(30);
+/// trove-cli 单实例转发上限（app 卡死时不无限等）。
+const CLI_TIMEOUT: Duration = Duration::from_secs(30);
 const POLL: Duration = Duration::from_millis(250);
 
 /// 所有用例串行执行：`TROVE_DATA_DIR` 是进程级 env、`tauri-driver` 不宜多开、
@@ -261,14 +263,38 @@ impl Ctx {
     pub const ENTER: &'static str = "\u{E007}";
 
     /// 运行 `trove-cli`（继承 TROVE_DATA_DIR；--app 指向被测二进制）。
-    /// CLI 不直接读写 DB，经运行中的 app（单实例转发）执行动作。
+    /// CLI 不直接读写 DB，经运行中的 app（单实例转发）执行动作；
+    /// 转发可能因 app 卡死而无限阻塞，必须带超时并强杀。
     pub fn run_cli(&self, args: &[&str]) -> Result<String, String> {
-        let output = Command::new(&self.cli_bin)
+        let mut child = Command::new(&self.cli_bin)
             .arg("--app")
             .arg(&self.trove_bin)
             .args(args)
-            .output()
+            .stdout(Stdio::piped())
+            .stderr(Stdio::piped())
+            .spawn()
             .map_err(|e| format!("运行 trove-cli {args:?} 失败: {e}"))?;
+        let deadline = Instant::now() + CLI_TIMEOUT;
+        loop {
+            match child.try_wait() {
+                Ok(Some(_)) => break,
+                Ok(None) => {
+                    if Instant::now() > deadline {
+                        let _ = child.kill();
+                        let _ = child.wait();
+                        return Err(format!(
+                            "trove-cli {args:?} 超时（{}s）：单实例转发未响应，app 可能已卡死",
+                            CLI_TIMEOUT.as_secs()
+                        ));
+                    }
+                    std::thread::sleep(POLL);
+                }
+                Err(e) => return Err(format!("trove-cli {args:?} 等待失败: {e}")),
+            }
+        }
+        let output = child
+            .wait_with_output()
+            .map_err(|e| format!("trove-cli {args:?} 读取输出失败: {e}"))?;
         let combined = format!(
             "{}{}",
             String::from_utf8_lossy(&output.stdout),
@@ -282,18 +308,28 @@ impl Ctx {
 }
 
 /// 一次性连接（用例 #4 重开校验会连第二次，数据目录不变）。
+/// 必须带超时：app 起不来（如 CI 无显示服务器）时 WebKitWebDriver 的
+/// 新会话请求永不返回，裸 await 会把整条流水线挂到 job 上限。
 async fn connect(trove_bin: &PathBuf, port: u16) -> Result<Client, String> {
     let mut caps = serde_json::Map::new();
     caps.insert(
         "tauri:options".to_string(),
         serde_json::json!({ "application": trove_bin.display().to_string() }),
     );
-    ClientBuilder::rustls()
-        .map_err(|e| format!("构建 WebDriver 客户端失败: {e}"))?
-        .capabilities(caps)
-        .connect(&format!("http://127.0.0.1:{port}"))
-        .await
-        .map_err(|e| format!("连接 tauri-driver 失败: {e}"))
+    let url = format!("http://127.0.0.1:{port}");
+    let mut builder =
+        ClientBuilder::rustls().map_err(|e| format!("构建 WebDriver 客户端失败: {e}"))?;
+    builder.capabilities(caps);
+    // connect 借用 builder（&self），builder 必须先落 let，future 才能过 timeout await。
+    let fut = builder.connect(&url);
+    match tokio::time::timeout(CONNECT_TIMEOUT, fut).await {
+        Ok(r) => r.map_err(|e| format!("连接 tauri-driver 失败: {e}")),
+        Err(_) => Err(format!(
+            "连接 tauri-driver 超时（{}s）：app 未能在期限内被拉起；\
+             常见原因是无显示服务器（需 xvfb-run）或 app 启动即崩溃",
+            CONNECT_TIMEOUT.as_secs()
+        )),
+    }
 }
 
 /// 持有：串行锁、tempdir、TROVE_DATA_DIR 注入、tauri-driver 子进程。
@@ -429,11 +465,15 @@ impl Harness {
     async fn save_failure_artifacts(&self, err: &str) {
         let dir = self.artifact_dir.clone();
         let _ = std::fs::write(dir.join("error.txt"), err);
-        if let Ok(png) = self.ctx.client.screenshot().await {
+        // app 可能已死：截图/取源码也要限时，别让留证变成二次挂起。
+        let shot =
+            tokio::time::timeout(Duration::from_secs(5), self.ctx.client.screenshot()).await;
+        if let Ok(Ok(png)) = shot {
             let _ = std::fs::write(dir.join("failure.png"), png);
         }
-        if let Ok(html) = self.ctx.client.source().await {
-            let _ = std::fs::write(dir.join("page.html"), html);
+        let html = tokio::time::timeout(Duration::from_secs(5), self.ctx.client.source()).await;
+        if let Ok(Ok(page)) = html {
+            let _ = std::fs::write(dir.join("page.html"), page);
         }
         eprintln!(
             "[e2e:{}] 失败，artifact：{}",
