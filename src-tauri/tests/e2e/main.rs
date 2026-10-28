@@ -179,7 +179,7 @@ async fn case07_create_group() {
         ctx.wait_main_ready().await?;
         ctx.dismiss_onboarding().await?;
         ctx.click(
-            &ctx.button_with_text("新建分组或清单"),
+            &ctx.button_aria("新建分组或清单"),
             "新建分组或清单入口",
         )
         .await?;

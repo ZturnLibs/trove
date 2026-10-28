@@ -159,6 +159,11 @@ impl Ctx {
         format!("//button[normalize-space()='{text}']")
     }
 
+    /// 图标按钮无文本，只有 aria-label（如「新建分组或清单」）。
+    pub fn button_aria(&self, aria: &str) -> String {
+        format!("//button[@aria-label='{aria}']")
+    }
+
     /// 任务行（TaskRow 外层是 `div[role=button]`），按标题包含匹配。
     pub fn task_row(&self, title: &str) -> String {
         format!(
@@ -191,9 +196,26 @@ impl Ctx {
             .map_err(|e| format!("找不到 {what}: {e}"))
     }
 
+    /// 点击 = 先 wait_for（20s 重试窗口，覆盖视图切换渲染）再点；
+    /// WebKitGTK 下 React 重渲染会让已获节点失效（stale），重试重新等待再点。
     pub async fn click(&self, xpath: &str, what: &str) -> Result<(), String> {
-        let el = self.find(xpath, what).await?;
-        el.click().await.map_err(|e| format!("点击 {what} 失败: {e}"))
+        let mut last = String::new();
+        for _ in 0..3 {
+            let el = self.wait_for(xpath, what).await?;
+            match el.click().await {
+                Ok(()) => return Ok(()),
+                Err(e) => {
+                    let msg = e.to_string();
+                    last = msg.clone();
+                    if msg.contains("not found") || msg.contains("stale") {
+                        tokio::time::sleep(POLL).await;
+                        continue;
+                    }
+                    return Err(format!("点击 {what} 失败: {msg}"));
+                }
+            }
+        }
+        Err(format!("点击 {what} 失败（重试耗尽）: {last}"))
     }
 
     /// 等待主窗口侧栏渲染（app 冷启动 + React 挂载）。
