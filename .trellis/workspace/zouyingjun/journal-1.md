@@ -512,3 +512,24 @@ roadmap N1：release publish matrix 加 ubuntu-latest（deps 与 e2e 同源 + li
 ### Status
 
 [OK] **Completed**
+
+
+## Session 23: N2 前端测试覆盖补强——纯决策内核抽取 + 24 条 vitest（PR #45）
+
+**Date**: 2026-10-29
+**Task**: N2 前端测试覆盖补强——纯决策内核抽取 + 24 条 vitest（PR #45）
+**Branch**: `main`
+
+### Summary
+
+roadmap N2：boardDrag.resolveBoardDrag（看板拖拽全分支决策）、cardAction.resolveCardAction（出牌前校验）、taskDetailSave（标签解析+载荷组装）三处纯函数抽取，组件只消费决策；vitest 63→87。行为保持由 e2e 兜底：PR CI run 40871464822 三 job 全绿（10 passed / 49.7s，直击改动面）。任务归档
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `9240aa9` | (see git log) |
+
+### Status
+
+[OK] **Completed**
