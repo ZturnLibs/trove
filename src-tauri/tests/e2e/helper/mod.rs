@@ -200,14 +200,23 @@ impl Ctx {
         )
     }
 
+    /// 轮询等待元素（20s）。不用 client.wait()：它对 Stale element 直接终止
+    /// （只容忍 no-such-element，CI 实证）；此处到期前任何错误都继续轮询。
     pub async fn wait_for(&self, xpath: &str, what: &str) -> Result<Element, String> {
-        self.client
-            .wait()
-            .at_most(Duration::from_secs(20))
-            .every(POLL)
-            .for_element(Locator::XPath(xpath))
-            .await
-            .map_err(|e| format!("等待 {what} 超时: {e}"))
+        let deadline = Instant::now() + Duration::from_secs(20);
+        let mut last = String::new();
+        loop {
+            match self.client.find(Locator::XPath(xpath)).await {
+                Ok(el) => return Ok(el),
+                Err(e) => {
+                    last = e.to_string();
+                    if Instant::now() > deadline {
+                        return Err(format!("等待 {what} 超时: {last}"));
+                    }
+                    std::thread::sleep(POLL);
+                }
+            }
+        }
     }
 
     /// 轮询直到元素从 DOM 消失（完成类操作会让任务离开 todo 视图）。
