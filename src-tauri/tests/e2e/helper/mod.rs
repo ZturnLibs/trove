@@ -485,6 +485,39 @@ impl Ctx {
         )
     }
 
+    /// 侧栏当前激活项（NavLink isActive → bg-row-active）。
+    pub fn active_nav(&self, label: &str) -> String {
+        format!(
+            "//nav//a[contains(@class,'bg-row-active')][.//span[normalize-space()='{}']]",
+            label
+        )
+    }
+
+    /// 以 URL 参数启动第二个 app 实例：single-instance 插件将 argv 转发给
+    /// 主实例（`handle_trove_url`）后立即退出。Linux dev 构建即可用——
+    /// deep-link 的 argv 路径不依赖打包注册（case09 依据）。
+    pub fn spawn_url_instance(&self, url: &str) -> Result<(), String> {
+        let mut child = Command::new(&self.trove_bin)
+            .arg(url)
+            .spawn()
+            .map_err(|e| format!("启动 URL 二实例失败: {e}"))?;
+        let deadline = Instant::now() + Duration::from_secs(15);
+        loop {
+            match child.try_wait() {
+                Ok(Some(_)) => return Ok(()),
+                Ok(None) => {
+                    if Instant::now() > deadline {
+                        let _ = child.kill();
+                        let _ = child.wait();
+                        return Err("URL 二实例未在 15s 内退出".into());
+                    }
+                    std::thread::sleep(POLL);
+                }
+                Err(e) => return Err(format!("等待 URL 二实例失败: {e}")),
+            }
+        }
+    }
+
     /// W3C Actions 真实指针双击（viewport 坐标取元素中心）。
     async fn native_double_click(&self, el: &Element) -> Result<(), String> {
         let (x, y, w, h) = el
