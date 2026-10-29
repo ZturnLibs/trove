@@ -533,3 +533,24 @@ roadmap N2：boardDrag.resolveBoardDrag（看板拖拽全分支决策）、cardA
 ### Status
 
 [OK] **Completed**
+
+
+## Session 24: N3 统一搜索类型筛选——chips 透传 types（PR #47）
+
+**Date**: 2026-10-29
+**Task**: N3 统一搜索类型筛选——chips 透传 types（PR #47）
+**Branch**: `main`
+
+### Summary
+
+roadmap N3：快捷搜索此前调 searchQuery 未传 types（协议已有，前端未接）。加筛选 chips（全部/任务/提醒/记忆/剪切板）透传后端，语义匹配按类型客户端过滤，切换重置键盘选中。roadmap N1/N2/N3 全部勾销。typecheck/build/unit 87 绿；PR CI 三 job 全绿。任务归档
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `809938f` | (see git log) |
+
+### Status
+
+[OK] **Completed**

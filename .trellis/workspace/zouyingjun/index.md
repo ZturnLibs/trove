@@ -8,7 +8,7 @@
 
 <!-- @@@auto:current-status -->
 - **Active File**: `journal-1.md`
-- **Total Sessions**: 23
+- **Total Sessions**: 24
 - **Last Active**: 2026-10-29
 <!-- @@@/auto:current-status -->
 
@@ -19,7 +19,7 @@
 <!-- @@@auto:active-documents -->
 | File | Lines | Status |
 |------|-------|--------|
-| `journal-1.md` | ~535 | Active |
+| `journal-1.md` | ~556 | Active |
 <!-- @@@/auto:active-documents -->
 
 ---
@@ -29,6 +29,7 @@
 <!-- @@@auto:session-history -->
 | # | Date | Title | Commits | Branch |
 |---|------|-------|---------|--------|
+| 24 | 2026-10-29 | N3 统一搜索类型筛选——chips 透传 types（PR #47） | `809938f` | `main` |
 | 23 | 2026-10-29 | N2 前端测试覆盖补强——纯决策内核抽取 + 24 条 vitest（PR #45） | `9240aa9` | `main` |
 | 22 | 2026-10-29 | N1 Linux 官方发布通道——release matrix 加 ubuntu（PR #43） | `12b50bc` | `main` |
 | 21 | 2026-10-29 | 启用 case09 URL Scheme 直达——argv 转发路径（PR #38） | `59c52b3` | `main` |
