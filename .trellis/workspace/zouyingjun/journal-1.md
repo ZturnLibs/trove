@@ -491,3 +491,24 @@ case04 实证的 W3C Actions 达成归档任务遗留启用条件：native_drag�
 ### Status
 
 [OK] **Completed**
+
+
+## Session 22: N1 Linux 官方发布通道——release matrix 加 ubuntu（PR #43）
+
+**Date**: 2026-10-29
+**Task**: N1 Linux 官方发布通道——release matrix 加 ubuntu（PR #43）
+**Branch**: `main`
+
+### Summary
+
+roadmap N1：release publish matrix 加 ubuntu-latest（deps 与 e2e 同源 + libfuse2），产出 .deb/.AppImage 并入 updater latest.json；bundle targets=all 无需改配置。验证点在下一次 tag 发版（PRD 记录）。任务归档
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `12b50bc` | (see git log) |
+
+### Status
+
+[OK] **Completed**
