@@ -415,6 +415,76 @@ impl Ctx {
             })
     }
 
+    /// W3C Actions 真实指针拖拽：源中心 → 按下 → 小位移越激活阈值
+    /// （dnd-kit PointerSensor distance=8）→ 移至目标中心 → 释放。
+    /// duration 让 WebKit 插值出中间 pointermove（dnd-kit 依赖 move 事件跟踪）。
+    pub async fn native_drag(&self, source: &Element, target: &Element) -> Result<(), String> {
+        let (sx, sy, sw, sh) = source
+            .rectangle()
+            .await
+            .map_err(|e| format!("获取源位置失败: {e}"))?;
+        let (tx, ty, tw, th) = target
+            .rectangle()
+            .await
+            .map_err(|e| format!("获取目标位置失败: {e}"))?;
+        let mouse = MouseActions::new("e2e-drag".into())
+            .then(PointerAction::MoveTo {
+                duration: Some(Duration::from_millis(200)),
+                x: sx + sw / 2.0,
+                y: sy + sh / 2.0,
+            })
+            .then(PointerAction::Down {
+                button: MOUSE_BUTTON_LEFT,
+            })
+            .then(PointerAction::MoveTo {
+                duration: Some(Duration::from_millis(120)),
+                x: sx + sw / 2.0,
+                y: sy + sh / 2.0 + 14.0,
+            })
+            .then(PointerAction::MoveTo {
+                duration: Some(Duration::from_millis(350)),
+                x: tx + tw / 2.0,
+                y: ty + th / 2.0,
+            })
+            .then(PointerAction::Up {
+                button: MOUSE_BUTTON_LEFT,
+            });
+        self.client
+            .perform_actions(mouse)
+            .await
+            .map_err(|e| format!("拖拽失败: {e}"))
+    }
+
+    /// 看板列区域（BoardColumnView 根 section，含列头 h2）。
+    pub fn board_column(&self, column_title: &str) -> String {
+        format!("//section[.//h2[normalize-space()='{}']]", column_title)
+    }
+
+    /// 看板卡片（BoardCard 根：role=button + touch-none），按标题包含匹配。
+    pub fn board_card(&self, column_title: &str, title: &str) -> String {
+        format!(
+            "{}//div[@role='button'][contains(@class,'touch-none')][contains(normalize-space(.),'{}')]",
+            self.board_column(column_title),
+            title
+        )
+    }
+
+    /// 看板列尾「＋ 新建任务」按钮。
+    pub fn board_quick_add(&self, column_title: &str) -> String {
+        format!(
+            "{}//button[contains(normalize-space(),'新建任务')]",
+            self.board_column(column_title)
+        )
+    }
+
+    /// 看板列尾行内新建输入。
+    pub fn board_composer(&self, column_title: &str) -> String {
+        format!(
+            "{}//input[contains(@placeholder,'标题后回车创建')]",
+            self.board_column(column_title)
+        )
+    }
+
     /// W3C Actions 真实指针双击（viewport 坐标取元素中心）。
     async fn native_double_click(&self, el: &Element) -> Result<(), String> {
         let (x, y, w, h) = el

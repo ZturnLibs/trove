@@ -196,18 +196,163 @@ async fn case04_double_click_rename() {
     }
 }
 
-/// 用例 #5：看板跨列拖拽。dnd-kit PointerSensor 不响应 WebDriver 合成拖拽（已实测）。
+/// 用例 #5：看板跨列拖拽（待办 → 进行中）。
+/// 真实指针序列（W3C Actions）驱动 dnd-kit PointerSensor——JS 合成事件
+/// 不激活传感器（归档结论）；细节见 .trellis/spec/tauri/e2e-webdriver.md。
 #[tokio::test]
-#[ignore = "PointerSensor 不响应合成拖拽；待 WebDriver 原生 action 序列验证后启用"]
+#[ignore = "E2E=1 + tauri-driver（仅 Linux/Windows；macOS 自动跳过）"]
 async fn case05_board_cross_column_drag() {
-    println!("[e2e:05-drag] skip：见 ignore 原因");
+    let Some(h) = Harness::acquire("05-drag").await.expect("acquire") else {
+        return;
+    };
+    let result = h.run(|ctx| async {
+        ctx.wait_main_ready().await?;
+        ctx.dismiss_onboarding().await?;
+        ctx.click(&ctx.nav_link("看板"), "看板导航").await?;
+        // 看板列尾新建两张卡（待办列）。
+        for title in ["e2e 跨列垫片", "e2e 跨列"] {
+            ctx.click(&ctx.board_quick_add("待办"), "待办列快速新建").await?;
+            let composer = ctx
+                .wait_for(&ctx.board_composer("待办"), "待办列新建输入框")
+                .await?;
+            composer
+                .send_keys(title)
+                .await
+                .map_err(|e| format!("输入卡标题失败: {e}"))?;
+            composer
+                .send_keys(ENTER)
+                .await
+                .map_err(|e| format!("回车建卡失败: {e}"))?;
+            ctx.wait_for(&ctx.board_card("待办", title), "待办列新卡").await?;
+        }
+        // 拖「e2e 跨列」卡到「进行中」列：卡片离开待办、出现在进行中。
+        let mut last = String::new();
+        let mut moved: Result<(), String> = Err("未尝试".into());
+        for _ in 0..3 {
+            let src = ctx
+                .wait_for(&ctx.board_card("待办", "e2e 跨列"), "待办列源卡")
+                .await?;
+            let dst = ctx
+                .wait_for(&ctx.board_column("进行中"), "进行中列")
+                .await?;
+            if let Err(e) = ctx.native_drag(&src, &dst).await {
+                last = e;
+                continue;
+            }
+            tokio::time::sleep(Duration::from_millis(400)).await;
+            moved = ctx
+                .wait_for(&ctx.board_card("进行中", "e2e 跨列"), "进行中列的卡")
+                .await
+                .map(|_| ());
+            if moved.is_ok() {
+                break;
+            }
+            last = moved.as_ref().unwrap_err().clone();
+        }
+        moved.map_err(|e| format!("跨列拖拽失败: {e}；last={last}"))?;
+        Ok(())
+    });
+    let r = result.await;
+    h.finish(r).await;
 }
 
-/// 用例 #6：看板同清单列内排序。同 #5。
+/// 用例 #6：看板同列排序（拖「甲」到「乙」上，顺序互换）。
 #[tokio::test]
-#[ignore = "PointerSensor 不响应合成拖拽；待 WebDriver 原生 action 序列验证后启用"]
+#[ignore = "E2E=1 + tauri-driver（仅 Linux/Windows；macOS 自动跳过）"]
 async fn case06_board_same_column_reorder() {
-    println!("[e2e:06-reorder] skip：见 ignore 原因");
+    let Some(h) = Harness::acquire("06-reorder").await.expect("acquire") else {
+        return;
+    };
+    let result = h.run(|ctx| async {
+        ctx.wait_main_ready().await?;
+        ctx.dismiss_onboarding().await?;
+        ctx.click(&ctx.nav_link("看板"), "看板导航").await?;
+        for title in ["e2e 排序甲", "e2e 排序乙"] {
+            ctx.click(&ctx.board_quick_add("待办"), "待办列快速新建").await?;
+            let composer = ctx
+                .wait_for(&ctx.board_composer("待办"), "待办列新建输入框")
+                .await?;
+            composer
+                .send_keys(title)
+                .await
+                .map_err(|e| format!("输入卡标题失败: {e}"))?;
+            composer
+                .send_keys(ENTER)
+                .await
+                .map_err(|e| format!("回车建卡失败: {e}"))?;
+            ctx.wait_for(&ctx.board_card("待办", title), "待办列新卡").await?;
+        }
+        // 列内当前顺序（页内 JS 读取，规避 XPath 位置断言的文本污染问题）。
+        let order_script = r#"
+            const sec = Array.from(document.querySelectorAll("section")).find(
+                (s) => {
+                    const h = s.querySelector("h2");
+                    return h && h.textContent.trim() === "待办";
+                });
+            if (!sec) return null;
+            return Array.from(
+                sec.querySelectorAll("div[role='button']"))
+                .map((el) => el.textContent.trim());
+        "#;
+        let order_of = |items: serde_json::Value| -> Vec<String> {
+            items
+                .as_array()
+                .map(|a| {
+                    a.iter()
+                        .map(|v| v.as_str().unwrap_or_default().to_string())
+                        .collect()
+                })
+                .unwrap_or_default()
+        };
+        let before = ctx
+            .client
+            .execute(order_script, vec![])
+            .await
+            .map(order_of)
+            .map_err(|e| format!("读取列内顺序失败: {e}"))?;
+        // 拖「甲」到「乙」卡上 → 乙应在甲前。
+        let mut last = String::new();
+        let mut reordered: Result<(), String> = Err("未尝试".into());
+        for _ in 0..3 {
+            let src = ctx
+                .wait_for(&ctx.board_card("待办", "e2e 排序甲"), "源卡甲")
+                .await?;
+            let dst = ctx
+                .wait_for(&ctx.board_card("待办", "e2e 排序乙"), "目标卡乙")
+                .await?;
+            if let Err(e) = ctx.native_drag(&src, &dst).await {
+                last = e;
+                continue;
+            }
+            tokio::time::sleep(Duration::from_millis(400)).await;
+            let after = ctx
+                .client
+                .execute(order_script, vec![])
+                .await
+                .map(order_of)
+                .map_err(|e| format!("读取列内顺序失败: {e}"));
+            match after {
+                Ok(order) => {
+                    let i_jia = order
+                        .iter()
+                        .position(|t| t.contains("e2e 排序甲"));
+                    let i_yi = order.iter().position(|t| t.contains("e2e 排序乙"));
+                    if let (Some(a), Some(b)) = (i_jia, i_yi) {
+                        if b < a {
+                            reordered = Ok(());
+                            break;
+                        }
+                    }
+                    last = format!("顺序未变：{order:?}");
+                }
+                Err(e) => last = e,
+            }
+        }
+        reordered.map_err(|e| format!("列内排序失败: {e}；last={last}"))?;
+        Ok(())
+    });
+    let r = result.await;
+    h.finish(r).await;
 }
 
 /// 用例 #7：侧栏新建分组 → 树上出现。
