@@ -8,7 +8,7 @@
 
 <!-- @@@auto:current-status -->
 - **Active File**: `journal-1.md`
-- **Total Sessions**: 20
+- **Total Sessions**: 21
 - **Last Active**: 2026-10-29
 <!-- @@@/auto:current-status -->
 
@@ -19,7 +19,7 @@
 <!-- @@@auto:active-documents -->
 | File | Lines | Status |
 |------|-------|--------|
-| `journal-1.md` | ~472 | Active |
+| `journal-1.md` | ~493 | Active |
 <!-- @@@/auto:active-documents -->
 
 ---
@@ -29,6 +29,7 @@
 <!-- @@@auto:session-history -->
 | # | Date | Title | Commits | Branch |
 |---|------|-------|---------|--------|
+| 21 | 2026-10-29 | 启用 case09 URL Scheme 直达——argv 转发路径（PR #38） | `59c52b3` | `main` |
 | 20 | 2026-10-29 | 启用看板拖拽 e2e（case05/06）——W3C Actions 真实指针（PR #36） | `2a7706e` | `main` |
 | 19 | 2026-10-29 | 核心流 e2e 冒烟：tauri-driver 10 条用例 CI 全绿（PR #31） | `5783bb5` | `main` |
 | 18 | 2026-10-28 | 周回顾处理模式：四队列单条出牌（PR #30） | `91f14ec` | `main` |

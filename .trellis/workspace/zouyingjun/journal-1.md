@@ -470,3 +470,24 @@ case04 实证的 W3C Actions 达成归档任务遗留启用条件：native_drag�
 ### Status
 
 [OK] **Completed**
+
+
+## Session 21: 启用 case09 URL Scheme 直达——argv 转发路径（PR #38）
+
+**Date**: 2026-10-29
+**Task**: 启用 case09 URL Scheme 直达——argv 转发路径（PR #38）
+**Branch**: `main`
+
+### Summary
+
+推翻 ignore 理由：Linux 上 trove:// 经 single-instance argv 转发（handle_trove_url）无需打包注册。case09：收件箱激活 → 二实例 argv trove://today → 今日激活态回归（NavLink bg-row-active）。CI run 40832537410：10 passed / 0 ignored / 50.4s——套件首次零 skip
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `59c52b3` | (see git log) |
+
+### Status
+
+[OK] **Completed**
