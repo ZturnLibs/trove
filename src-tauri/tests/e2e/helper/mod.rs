@@ -609,6 +609,22 @@ impl Ctx {
     }
 }
 
+/// 连接带重试：tauri-driver/WebKitWebDriver 偶发瞬态连接错误
+/// （hyper SendRequest 等，CI 实证），立即重试通常即恢复。
+async fn connect_retry(trove_bin: &PathBuf, port: u16) -> Result<Client, String> {
+    let mut last = String::new();
+    for _ in 0..3 {
+        match connect(trove_bin, port).await {
+            Ok(client) => return Ok(client),
+            Err(e) => {
+                last = e;
+                tokio::time::sleep(POLL).await;
+            }
+        }
+    }
+    Err(last)
+}
+
 /// 一次性连接（用例 #4 重开校验会连第二次，数据目录不变）。
 /// 必须带超时：app 起不来（如 CI 无显示服务器）时 WebKitWebDriver 的
 /// 新会话请求永不返回，裸 await 会把整条流水线挂到 job 上限。
@@ -687,7 +703,7 @@ impl Harness {
             })?;
         wait_port(port, "tauri-driver")?;
 
-        let client = connect(&trove_bin, port).await?;
+        let client = connect_retry(&trove_bin, port).await?;
         println!("[e2e:{case}] 已连接（TROVE_DATA_DIR={}）", data_dir.display());
         Ok(Some(Harness {
             ctx: Ctx {
@@ -717,7 +733,7 @@ impl Harness {
         let _ = tokio::time::timeout(Duration::from_secs(10), old.close()).await;
         wait_app_exit(&self.ctx.trove_bin);
         let port = self.driver_port()?;
-        let client = connect(&self.ctx.trove_bin, port).await?;
+        let client = connect_retry(&self.ctx.trove_bin, port).await?;
         self.ctx.client = client;
         Ok(())
     }
