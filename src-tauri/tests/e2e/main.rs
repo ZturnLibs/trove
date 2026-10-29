@@ -430,11 +430,30 @@ async fn case08_tasks_page_search() {
     h.finish(r).await;
 }
 
-/// 用例 #9：URL Scheme 直达。dev 二进制未注册 scheme，装注册流程后启用。
+/// 用例 #9：URL Scheme 直达（trove://today）。
+/// Linux dev 二进制即可测：URL 经 single-instance 插件 argv 转发到主实例
+/// （lib.rs `handle_trove_url` → Navigate /today → `main://navigate`），
+/// 不依赖打包注册（xdg mimeapps 仅影响系统级 xdg-open 入口）。
 #[tokio::test]
-#[ignore = "deep-link 需应用注册 scheme；dev 构建不含注册，待打包流程后启用"]
+#[ignore = "E2E=1 + tauri-driver（仅 Linux/Windows；macOS 自动跳过）"]
 async fn case09_url_scheme_today() {
-    println!("[e2e:09-deeplink] skip：见 ignore 原因");
+    let Some(h) = Harness::acquire("09-deeplink").await.expect("acquire") else {
+        return;
+    };
+    let result = h.run(|ctx| async {
+        ctx.wait_main_ready().await?;
+        ctx.dismiss_onboarding().await?;
+        // 先离开今日：激活态切到收件箱。
+        ctx.click(&ctx.nav_link("收件箱"), "收件箱导航").await?;
+        ctx.wait_for(&ctx.active_nav("收件箱"), "收件箱激活").await?;
+        // 二实例 argv 携带 trove://today → 主实例导航回今日。
+        ctx.spawn_url_instance("trove://today")?;
+        ctx.wait_for(&ctx.active_nav("今日"), "URL 直达后今日重新激活")
+            .await?;
+        Ok(())
+    });
+    let r = result.await;
+    h.finish(r).await;
 }
 
 /// 用例 #10：CLI 导出任务 CSV（经运行中的应用转发，文件非空）。
