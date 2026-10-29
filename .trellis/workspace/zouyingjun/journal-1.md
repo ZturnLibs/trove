@@ -554,3 +554,24 @@ roadmap N3：快捷搜索此前调 searchQuery 未传 types（协议已有，前
 ### Status
 
 [OK] **Completed**
+
+
+## Session 25: v2.4.0 发版——Linux 官方产物首秀（N1 验证通过）
+
+**Date**: 2026-10-29
+**Task**: v2.4.0 发版——Linux 官方产物首秀（N1 验证通过）
+**Branch**: `main`
+
+### Summary
+
+发版执行：notes（PR #49）+ 版本 bump（PR #50）+ tag v2.4.0。release workflow 4 job 全绿——publish(ubuntu-latest) 首跑即绿，N1 验证通过：Release 资产含 .deb/.AppImage/.rpm（+sig），latest.json 11 平台条目（linux-x86_64×4）。发布体已替换为手写 notes
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `1a5d068` | (see git log) |
+
+### Status
+
+[OK] **Completed**
