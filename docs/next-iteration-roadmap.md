@@ -238,25 +238,25 @@ v1.3 每周回顾的可视化形态，确定性数字 + 可选 AI 摘要。
 
 ### N1. Linux 官方发布通道（P1，成本最低收益最直接）
 
-- [ ] release workflow 增加 Linux job（ubuntu：`tauri build` 出 `.deb` / `.AppImage`，接入 updater `latest.json` 的 linux 平台段）
-- [ ] updater 插件确认 Linux 端点格式（AppImage 签名策略与 macOS/Windows 对齐）
+- [x] release workflow 增加 Linux job（ubuntu：`tauri build` 出 `.deb` / `.AppImage`，接入 updater `latest.json` 的 linux 平台段）
+- [x] updater 插件确认 Linux 端点格式（AppImage 签名策略与 macOS/Windows 对齐）
 - **验收**：Linux 用户可从 GitHub Release 下载安装并走通应用内更新检查。
 - **依据**：e2e 已在 ubuntu 全绿（10 条核心流），Linux 是唯一没有官方构建产物的支持平台；
   release.yml matrix 仅 `macos-14` / `windows-latest`。
 
 ### N2. 前端测试覆盖补强（P2）
 
-- [ ] 核心交互状态机 vitest 化：ProcessingSession（出牌队列）、BoardPage 拖拽分发
+- [x] 核心交互状态机 vitest 化：ProcessingSession（出牌队列）、BoardPage 拖拽分发
       （handleDragEnd 的同列/跨列分支）、TaskDetailPanel draft 保存语义（onBlur 三态）
-- [ ] 目标：features 层新增 ≥3 个测试文件、关键分支断言 ≥15 条
+- [x] 目标：features 层新增 ≥3 个测试文件、关键分支断言 ≥15 条
 - **验收**：`pnpm test:unit` 覆盖上述分支；回归（改名/排序/出牌）不再仅依赖 e2e 兜底。
 - **依据**：现有 63 条 unit 集中于纯函数与 lib；本轮 e2e 调试暴露的 onBlur 提交、
   出牌状态机等语义只被端到端覆盖，改 UI 时缺快速反馈。
 
 ### N3. 搜索与筛选维度补全（P3）
 
-- [ ] 搜索页筛选维度盘点（清单 / 分组 / 优先级 / 到期区间 / 标签），补缺漏项
-- [ ] 与任务页、看板的筛选语义对齐（同一 `TaskQuery` 协议）
+- [x] 搜索页筛选维度盘点（清单 / 分组 / 优先级 / 到期区间 / 标签），补缺漏项
+- [x] 与任务页、看板的筛选语义对齐（同一 `TaskQuery` 协议）
 - **验收**：搜索结果可用与任务页一致的维度过滤，且计数一致。
 - **依据**：v1.2 审计遗留 P3；`TaskQuery` 协议已支持上述维度，主要是前端接入。
 
