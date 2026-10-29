@@ -11,6 +11,7 @@ import { RecurrencePicker } from "@/design-system/patterns/RecurrencePicker";
 import { Button } from "@/design-system/primitives/Button";
 import { ConfirmButton } from "@/design-system/patterns/ConfirmButton";
 import { Input } from "@/design-system/primitives/Input";
+import { buildDetailSaveInput } from "@/design-system/patterns/taskDetailSave";
 import {
   ipc,
   type Reminder,
@@ -210,11 +211,7 @@ export function TaskDetailPanel({
   }
 
   const save = () => {
-    const tagNames = tagText
-      .split(/[,，]/)
-      .map((t) => t.trim())
-      .filter(Boolean);
-    saveMutation.mutate({ ...draft, tagNames });
+    saveMutation.mutate(buildDetailSaveInput(draft, tagText));
   };
 
   // 清单切换器选项：按 分组→清单 分层（overview 可用时），否则退回平铺清单。

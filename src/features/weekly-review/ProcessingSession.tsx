@@ -9,6 +9,7 @@ import {
   type ProcessingItem,
   type ProcessingSummary,
 } from "./processingSummary";
+import { resolveCardAction } from "./cardAction";
 
 const ACTIONS: {
   kind: Exclude<ActionKind, "skipped">;
@@ -114,10 +115,11 @@ export function ProcessingSession({
       }
       pendingRef.current = true;
       try {
-        // 出牌前校验：任务可能已被其他窗口完结/归档。
+        // 出牌前校验：任务可能已被其他窗口完结/归档（决策内核见 cardAction.ts）。
         const latest = await ipc.taskGet(item.task.id);
-        if (latest.status !== "todo") {
-          setNotice(`「${latest.title}」已不在待办状态，已自动跳过`);
+        const decision = resolveCardAction(latest);
+        if (!decision.proceed) {
+          setNotice(decision.notice);
           advance("skipped");
           return;
         }
