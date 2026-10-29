@@ -184,9 +184,11 @@ export function QuickWindow() {
   const captureOverview: TaskListGroupOverview | undefined =
     captureOverviewQuery.data;
 
+  const [typeFilter, setTypeFilter] = useState<SearchEntityType | null>(null);
   const searchQuery = useQuery({
-    queryKey: ["search", searchText],
-    queryFn: () => ipc.searchQuery(searchText),
+    queryKey: ["search", searchText, typeFilter],
+    queryFn: () =>
+      ipc.searchQuery(searchText, typeFilter ? [typeFilter] : undefined),
     enabled: mode === "search" && searchText.trim().length > 0,
   });
 
@@ -326,11 +328,12 @@ export function QuickWindow() {
     () =>
       (searchQuery.data?.semantic ?? []).filter(
         (s) =>
+          (!typeFilter || s.entityType === typeFilter) &&
           !flatResults.some(
             (k) => k.entityType === s.entityType && k.entityId === s.entityId,
           ),
       ),
-    [searchQuery.data, flatResults],
+    [searchQuery.data, flatResults, typeFilter],
   );
 
   const renderPaletteRow = (item: PaletteItem, index: number) => (
@@ -833,6 +836,34 @@ export function QuickWindow() {
                 }
               }}
             />
+            <div className="flex flex-wrap gap-1.5 px-1 pb-1.5">
+              {(
+                [
+                  null,
+                  "task",
+                  "reminder",
+                  "memory",
+                  "clipboard",
+                ] as (SearchEntityType | null)[]
+              ).map((t) => (
+                <button
+                  key={t ?? "all"}
+                  type="button"
+                  onClick={() => {
+                    setTypeFilter(t);
+                    setSelectedIndex(0);
+                  }}
+                  className={cn(
+                    "rounded-full border px-2 py-0.5 text-[11px] transition-colors",
+                    (typeFilter ?? null) === t
+                      ? "border-accent bg-row-active text-foreground"
+                      : "border-border text-muted hover:text-foreground",
+                  )}
+                >
+                  {t === null ? "全部" : typeLabel[t]}
+                </button>
+              ))}
+            </div>
             <div className="min-h-0 flex-1 overflow-auto rounded-[var(--radius-panel)] border border-border">
               {searchText.trim() && searchQuery.isLoading ? (
                 <div className="p-4 text-[12px] text-muted">搜索中…</div>
