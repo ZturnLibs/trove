@@ -449,3 +449,24 @@
 ### Status
 
 [OK] **Completed**
+
+
+## Session 20: 启用看板拖拽 e2e（case05/06）——W3C Actions 真实指针（PR #36）
+
+**Date**: 2026-10-29
+**Task**: 启用看板拖拽 e2e（case05/06）——W3C Actions 真实指针（PR #36）
+**Branch**: `main`
+
+### Summary
+
+case04 实证的 W3C Actions 达成归档任务遗留启用条件：native_drag（Down 后 +14px 越 8px 激活阈值 + duration 插值）+ 看板定位器；case05 跨列、case06 同列排序（页内 JS 读序断言）解除 ignore。CI run 40815077128：10 passed / 48.8s 全绿，仅 case09 深链维持 ignore（待打包注册 scheme）。任务归档
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `2a7706e` | (see git log) |
+
+### Status
+
+[OK] **Completed**
