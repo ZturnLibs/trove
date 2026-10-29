@@ -575,3 +575,24 @@ roadmap N3：快捷搜索此前调 searchQuery 未传 types（协议已有，前
 ### Status
 
 [OK] **Completed**
+
+
+## Session 26: e2e connect 带重试——瞬态连接错误修复（PR #53）+ CI actions Node 24（PR #52）
+
+**Date**: 2026-10-29
+**Task**: e2e connect 带重试——瞬态连接错误修复（PR #53）+ CI actions Node 24（PR #52）
+**Branch**: `main`
+
+### Summary
+
+维护轮：①CI actions 升 Node 24 大版本（checkout v7/setup-node v7/pnpm-setup v6/upload-artifact v7），deprecation 告警清零（PR #52）；②main run 40888705017 case06 抖动实证 acquire 首连瞬态 hyper SendRequest 即判死 → connect_retry（3 次/250ms）覆盖 acquire+reconnect（PR #53），分支 CI 三 job 全绿
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `08f8d89` | (see git log) |
+
+### Status
+
+[OK] **Completed**
