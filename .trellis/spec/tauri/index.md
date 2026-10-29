@@ -7,6 +7,7 @@ Contracts for the `src-tauri` crate. Read the listed files before changing the m
 - [ ] Adding `src/bin/*` or a second Cargo binary → [extra-binaries-and-release.md](./extra-binaries-and-release.md)
 - [ ] Changing `WorkbenchAction` / `ActionOutcome` / IPC `workbench_action_dispatch` → [workbench-action.md](./workbench-action.md)
 - [ ] Changing task CSV import/export/undo or migration `0018` → [csv-tasks.md](./csv-tasks.md)
+- [ ] Changing `tests/e2e/**`、CI `e2e` job 或 app 启动 env/data-dir 链路 → [e2e-webdriver.md](./e2e-webdriver.md)
 - [ ] Bumping app version or cutting a GitHub Release → [extra-binaries-and-release.md](./extra-binaries-and-release.md)
 
 ## Quality Check
