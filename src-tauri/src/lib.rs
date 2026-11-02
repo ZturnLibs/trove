@@ -229,6 +229,41 @@ fn hide_on_close(app: &tauri::AppHandle, label: &str) {
     }
 }
 
+/// 首次启动（无持久化窗口状态）时的主窗口初始尺寸：
+/// 每一维取「显示器工作区三分之一」与「配置默认 1080×720」的较大值。
+/// 输入均为物理像素（含缩放后的基准值比较，逻辑像素基准 1080×720 × scale）。
+fn first_launch_size(area_w: f64, area_h: f64, scale: f64) -> (f64, f64) {
+    ((1080.0 * scale).max(area_w / 3.0), (720.0 * scale).max(area_h / 3.0))
+}
+
+/// 仅在无持久化窗口状态（首次启动）时应用：已有状态时由
+/// window-state 插件在 setup 后恢复用户上次尺寸，此处不得干预。
+fn apply_first_launch_size(app: &tauri::AppHandle) {
+    use tauri::{Manager, PhysicalSize};
+    let Some(window) = app.get_webview_window("main") else {
+        return;
+    };
+    let Ok(data_dir) = app.path().app_data_dir() else {
+        return;
+    };
+    if data_dir.join(".window-state.json").exists() {
+        return;
+    }
+    let Ok(Some(monitor)) = window.current_monitor() else {
+        return;
+    };
+    let area = monitor.work_area();
+    let Ok(scale) = window.scale_factor() else {
+        return;
+    };
+    let (w, h) = first_launch_size(
+        area.size.width as f64,
+        area.size.height as f64,
+        scale,
+    );
+    let _ = window.set_size(PhysicalSize::new(w.round() as u32, h.round() as u32));
+}
+
 /// Guards against a persisted window state that restores the main window to an
 /// oversized or off-screen frame (e.g. a corrupted .window-state.json).
 fn clamp_main_window(app: &tauri::AppHandle) {
@@ -540,6 +575,7 @@ pub fn run() {
                 }
             }
 
+            apply_first_launch_size(app.handle());
             clamp_main_window(app.handle());
             // The window-state plugin applies the restored geometry after setup,
             // so also re-check once the restore has taken effect.
@@ -778,6 +814,8 @@ pub fn run() {
 #[cfg(test)]
 mod tests {
     use super::data_dir_override;
+    use super::first_launch_size;
+
 
     /// `TROVE_DATA_DIR` must reroute every data path so e2e runs stay inside a
     /// tempdir. One test fn on purpose: the env is process-global and cargo
@@ -801,5 +839,34 @@ mod tests {
 
         std::env::remove_var("TROVE_DATA_DIR");
         assert_eq!(data_dir_override(), None);
+    }
+}
+
+#[cfg(test)]
+mod first_launch_size_tests {
+    use crate::first_launch_size;
+
+    #[test]
+    fn base_wins_on_small_screens() {
+        // 工作区 1716×1114：三分之一 572×371 < 基准 1080×720 → 取基准。
+        assert_eq!(first_launch_size(1716.0, 1114.0, 1.0), (1080.0, 720.0));
+    }
+
+    #[test]
+    fn base_wins_scaled_on_hidpi() {
+        // scale 2、物理 3840×2160：基准 2160×1440 胜过三分之一 1280×720。
+        assert_eq!(first_launch_size(3840.0, 2160.0, 2.0), (2160.0, 1440.0));
+    }
+
+    #[test]
+    fn third_wins_on_ultrawide() {
+        // scale 2、物理 6912×4320：宽三分之一 2304 > 2160 → 取 2304；高仍取基准。
+        assert_eq!(first_launch_size(6912.0, 4320.0, 2.0), (2304.0, 1440.0));
+    }
+
+    #[test]
+    fn per_dimension_independent() {
+        // 宽由三分之一决定、高由基准决定的混合情形（物理 4320×2160，scale 2）。
+        assert_eq!(first_launch_size(4320.0, 2160.0, 2.0), (2160.0, 1440.0));
     }
 }
