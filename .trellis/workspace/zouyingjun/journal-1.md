@@ -743,3 +743,24 @@ roadmap N3：快捷搜索此前调 searchQuery 未传 types（协议已有，前
 ### Status
 
 [OK] **Completed**
+
+
+## Session 34: 主窗口初始尺寸不小于屏幕工作区三分之一（PR #72）
+
+**Date**: 2026-11-02
+**Task**: 主窗口初始尺寸不小于屏幕工作区三分之一（PR #72）
+**Branch**: `main`
+
+### Summary
+
+首次启动（无 .window-state.json）逐维取 max(工作区/3, 1080×720×scale)，物理像素比较；已有持久化状态仍由 window-state 插件恢复。first_launch_size 纯函数 + 4 组边界测试（小屏/HIDPI/超宽/混合），rust 204 绿；PR CI 三 job 全绿。任务完成
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `35d7fd6` | (see git log) |
+
+### Status
+
+[OK] **Completed**
