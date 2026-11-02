@@ -2,6 +2,7 @@ import { useEffect, useRef, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useNavigate } from "react-router-dom";
 import { PageScaffold } from "@/components/PageScaffold";
+import { cn } from "@/lib/cn";
 import { Button } from "@/design-system/primitives/Button";
 import { RecurrencePicker } from "@/design-system/patterns/RecurrencePicker";
 import { ConfirmButton } from "@/design-system/patterns/ConfirmButton";
@@ -46,10 +47,68 @@ const PRIORITY_LABEL: Record<TaskPriority, string> = {
   high: "高",
 };
 
+const SETTINGS_SECTIONS = [
+  { id: "rhythm", label: "工作节奏" },
+  { id: "subtasks", label: "子任务" },
+  { id: "app-status", label: "应用状态" },
+  { id: "general", label: "通用" },
+  { id: "updates", label: "软件更新" },
+  { id: "shortcuts", label: "快捷键" },
+  { id: "quick-capture-syntax", label: "快速记录语法" },
+  { id: "templates", label: "模板" },
+  { id: "clipboard", label: "剪切板" },
+  { id: "backup", label: "备份与数据" },
+  { id: "automation", label: "自动化规则" },
+  { id: "ai", label: "AI 助手" },
+  { id: "privacy", label: "权限与隐私" },
+] as const;
+
+type SettingsSectionId = (typeof SETTINGS_SECTIONS)[number]["id"];
+
+const sectionDomId = (id: SettingsSectionId) => `settings-${id}`;
+
+function computeActiveSection(
+  container: HTMLElement,
+  lineOffset = 96,
+): SettingsSectionId {
+  const containerTop = container.getBoundingClientRect().top;
+  let current: SettingsSectionId = SETTINGS_SECTIONS[0].id;
+  for (const section of SETTINGS_SECTIONS) {
+    const el = document.getElementById(sectionDomId(section.id));
+    if (!el) continue;
+    if (el.getBoundingClientRect().top - containerTop <= lineOffset) {
+      current = section.id;
+    }
+  }
+  // 滚动到底时强制点亮最后一项（末段高度不足时无法越过基准线）。
+  if (container.scrollTop + container.clientHeight >= container.scrollHeight - 8) {
+    return SETTINGS_SECTIONS[SETTINGS_SECTIONS.length - 1].id;
+  }
+  return current;
+}
+
 export function SettingsPage() {
   const navigate = useNavigate();
   const queryClient = useQueryClient();
   const fileRef = useRef<HTMLInputElement>(null);
+  const contentRef = useRef<HTMLDivElement>(null);
+  const [activeSection, setActiveSection] = useState<(typeof SETTINGS_SECTIONS)[number]["id"]>(
+    SETTINGS_SECTIONS[0].id,
+  );
+
+  const handleContentScroll = () => {
+    const container = contentRef.current;
+    if (!container) return;
+    setActiveSection(computeActiveSection(container));
+  };
+
+  const jumpToSection = (id: SettingsSectionId) => {
+    setActiveSection(id);
+    document
+      .getElementById(sectionDomId(id))
+      ?.scrollIntoView({ behavior: "smooth", block: "start" });
+  };
+
   const healthQuery = useQuery({
     queryKey: ["app", "health"],
     queryFn: () => ipc.appHealth(),
@@ -349,7 +408,37 @@ export function SettingsPage() {
 
   return (
     <PageScaffold title="设置" description="备份、权限、快捷键与隐私说明">
-      <div className="mx-auto flex max-w-3xl flex-col gap-6 p-4">
+      <div className="flex h-full min-h-0">
+        <nav
+          aria-label="设置分区"
+          className="w-40 shrink-0 overflow-y-auto border-r border-border px-2 py-3"
+        >
+          <ul className="space-y-0.5">
+            {SETTINGS_SECTIONS.map((section) => (
+              <li key={section.id}>
+                <button
+                  type="button"
+                  aria-current={activeSection === section.id || undefined}
+                  onClick={() => jumpToSection(section.id)}
+                  className={cn(
+                    "w-full rounded-[var(--radius-control)] px-2 py-1.5 text-left text-[12px] transition-colors",
+                    activeSection === section.id
+                      ? "bg-row-active font-medium text-foreground"
+                      : "text-muted hover:bg-row-hover hover:text-foreground",
+                  )}
+                >
+                  {section.label}
+                </button>
+              </li>
+            ))}
+          </ul>
+        </nav>
+        <div
+          ref={contentRef}
+          onScroll={handleContentScroll}
+          className="min-w-0 flex-1 overflow-y-auto"
+        >
+          <div className="mx-auto flex max-w-3xl flex-col gap-6 p-4">
         {message ? (
           <div className="rounded-[var(--radius-panel)] border border-border bg-surface-raised px-3 py-2 text-[12px]">
             {message}
@@ -362,7 +451,7 @@ export function SettingsPage() {
           </div>
         ) : null}
 
-        <section className="rounded-[var(--radius-panel)] border border-border bg-surface-raised p-4">
+        <section id="settings-rhythm" className="scroll-mt-3 rounded-[var(--radius-panel)] border border-border bg-surface-raised p-4">
           <h2 className="text-[13px] font-semibold">工作节奏</h2>
           <p className="mt-1 text-[12px] text-muted">
             每周回顾汇总收件箱、逾期、等待等待整理信号，不含效率评分。
@@ -441,7 +530,7 @@ export function SettingsPage() {
           </div>
         </section>
 
-        <section className="rounded-[var(--radius-panel)] border border-border bg-surface-raised p-4">
+        <section id="settings-subtasks" className="scroll-mt-3 rounded-[var(--radius-panel)] border border-border bg-surface-raised p-4">
           <h2 className="text-[13px] font-semibold">子任务</h2>
           <p className="mt-1 text-[12px] text-muted">
             任务可嵌套多层子任务；以下是完成状态的聚合规则。
@@ -478,7 +567,7 @@ export function SettingsPage() {
           ) : null}
         </section>
 
-        <section className="rounded-[var(--radius-panel)] border border-border bg-surface-raised p-4">
+        <section id="settings-app-status" className="scroll-mt-3 rounded-[var(--radius-panel)] border border-border bg-surface-raised p-4">
           <h2 className="text-[13px] font-semibold">应用状态</h2>
           {healthQuery.isLoading ? (
             <p className="mt-2 text-[12px] text-muted">检查中…</p>
@@ -510,7 +599,7 @@ export function SettingsPage() {
           ) : null}
         </section>
 
-        <section className="rounded-[var(--radius-panel)] border border-border bg-surface-raised p-4">
+        <section id="settings-general" className="scroll-mt-3 rounded-[var(--radius-panel)] border border-border bg-surface-raised p-4">
           <h2 className="text-[13px] font-semibold">通用</h2>
           <div className="mt-3 space-y-3 text-[12px]">
             <div>
@@ -558,7 +647,7 @@ export function SettingsPage() {
         </section>
 
         {isAppUpdaterSupported() ? (
-          <section className="rounded-[var(--radius-panel)] border border-border bg-surface-raised p-4">
+          <section id="settings-updates" className="scroll-mt-3 rounded-[var(--radius-panel)] border border-border bg-surface-raised p-4">
             <h2 className="text-[13px] font-semibold">软件更新</h2>
             <p className="mt-1 text-[12px] text-muted">
               从 GitHub Release 检查签名更新包。更新仅替换应用本身，不会修改本地数据库。
@@ -634,7 +723,7 @@ export function SettingsPage() {
           </section>
         ) : null}
 
-        <section className="rounded-[var(--radius-panel)] border border-border bg-surface-raised p-4">
+        <section id="settings-shortcuts" className="scroll-mt-3 rounded-[var(--radius-panel)] border border-border bg-surface-raised p-4">
           <h2 className="text-[13px] font-semibold">快捷键</h2>
           <p className="mt-1 text-[12px] text-muted">
             全局快捷键在后台也可唤起。点击「更改」后按下新组合；保存后立即重新注册，无需重启。
@@ -671,7 +760,7 @@ export function SettingsPage() {
           ) : null}
         </section>
 
-        <section className="rounded-[var(--radius-panel)] border border-border bg-surface-raised p-4">
+        <section id="settings-quick-capture-syntax" className="scroll-mt-3 rounded-[var(--radius-panel)] border border-border bg-surface-raised p-4">
           <h2 className="text-[13px] font-semibold">快速记录语法</h2>
           <p className="mt-1 text-[12px] text-muted">
             在快速窗口「记录 → 任务/提醒」中输入自然语言，Trove 会解析日期、标签与优先级。完整说明见帮助文档。
@@ -686,7 +775,7 @@ export function SettingsPage() {
           </dl>
         </section>
 
-        <section className="rounded-[var(--radius-panel)] border border-border bg-surface-raised p-4">
+        <section id="settings-templates" className="scroll-mt-3 rounded-[var(--radius-panel)] border border-border bg-surface-raised p-4">
           <h2 className="text-[13px] font-semibold">模板</h2>
           <p className="mt-1 text-[12px] text-muted">
             在命令面板搜索「模板」可一键应用。相对日期在应用时解析为当天偏移。
@@ -1023,7 +1112,7 @@ export function SettingsPage() {
           </div>
         ) : null}
 
-        <section className="rounded-[var(--radius-panel)] border border-border bg-surface-raised p-4">
+        <section id="settings-clipboard" className="scroll-mt-3 rounded-[var(--radius-panel)] border border-border bg-surface-raised p-4">
           <h2 className="text-[13px] font-semibold">剪切板</h2>
           <p className="mt-1 text-[12px] text-muted">
             文本历史仅保存在本机。无法仅凭内容准确识别所有密码或验证码；请用暂停与排除应用保护敏感复制。
@@ -1091,7 +1180,7 @@ export function SettingsPage() {
           ) : null}
         </section>
 
-        <section className="rounded-[var(--radius-panel)] border border-border bg-surface-raised p-4">
+        <section id="settings-backup" className="scroll-mt-3 rounded-[var(--radius-panel)] border border-border bg-surface-raised p-4">
           <h2 className="text-[13px] font-semibold">备份与数据</h2>
           <p className="mt-1 text-[12px] text-muted">
             自动本地备份保存在应用数据目录。导入会覆盖当前业务数据，导入前会自动备份。
@@ -1228,15 +1317,19 @@ export function SettingsPage() {
           <CsvTasksSection onMessage={setMessage} />
         </section>
 
+        <div id="settings-automation" className="scroll-mt-3">
         <AutomationRulesSection
           settings={settings}
           onSaveSettings={(next) => saveSettings.mutate(next)}
           onMessage={setMessage}
         />
+        </div>
 
+        <div id="settings-ai" className="scroll-mt-3">
         {settings ? <AIAssistSection settings={settings} /> : null}
+        </div>
 
-        <section className="rounded-[var(--radius-panel)] border border-border bg-surface-raised p-4">
+        <section id="settings-privacy" className="scroll-mt-3 rounded-[var(--radius-panel)] border border-border bg-surface-raised p-4">
           <h2 className="text-[13px] font-semibold">权限与隐私</h2>
           <p className="mt-1 text-[12px] text-muted">
             所有业务数据保存在本机 SQLite，不上传云端。日志不记录任务正文、记忆正文或剪切板内容。
@@ -1259,6 +1352,8 @@ export function SettingsPage() {
             </ul>
           ) : null}
         </section>
+          </div>
+        </div>
       </div>
     </PageScaffold>
   );
