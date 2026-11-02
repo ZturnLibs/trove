@@ -680,3 +680,24 @@ roadmap N3：快捷搜索此前调 searchQuery 未传 types（协议已有，前
 ### Status
 
 [OK] **Completed**
+
+
+## Session 31: 今日页快速添加确认键可配置（Enter / ⌘Ctrl+Enter）
+
+**Date**: 2026-11-02
+**Task**: 今日页快速添加确认键可配置（Enter / ⌘Ctrl+Enter）
+**Branch**: `main`
+
+### Summary
+
+需求实现：AppSettings.quick_add_submit_key（enter|modEnter，默认 enter，JSON 默认值兼容无迁移）；TodayPage composer 按 shouldSubmitQuickAdd 纯函数判定（modEnter 模式裸 Enter 不动作），placeholder 动态提示（Enter 添加 / ⌘↩ 添加 / Ctrl+↩ 添加）；设置页工作节奏区块单选。vitest +8（87→95）、rust 默认值断言补齐（200 绿）。PR CI 三 job 全绿。任务归档
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `df843dc` | (see git log) |
+
+### Status
+
+[OK] **Completed**
