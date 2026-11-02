@@ -382,6 +382,47 @@ export function SettingsPage() {
               今日页智能排序建议（本地算法，可采纳或忽略）
             </label>
           ) : null}
+          {settings ? (
+            <div className="mt-3 text-[12px]">
+              <p className="text-muted">
+                今日页底部快速添加的确认方式（默认
+                {settings.quickAddSubmitKey === "modEnter"
+                  ? " ⌘/Ctrl+Enter"
+                  : " Enter"}
+                ）
+              </p>
+              <div className="mt-1.5 flex flex-col gap-1.5">
+                <label className="flex items-center gap-2">
+                  <input
+                    type="radio"
+                    name="quick-add-submit-key"
+                    checked={settings.quickAddSubmitKey === "enter"}
+                    onChange={() =>
+                      saveSettings.mutate({
+                        ...settings,
+                        quickAddSubmitKey: "enter",
+                      })
+                    }
+                  />
+                  Enter 确认添加
+                </label>
+                <label className="flex items-center gap-2">
+                  <input
+                    type="radio"
+                    name="quick-add-submit-key"
+                    checked={settings.quickAddSubmitKey === "modEnter"}
+                    onChange={() =>
+                      saveSettings.mutate({
+                        ...settings,
+                        quickAddSubmitKey: "modEnter",
+                      })
+                    }
+                  />
+                  ⌘(Cmd/Ctrl)+Enter 确认添加
+                </label>
+              </div>
+            </div>
+          ) : null}
           <div className="mt-3 flex flex-wrap gap-2">
             <Button
               size="sm"

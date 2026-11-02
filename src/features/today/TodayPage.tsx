@@ -23,6 +23,7 @@ import { DailySuggestionsCard } from "@/features/today/DailySuggestionsCard";
 import { TaskDetailPanel } from "@/design-system/patterns/TaskDetailPanel";
 import { SortableTaskRow, TaskRow } from "@/design-system/patterns/TaskRow";
 import { EmptyState } from "@/components/PageScaffold";
+import { quickAddSubmitHint, shouldSubmitQuickAdd } from "./quickAddSubmit";
 import { NotificationPermissionBanner } from "@/components/NotificationPermissionBanner";
 import { Button } from "@/design-system/primitives/Button";
 import { ConfirmButton } from "@/design-system/patterns/ConfirmButton";
@@ -916,6 +917,9 @@ export function TodayPage() {
     quickAddMutation.mutate(value);
   };
 
+  const quickAddSubmitMode =
+    settingsQuery.data?.quickAddSubmitKey ?? "enter";
+
   const toggleMutation = useMutation({
     mutationFn: async (task: Task) => {
       if (task.status === "completed") await ipc.taskUncomplete(task.id);
@@ -1604,10 +1608,16 @@ export function TodayPage() {
                 setQuickTitle(e.target.value);
                 setQuickError(null);
               }}
-              placeholder="快速添加任务，如：明天下午三点回复客户…"
+              placeholder={`快速添加任务，如：明天下午三点回复客户…（${quickAddSubmitHint(quickAddSubmitMode)}）`}
               onKeyDown={(e) => {
                 if (e.nativeEvent.isComposing) return;
-                if (e.key === "Enter") {
+                if (
+                  shouldSubmitQuickAdd(
+                    e.key,
+                    e.metaKey || e.ctrlKey,
+                    quickAddSubmitMode,
+                  )
+                ) {
                   e.preventDefault();
                   submitQuickAdd();
                 }

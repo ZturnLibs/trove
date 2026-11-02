@@ -17,6 +17,8 @@ export type ShortcutSettings = {
   screenshotRegion: string;
 };
 
+export type QuickAddSubmitKey = "enter" | "modEnter";
+
 export type AppSettings = {
   theme: ThemePreference;
   launchAtLogin: boolean;
@@ -32,6 +34,7 @@ export type AppSettings = {
   backupRetentionCount: number;
   onboardingCompleted: boolean;
   lastFocusCarryDismissedDate?: string | null;
+  quickAddSubmitKey: QuickAddSubmitKey;
   automationEnabled: boolean;
   subtaskAutoCompleteParent: boolean;
   subtaskCascadeChildren: boolean;
