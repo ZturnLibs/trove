@@ -8,7 +8,7 @@
 
 <!-- @@@auto:current-status -->
 - **Active File**: `journal-1.md`
-- **Total Sessions**: 31
+- **Total Sessions**: 32
 - **Last Active**: 2026-11-02
 <!-- @@@/auto:current-status -->
 
@@ -19,7 +19,7 @@
 <!-- @@@auto:active-documents -->
 | File | Lines | Status |
 |------|-------|--------|
-| `journal-1.md` | ~703 | Active |
+| `journal-1.md` | ~724 | Active |
 <!-- @@@/auto:active-documents -->
 
 ---
@@ -29,6 +29,7 @@
 <!-- @@@auto:session-history -->
 | # | Date | Title | Commits | Branch |
 |---|------|-------|---------|--------|
+| 32 | 2026-11-02 | v2.5.0 发版——快速添加确认键可配置上线 | `e887e61` | `main` |
 | 31 | 2026-11-02 | 今日页快速添加确认键可配置（Enter / ⌘Ctrl+Enter） | `df843dc` | `main` |
 | 30 | 2026-11-02 | v2.4.2 发版——macOS 升级白屏修复上线 | `d654e49` | `main` |
 | 29 | 2026-11-02 | 修复 macOS 升级后白屏——重启改经 LaunchServices（PR #60） | `7257ecf` | `main` |
