@@ -37,8 +37,24 @@ pub struct AppSettings {
     pub onboarding_completed: bool,
     #[serde(default)]
     pub last_focus_carry_dismissed_date: Option<String>,
+    #[serde(default = "default_quick_add_submit_key")]
+    pub quick_add_submit_key: QuickAddSubmitKey,
     #[serde(default)]
     pub ai: AIConfig,
+}
+
+/// 今日页快速添加的确认键（`quick_add_submit_key`）。
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub enum QuickAddSubmitKey {
+    /// Enter 直接提交（默认，保持既有习惯）。
+    Enter,
+    /// ⌘(Cmd/Ctrl)+Enter 提交。
+    ModEnter,
+}
+
+fn default_quick_add_submit_key() -> QuickAddSubmitKey {
+    QuickAddSubmitKey::Enter
 }
 
 fn default_true() -> bool {
@@ -107,6 +123,7 @@ impl Default for AppSettings {
             backup_retention_count: 10,
             onboarding_completed: false,
             last_focus_carry_dismissed_date: None,
+            quick_add_submit_key: QuickAddSubmitKey::Enter,
             ai: AIConfig::default(),
         }
     }
@@ -286,6 +303,7 @@ mod tests {
         assert_eq!(settings.ai, AIConfig::default());
         assert!(settings.subtask_auto_complete_parent);
         assert!(settings.subtask_cascade_children);
+        assert_eq!(settings.quick_add_submit_key, QuickAddSubmitKey::Enter);
 
         let mut updated = settings.clone();
         updated.theme = ThemePreference::Dark;

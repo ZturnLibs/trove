@@ -1,0 +1,55 @@
+import { describe, expect, it } from "vitest";
+import {
+  quickAddSubmitHint,
+  shouldSubmitQuickAdd,
+} from "./quickAddSubmit";
+
+describe("shouldSubmitQuickAdd", () => {
+  it("enter 模式：裸 Enter 提交", () => {
+    expect(shouldSubmitQuickAdd("Enter", false, "enter")).toBe(true);
+  });
+
+  it("enter 模式：⌘/Ctrl+Enter 同样提交（既有习惯超集）", () => {
+    expect(shouldSubmitQuickAdd("Enter", true, "enter")).toBe(true);
+  });
+
+  it("enter 模式：其他键不提交", () => {
+    expect(shouldSubmitQuickAdd("Escape", false, "enter")).toBe(false);
+  });
+
+  it("modEnter 模式：裸 Enter 不提交", () => {
+    expect(shouldSubmitQuickAdd("Enter", false, "modEnter")).toBe(false);
+  });
+
+  it("modEnter 模式：⌘/Ctrl+Enter 提交", () => {
+    expect(shouldSubmitQuickAdd("Enter", true, "modEnter")).toBe(true);
+  });
+
+  it("modEnter 模式：其他键不提交", () => {
+    expect(shouldSubmitQuickAdd("Escape", true, "modEnter")).toBe(false);
+  });
+});
+
+describe("quickAddSubmitHint", () => {
+  it("enter 模式提示 Enter 添加", () => {
+    expect(quickAddSubmitHint("enter")).toBe("Enter 添加");
+  });
+
+  it("modEnter 模式：mac 提示 ⌘↩，其他平台提示 Ctrl+↩", () => {
+    const original = navigator.platform;
+    Object.defineProperty(navigator, "platform", {
+      value: "MacIntel",
+      configurable: true,
+    });
+    expect(quickAddSubmitHint("modEnter")).toBe("⌘↩ 添加");
+    Object.defineProperty(navigator, "platform", {
+      value: "Win32",
+      configurable: true,
+    });
+    expect(quickAddSubmitHint("modEnter")).toBe("Ctrl+↩ 添加");
+    Object.defineProperty(navigator, "platform", {
+      value: original,
+      configurable: true,
+    });
+  });
+});
