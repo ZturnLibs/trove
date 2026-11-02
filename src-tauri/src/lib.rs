@@ -601,6 +601,7 @@ pub fn run() {
         })
         .invoke_handler(tauri::generate_handler![
             commands::app_health,
+            commands::app_relaunch,
             commands::settings_get,
             commands::settings_save,
             commands::settings_reset_shortcuts,

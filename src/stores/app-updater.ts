@@ -1,6 +1,6 @@
 import { create } from "zustand";
 import { check, type Update } from "@tauri-apps/plugin-updater";
-import { relaunch } from "@tauri-apps/plugin-process";
+import { invoke } from "@tauri-apps/api/core";
 
 export type UpdaterPhase =
   | "idle"
@@ -151,7 +151,8 @@ export const useAppUpdater = create<AppUpdaterState>((set, get) => ({
         }
       });
 
-      await relaunch();
+      // macOS 经 LaunchServices 重启（避免直 spawn 白屏），见 commands::app_relaunch
+      await invoke("app_relaunch");
     } catch (err) {
       set({
         phase: "error",
