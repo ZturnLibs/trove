@@ -596,3 +596,24 @@ roadmap N3：快捷搜索此前调 searchQuery 未传 types（协议已有，前
 ### Status
 
 [OK] **Completed**
+
+
+## Session 27: 修复剪切板图片不显示——缩略图双重 data URL 前缀（存量缺陷）
+
+**Date**: 2026-11-02
+**Task**: 修复剪切板图片不显示——缩略图双重 data URL 前缀（存量缺陷）
+**Branch**: `main`
+
+### Summary
+
+用户报告剪切板图片显示不了。定位：后端 thumb_base64 返回带 data:image/png;base64, 前缀的 data URL，而前端全部 6 处消费点统一自行拼同款前缀——双重前缀使 data URL 无效，图片从未渲染成功（v1.2 起存量，全 app 面：剪贴板/统一搜索/附件区/专注关联）。修复后端单点改回裸 base64 + 回归测试（载荷无前缀且解码为 PNG）。lib 200 绿
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `ed8dfba` | (see git log) |
+
+### Status
+
+[OK] **Completed**
