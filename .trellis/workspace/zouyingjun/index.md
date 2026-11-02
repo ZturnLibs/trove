@@ -8,7 +8,7 @@
 
 <!-- @@@auto:current-status -->
 - **Active File**: `journal-1.md`
-- **Total Sessions**: 28
+- **Total Sessions**: 29
 - **Last Active**: 2026-11-02
 <!-- @@@/auto:current-status -->
 
@@ -19,7 +19,7 @@
 <!-- @@@auto:active-documents -->
 | File | Lines | Status |
 |------|-------|--------|
-| `journal-1.md` | ~640 | Active |
+| `journal-1.md` | ~661 | Active |
 <!-- @@@/auto:active-documents -->
 
 ---
@@ -29,6 +29,7 @@
 <!-- @@@auto:session-history -->
 | # | Date | Title | Commits | Branch |
 |---|------|-------|---------|--------|
+| 29 | 2026-11-02 | 修复 macOS 升级后白屏——重启改经 LaunchServices（PR #60） | `7257ecf` | `main` |
 | 28 | 2026-11-02 | v2.4.1 发版——剪切板图片显示修复上线 | `532f479` | `main` |
 | 27 | 2026-11-02 | 修复剪切板图片不显示——缩略图双重 data URL 前缀（存量缺陷） | `ed8dfba` | `main` |
 | 26 | 2026-10-29 | e2e connect 带重试——瞬态连接错误修复（PR #53）+ CI actions Node 24（PR #52） | `08f8d89` | `main` |

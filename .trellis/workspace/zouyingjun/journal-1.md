@@ -638,3 +638,24 @@ roadmap N3：快捷搜索此前调 searchQuery 未传 types（协议已有，前
 ### Status
 
 [OK] **Completed**
+
+
+## Session 29: 修复 macOS 升级后白屏——重启改经 LaunchServices（PR #60）
+
+**Date**: 2026-11-02
+**Task**: 修复 macOS 升级后白屏——重启改经 LaunchServices（PR #60）
+**Branch**: `main`
+
+### Summary
+
+用户报告 v2.4.1 升级后启动白屏。取证链：bundle 前端 chunk 两版本一致（排除前端包差异）→ 统一日志实证 updater relaunch 实例 launchedByLS=0 且 WebContent 13s 挂起（non visible）→ 代码级根因 tauri process::restart restart_macos_app 直 spawn 二进制绕过 LaunchServices。修复 app_relaunch 命令（延时 400ms 经 LS open + 旧实例退出），updater 改调；机制本机实证（新实例 launchedByLS=1 foreground=1 渲染正常，orca 截图）。lib 200/typecheck/unit 87/build 绿
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `7257ecf` | (see git log) |
+
+### Status
+
+[OK] **Completed**
