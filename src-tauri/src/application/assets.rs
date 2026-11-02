@@ -175,14 +175,17 @@ impl AssetStore {
         std::fs::read(path).map_err(io_err)
     }
 
+    /// 返回**裸 base64**（不带 data URL 前缀）——前端所有消费点统一自行拼
+    /// `data:image/png;base64,` 前缀；此处带前缀会导致前端双重前缀、图片
+    /// 无法渲染（v1.2 起的存量缺陷）。
     pub fn thumb_base64(&self, asset: &Asset) -> Result<Option<String>, DomainError> {
         let bytes = self.read_thumb_bytes(asset)?;
         if bytes.is_empty() {
             return Ok(None);
         }
-        Ok(Some(format!(
-            "data:image/png;base64,{}",
-            base64::Engine::encode(&base64::engine::general_purpose::STANDARD, bytes)
+        Ok(Some(base64::Engine::encode(
+            &base64::engine::general_purpose::STANDARD,
+            bytes,
         )))
     }
 
@@ -327,6 +330,24 @@ mod tests {
             [asset_id],
         )
         .unwrap();
+    }
+
+    #[test]
+    fn thumb_base64_is_raw_base64_without_data_url_prefix() {
+        let dir = tempdir().unwrap();
+        let store = store(dir.path());
+        let stored = store.store_rgba_image(2, 2, &rgba()).unwrap();
+
+        let thumb = store.thumb_base64(&stored.asset).unwrap().unwrap();
+        // 前端消费点统一自行拼 data URL 前缀；载荷必须是裸 base64。
+        assert!(!thumb.starts_with("data:"));
+
+        use base64::Engine as _;
+        let bytes = base64::engine::general_purpose::STANDARD
+            .decode(&thumb)
+            .expect("载荷必须是合法 base64");
+        // PNG 签名：\x89 P N G。
+        assert!(bytes.starts_with(&[0x89, b'P', b'N', b'G']));
     }
 
     #[test]
