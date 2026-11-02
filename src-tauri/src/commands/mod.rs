@@ -1325,6 +1325,39 @@ pub fn memory_link_mention(
         .map_err(Into::into)
 }
 
+/// 应用内更新后的重启（N1/白屏修复）：
+/// macOS 上 tauri 的 process::restart 直 spawn 二进制（不经 LaunchServices），
+/// 新实例 launchedByLS=0 → 应用未注册/激活 → WKWebView 判定页面 non-visible
+/// → WebProcess 挂起 → 白屏（run 40888705017 时期用户实证）。
+/// 这里改为「延时经 LaunchServices `open` 启动新实例 + 旧实例退出」：
+/// 新实例 launchedByLS=1，正常激活渲染。
+#[tauri::command]
+pub fn app_relaunch(app: tauri::AppHandle) {
+    #[cfg(target_os = "macos")]
+    {
+        use std::process::Command;
+        let exe = std::env::current_exe().expect("无法定位当前可执行文件");
+        // exe: <Bundle>/Contents/MacOS/trove → bundle 根为上两级目录。
+        let bundle = exe
+            .ancestors()
+            .nth(2)
+            .expect("无法定位应用包目录")
+            .to_path_buf();
+        // 延时 400ms 后经 LS `open` 启动（此时旧实例已退出，新实例成为主实例）。
+        // `$1` 传参避免路径空格转义问题。
+        Command::new("sh")
+            .args(["-c", "sleep 0.4; open \"$1\"", "sh"])
+            .arg(&bundle)
+            .spawn()
+            .expect("重启调度失败");
+        app.exit(0);
+    }
+    #[cfg(not(target_os = "macos"))]
+    {
+        app.restart();
+    }
+}
+
 #[derive(Debug, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct LinkedAsset {
