@@ -617,3 +617,24 @@ roadmap N3：快捷搜索此前调 searchQuery 未传 types（协议已有，前
 ### Status
 
 [OK] **Completed**
+
+
+## Session 28: v2.4.1 发版——剪切板图片显示修复上线
+
+**Date**: 2026-11-02
+**Task**: v2.4.1 发版——剪切板图片显示修复上线
+**Branch**: `main`
+
+### Summary
+
+发版执行：notes（PR #57）+ 版本 bump（PR #58）+ tag v2.4.1。release workflow 4 job 全绿（含 Linux 第二次验证）；资产全平台 14 件；发布体已替换为手写 notes。上游含 PR #55 剪切板缩略图修复、#53 e2e connect 重试、#52 CI actions Node 24
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `532f479` | (see git log) |
+
+### Status
+
+[OK] **Completed**
