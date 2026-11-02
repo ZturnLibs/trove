@@ -8,7 +8,7 @@
 
 <!-- @@@auto:current-status -->
 - **Active File**: `journal-1.md`
-- **Total Sessions**: 29
+- **Total Sessions**: 30
 - **Last Active**: 2026-11-02
 <!-- @@@/auto:current-status -->
 
@@ -19,7 +19,7 @@
 <!-- @@@auto:active-documents -->
 | File | Lines | Status |
 |------|-------|--------|
-| `journal-1.md` | ~661 | Active |
+| `journal-1.md` | ~682 | Active |
 <!-- @@@/auto:active-documents -->
 
 ---
@@ -29,6 +29,7 @@
 <!-- @@@auto:session-history -->
 | # | Date | Title | Commits | Branch |
 |---|------|-------|---------|--------|
+| 30 | 2026-11-02 | v2.4.2 发版——macOS 升级白屏修复上线 | `d654e49` | `main` |
 | 29 | 2026-11-02 | 修复 macOS 升级后白屏——重启改经 LaunchServices（PR #60） | `7257ecf` | `main` |
 | 28 | 2026-11-02 | v2.4.1 发版——剪切板图片显示修复上线 | `532f479` | `main` |
 | 27 | 2026-11-02 | 修复剪切板图片不显示——缩略图双重 data URL 前缀（存量缺陷） | `ed8dfba` | `main` |
