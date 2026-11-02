@@ -722,3 +722,24 @@ roadmap N3：快捷搜索此前调 searchQuery 未传 types（协议已有，前
 ### Status
 
 [OK] **Completed**
+
+
+## Session 33: 设置页左侧分区导航——快速跳转 + scroll-spy（PR #70）
+
+**Date**: 2026-11-02
+**Task**: 设置页左侧分区导航——快速跳转 + scroll-spy（PR #70）
+**Branch**: `main`
+
+### Summary
+
+设置页 13 分区改两栏：左 sticky 导航（点击 smooth 跳转）+ 右内容自持滚动；scroll-spy 高亮当前分区（滚底强制末项）；AutomationRules/AIAssist 组件区块包 div 挂 settings-* 锚点。orca 截图实证交互（13 项全列/初始高亮/点击跳转+高亮同步）。typecheck/unit 95/build 绿，PR CI 三 job 全绿
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `083c50c` | (see git log) |
+
+### Status
+
+[OK] **Completed**
