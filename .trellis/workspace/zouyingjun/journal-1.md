@@ -701,3 +701,24 @@ roadmap N3：快捷搜索此前调 searchQuery 未传 types（协议已有，前
 ### Status
 
 [OK] **Completed**
+
+
+## Session 32: v2.5.0 发版——快速添加确认键可配置上线
+
+**Date**: 2026-11-02
+**Task**: v2.5.0 发版——快速添加确认键可配置上线
+**Branch**: `main`
+
+### Summary
+
+发版执行：notes（PR #67）+ 版本 bump（PR #68）+ tag v2.5.0。release workflow 4 job 全绿；资产全平台 14 件；发布体已替换为手写 notes。上游含 PR #65 今日页快速添加确认键可配置（Enter / ⌘Ctrl+Enter + 设置项 + placeholder 提示）
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `e887e61` | (see git log) |
+
+### Status
+
+[OK] **Completed**
