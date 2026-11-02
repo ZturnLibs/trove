@@ -659,3 +659,24 @@ roadmap N3：快捷搜索此前调 searchQuery 未传 types（协议已有，前
 ### Status
 
 [OK] **Completed**
+
+
+## Session 30: v2.4.2 发版——macOS 升级白屏修复上线
+
+**Date**: 2026-11-02
+**Task**: v2.4.2 发版——macOS 升级白屏修复上线
+**Branch**: `main`
+
+### Summary
+
+发版执行：notes（PR #62）+ 版本 bump（PR #63）+ tag v2.4.2。release workflow 4 job 全绿（Linux 第三次验证）；资产全平台 14 件；发布体已替换为手写 notes。上游含 PR #60 macOS 升级白屏修复（LaunchServices 重启）
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `d654e49` | (see git log) |
+
+### Status
+
+[OK] **Completed**
