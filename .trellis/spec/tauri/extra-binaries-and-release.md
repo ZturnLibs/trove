@@ -73,3 +73,14 @@ default-run = "trove"
 ```
 
 Keep extra bin names in `scripts/lipo-extra-bins.mjs` (`extraBins`) in sync with `src/bin/*.rs`.
+
+
+### 已知抖动：三矩阵并发 create-release（2026-11-03 实证，v2.5.1）
+
+- 症状：release workflow 中**最后到达**的 publish job 失败，日志
+  `##[error]Validation Failed: {"code":"already_exists","field":"tag_name"}`——
+  另一矩阵 job 已抢先创建 Release。
+- 处置：`gh run rerun <run-id> --failed` 重跑失败 job 即可；Release 已存在时
+  tauri-action 走上传路径，重跑后三平台资产齐套（v2.5.1 实证）。
+- 根因：tauri-action 每矩阵 job 各自 create-release，无互斥；上游已知竞态，
+  暂不做 workflow 加固（重跑成本低）。
