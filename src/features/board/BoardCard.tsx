@@ -1,3 +1,4 @@
+import { Input } from "@/design-system/primitives/Input";
 import { useEffect, useState } from "react";
 import { useSortable } from "@dnd-kit/sortable";
 import { CSS } from "@dnd-kit/utilities";
@@ -185,7 +186,7 @@ export function BoardCardBody({
       ) : null}
       <div className="min-w-0 flex-1">
         {editing && onRename ? (
-          <input
+          <Input
             autoFocus
             defaultValue={task.title}
             onClick={(event) => event.stopPropagation()}

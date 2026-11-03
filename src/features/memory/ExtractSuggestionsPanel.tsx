@@ -1,3 +1,4 @@
+import { Checkbox } from "@/design-system/primitives/Checkbox";
 import { useMemo, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { ipc, type AISuggestionRecord } from "@/ipc/client";
@@ -110,8 +111,7 @@ export function ExtractSuggestionsPanel({
         {items.map((item, idx) => (
           <li key={idx} className="rounded border border-border p-2">
             <label className="flex items-start gap-2">
-              <input
-                type="checkbox"
+              <Checkbox
                 className="mt-0.5"
                 checked={selected.has(idx)}
                 onChange={() => toggle(idx)}

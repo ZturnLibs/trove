@@ -1,3 +1,5 @@
+import { Input } from "@/design-system/primitives/Input";
+import { Select } from "@/design-system/primitives/Select";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useLocation, useNavigate, useParams } from "react-router-dom";
 import {
@@ -20,7 +22,6 @@ import { TaskDetailPanel } from "@/design-system/patterns/TaskDetailPanel";
 import { SortableTaskRow, TaskRow } from "@/design-system/patterns/TaskRow";
 import { EmptyState } from "@/components/PageScaffold";
 import { Button } from "@/design-system/primitives/Button";
-import { Input } from "@/design-system/primitives/Input";
 import { ConfirmButton } from "@/design-system/patterns/ConfirmButton";
 import {
   ipc,
@@ -790,7 +791,7 @@ export function TasksPage() {
       }
       actions={
         <>
-          <select
+          <Select
             className="h-7 rounded-[var(--radius-control)] border border-border bg-surface-raised px-2 text-[12px]"
             value={smart}
             onChange={(e) => {
@@ -807,7 +808,7 @@ export function TasksPage() {
                 {item.label}
               </option>
             ))}
-          </select>
+          </Select>
           {smart === "none" ? (
             <>
               <Input
@@ -816,7 +817,7 @@ export function TasksPage() {
                 onChange={(e) => setSearch(e.target.value)}
                 placeholder="搜索任务…"
               />
-              <select
+              <Select
                 className="h-7 rounded-[var(--radius-control)] border border-border bg-surface-raised px-2 text-[12px]"
                 value={listGroupId ? `group:${listGroupId}` : listId}
                 onChange={(e) => {
@@ -864,7 +865,7 @@ export function TasksPage() {
                     ))}
                   </optgroup>
                 ) : null}
-              </select>
+              </Select>
               {smart === "none" && listId === "all" && !listGroupId ? (
                 <Button
                   size="sm"
@@ -874,7 +875,7 @@ export function TasksPage() {
                   按清单分区
                 </Button>
               ) : null}
-              <select
+              <Select
                 className="h-7 rounded-[var(--radius-control)] border border-border bg-surface-raised px-2 text-[12px]"
                 value={status}
                 onChange={(e) =>
@@ -885,8 +886,8 @@ export function TasksPage() {
                 <option value="todo">待办</option>
                 <option value="completed">已完成</option>
                 <option value="archived">已归档</option>
-              </select>
-              <select
+              </Select>
+              <Select
                 className="h-7 rounded-[var(--radius-control)] border border-border bg-surface-raised px-2 text-[12px]"
                 value={priority}
                 onChange={(e) =>
@@ -898,8 +899,8 @@ export function TasksPage() {
                 <option value="medium">中</option>
                 <option value="low">低</option>
                 <option value="none">无</option>
-              </select>
-              <select
+              </Select>
+              <Select
                 className="h-7 rounded-[var(--radius-control)] border border-border bg-surface-raised px-2 text-[12px]"
                 value={tagId ?? "all"}
                 onChange={(e) =>
@@ -912,7 +913,7 @@ export function TasksPage() {
                     {tag.name}
                   </option>
                 ))}
-              </select>
+              </Select>
               <Button
                 size="sm"
                 variant={showDeferred ? "secondary" : "ghost"}
@@ -943,7 +944,7 @@ export function TasksPage() {
           ) : null}
           {(savedViewsQuery.data ?? []).length > 0 ? (
             <>
-              <select
+              <Select
                 className="h-7 rounded-[var(--radius-control)] border border-border bg-surface-raised px-2 text-[12px]"
                 value={selectedViewId}
                 onChange={(e) => {
@@ -959,7 +960,7 @@ export function TasksPage() {
                     {view.name}
                   </option>
                 ))}
-              </select>
+              </Select>
               {selectedViewId ? (
                 <ConfirmButton
                   size="sm"

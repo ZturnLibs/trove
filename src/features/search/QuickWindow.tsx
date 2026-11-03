@@ -1,9 +1,11 @@
+import { Input } from "@/design-system/primitives/Input";
+import { Select } from "@/design-system/primitives/Select";
+import { Textarea } from "@/design-system/primitives/Textarea";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { emit, listen } from "@tauri-apps/api/event";
 import { useQuery } from "@tanstack/react-query";
 import { RecurrencePicker } from "@/design-system/patterns/RecurrencePicker";
 import { Button } from "@/design-system/primitives/Button";
-import { Input } from "@/design-system/primitives/Input";
 import {
   ipc,
   type SemanticHit,
@@ -651,7 +653,7 @@ export function QuickWindow() {
               <div className="grid grid-cols-2 gap-2">
                 <label className="col-span-2 space-y-1 text-[11px] text-muted">
                   清单
-                  <select
+                  <Select
                     className="h-8 w-full rounded-[var(--radius-control)] border border-border bg-surface-raised px-2 text-[13px] text-foreground"
                     value={captureListId}
                     onChange={(e) => setCaptureListId(e.target.value)}
@@ -677,7 +679,7 @@ export function QuickWindow() {
                         ))}
                       </optgroup>
                     ) : null}
-                  </select>
+                  </Select>
                 </label>
                 <label className="space-y-1 text-[11px] text-muted">
                   截止日期 <span className="text-muted/70">⌘2</span>
@@ -721,7 +723,7 @@ export function QuickWindow() {
                 </label>
                 <label className="col-span-2 space-y-1 text-[11px] text-muted">
                   优先级 <span className="text-muted/70">⌘5 · p1</span>
-                  <select
+                  <Select
                     ref={priorityRef}
                     className="h-8 w-full rounded-[var(--radius-control)] border border-border bg-surface-raised px-2 text-[13px] text-foreground"
                     value={priority}
@@ -732,7 +734,7 @@ export function QuickWindow() {
                     <option value="low">低</option>
                     <option value="medium">中</option>
                     <option value="high">高</option>
-                  </select>
+                  </Select>
                 </label>
               </div>
               </>
@@ -765,7 +767,7 @@ export function QuickWindow() {
               </div>
             ) : null}
             {captureType === "memory" ? (
-              <textarea
+              <Textarea
                 value={body}
                 onChange={(e) => setBody(e.target.value)}
                 rows={6}

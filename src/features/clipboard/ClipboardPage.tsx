@@ -1,3 +1,6 @@
+import { Input } from "@/design-system/primitives/Input";
+import { Checkbox } from "@/design-system/primitives/Checkbox";
+import { Select } from "@/design-system/primitives/Select";
 import { useEffect, useMemo, useState, useCallback } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Star } from "lucide-react";
@@ -5,7 +8,6 @@ import { EmptyState } from "@/components/PageScaffold";
 import { PermissionBanner } from "@/components/PermissionBanner";
 import { Button } from "@/design-system/primitives/Button";
 import { ConfirmButton } from "@/design-system/patterns/ConfirmButton";
-import { Input } from "@/design-system/primitives/Input";
 import { SplitTaskLayout } from "@/features/tasks/TaskLayout";
 import { useDomainInvalidation } from "@/features/tasks/useDomainInvalidation";
 import {
@@ -536,16 +538,14 @@ export function ClipboardPage() {
         actions={
           <>
             <label className="flex items-center gap-1.5 text-[12px] text-muted">
-              <input
-                type="checkbox"
+              <Checkbox
                 checked={favoritesOnly}
                 onChange={(e) => setFavoritesOnly(e.target.checked)}
               />
               仅收藏
             </label>
             <label className="flex items-center gap-1.5 text-[12px] text-muted">
-              <input
-                type="checkbox"
+              <Checkbox
                 checked={codeOnly}
                 onChange={(e) => setCodeOnly(e.target.checked)}
               />
@@ -557,7 +557,7 @@ export function ClipboardPage() {
               onChange={(e) => setSearch(e.target.value)}
               placeholder="搜索历史…"
             />
-            <select
+            <Select
               className="h-8 rounded-[var(--radius-control)] border border-border bg-surface-raised px-2 text-[12px]"
               value={sourceApp}
               onChange={(e) => setSourceApp(e.target.value)}
@@ -568,8 +568,8 @@ export function ClipboardPage() {
                   {app}
                 </option>
               ))}
-            </select>
-            <select
+            </Select>
+            <Select
               className="h-8 rounded-[var(--radius-control)] border border-border bg-surface-raised px-2 text-[12px]"
               value={dateRange}
               onChange={(e) =>
@@ -579,7 +579,7 @@ export function ClipboardPage() {
               <option value="all">全部时间</option>
               <option value="7d">最近 7 天</option>
               <option value="30d">最近 30 天</option>
-            </select>
+            </Select>
             <Button
               size="sm"
               variant={capturing ? "secondary" : "default"}

@@ -1,3 +1,4 @@
+import { Input } from "@/design-system/primitives/Input";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { useLocation, useNavigate } from "react-router-dom";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
@@ -311,7 +312,7 @@ export function TaskSidebarTree() {
       {/* 新建行内输入 */}
       {draft ? (
         <div className="px-2 pb-1">
-          <input
+          <Input
             autoFocus
             className="h-6 w-full rounded-[var(--radius-control)] border border-border bg-surface-raised px-1.5 text-[12px]"
             placeholder={draft === "group" ? "分组名称…" : "清单名称…"}
@@ -711,7 +712,7 @@ function GroupRow({
         <FolderOpen className="h-3.5 w-3.5 shrink-0 text-muted" />
       )}
       {renamingValue !== null ? (
-        <input
+        <Input
           autoFocus
           className="h-5 w-full min-w-0 rounded border border-border bg-surface-raised px-1 text-[12px]"
           value={renamingValue}
@@ -782,7 +783,7 @@ function ListRow({
     >
       <ListTodo className="h-3.5 w-3.5 shrink-0" />
       {renamingValue !== null ? (
-        <input
+        <Input
           autoFocus
           className="h-5 w-full min-w-0 rounded border border-border bg-surface-raised px-1 text-[12px]"
           value={renamingValue}

@@ -1,3 +1,8 @@
+import { Input } from "@/design-system/primitives/Input";
+import { Checkbox } from "@/design-system/primitives/Checkbox";
+import { Radio } from "@/design-system/primitives/Radio";
+import { Select } from "@/design-system/primitives/Select";
+import { Textarea } from "@/design-system/primitives/Textarea";
 import { useEffect, useMemo, useRef, useState, useCallback } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Pin } from "lucide-react";
@@ -8,7 +13,6 @@ import { FileRefsSection } from "@/design-system/patterns/FileRefsSection";
 import { Button } from "@/design-system/primitives/Button";
 import { ConfirmButton } from "@/design-system/patterns/ConfirmButton";
 import { ExtractSuggestionsPanel } from "@/features/memory/ExtractSuggestionsPanel";
-import { Input } from "@/design-system/primitives/Input";
 import {
   NewTaskButton,
   SplitTaskLayout,
@@ -63,7 +67,7 @@ function WikilinkResolveDialog({
                 <div className="mt-2 flex flex-wrap gap-2">
                   {item.reason === "missing" ? (
                     <label className="flex items-center gap-1">
-                      <input
+                      <Radio
                         type="radio"
                         checked={choice.action === "create"}
                         onChange={() =>
@@ -78,7 +82,7 @@ function WikilinkResolveDialog({
                   ) : null}
                   {item.candidates.map((c) => (
                     <label key={c.id} className="flex items-center gap-1">
-                      <input
+                      <Radio
                         type="radio"
                         checked={
                           choice.action === "link" && choice.targetId === c.id
@@ -98,7 +102,7 @@ function WikilinkResolveDialog({
                     </label>
                   ))}
                   <label className="flex items-center gap-1">
-                    <input
+                    <Radio
                       type="radio"
                       checked={choice.action === "skip"}
                       onChange={() =>
@@ -323,8 +327,7 @@ function MemoryDetail({
           />
         </label>
         <label className="flex items-center gap-2 text-[12px] text-foreground">
-          <input
-            type="checkbox"
+          <Checkbox
             checked={draft.quickInsert}
             onChange={(e) => {
               const next = { ...draft, quickInsert: e.target.checked };
@@ -341,8 +344,7 @@ function MemoryDetail({
           可快速插入（文本片段）
         </label>
         <label className="flex items-center gap-2 text-[12px] text-foreground">
-          <input
-            type="checkbox"
+          <Checkbox
             checked={draft.sensitive}
             onChange={(e) => {
               const next = { ...draft, sensitive: e.target.checked };
@@ -380,7 +382,7 @@ function MemoryDetail({
             )}
           </div>
         ) : (
-          <textarea
+          <Textarea
             value={draft.body}
             onChange={(e) => setDraft({ ...draft, body: e.target.value })}
             onBlur={save}
@@ -667,7 +669,7 @@ export function MemoryPage() {
                 onChange={(e) => setSearchText(e.target.value)}
                 placeholder="搜索标题/正文…"
               />
-              <select
+              <Select
                 className="h-7 max-w-28 rounded-[var(--radius-control)] border border-border bg-surface-raised px-2 text-[12px]"
                 value={tagId}
                 onChange={(e) => setTagId(e.target.value)}
@@ -679,7 +681,7 @@ export function MemoryPage() {
                     {tag.name}
                   </option>
                 ))}
-              </select>
+              </Select>
               <Button
                 size="sm"
                 variant={showArchived ? "default" : "secondary"}

@@ -1,3 +1,6 @@
+import { Checkbox } from "@/design-system/primitives/Checkbox";
+import { Input } from "@/design-system/primitives/Input";
+import { Radio } from "@/design-system/primitives/Radio";
 import { useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { ipc, type AIConfig, type AIMode, type AppSettings, type ProbeReport } from "@/ipc/client";
@@ -137,7 +140,7 @@ export function AIAssistSection({ settings }: { settings: AppSettings }) {
             ] as [AIMode, string][]
           ).map(([value, label]) => (
             <label key={value} className="flex items-center gap-1">
-              <input
+              <Radio
                 type="radio"
                 name="ai-mode"
                 checked={mode === value}
@@ -154,7 +157,7 @@ export function AIAssistSection({ settings }: { settings: AppSettings }) {
               <>
                 <label className="block">
                   <span className="text-muted">Ollama 地址</span>
-                  <input
+                  <Input
                     className="mt-0.5 w-full rounded border border-border bg-surface px-2 py-1"
                     defaultValue={ai.ollamaUrl}
                     onBlur={(e) =>
@@ -165,7 +168,7 @@ export function AIAssistSection({ settings }: { settings: AppSettings }) {
                 </label>
                 <label className="block">
                   <span className="text-muted">模型名（如 qwen3:4b）</span>
-                  <input
+                  <Input
                     className="mt-0.5 w-full rounded border border-border bg-surface px-2 py-1"
                     defaultValue={ai.ollamaModel}
                     placeholder="ollama pull 拉取后填写"
@@ -180,7 +183,7 @@ export function AIAssistSection({ settings }: { settings: AppSettings }) {
               <>
                 <label className="block">
                   <span className="text-muted">接口地址（OpenAI 兼容，含 /v1）</span>
-                  <input
+                  <Input
                     className="mt-0.5 w-full rounded border border-border bg-surface px-2 py-1"
                     defaultValue={ai.customEndpoint}
                     placeholder="https://api.example.com/v1"
@@ -192,7 +195,7 @@ export function AIAssistSection({ settings }: { settings: AppSettings }) {
                 </label>
                 <label className="block">
                   <span className="text-muted">模型名</span>
-                  <input
+                  <Input
                     className="mt-0.5 w-full rounded border border-border bg-surface px-2 py-1"
                     defaultValue={ai.customModel}
                     onBlur={(e) =>
@@ -204,7 +207,7 @@ export function AIAssistSection({ settings }: { settings: AppSettings }) {
                 <div>
                   <span className="text-muted">API Key（只写入本机文件，不回显）</span>
                   <div className="mt-0.5 flex gap-2">
-                    <input
+                    <Input
                       type="password"
                       className="w-full rounded border border-border bg-surface px-2 py-1"
                       value={keyInput}
@@ -252,8 +255,7 @@ export function AIAssistSection({ settings }: { settings: AppSettings }) {
               <legend className="text-muted">功能开关（逐项可关，默认全部关闭）</legend>
               {FEATURES.map((f) => (
                 <label key={f.key} className="flex items-center gap-2">
-                  <input
-                    type="checkbox"
+                  <Checkbox
                     checked={ai.features[f.key]}
                     onChange={(e) =>
                       saveMutation.mutate({
@@ -295,7 +297,7 @@ export function AIAssistSection({ settings }: { settings: AppSettings }) {
               </div>
               <label className="mt-2 block">
                 <span className="text-muted">Embedding 模型（如 nomic-embed-text）</span>
-                <input
+                <Input
                   className="mt-0.5 w-full rounded border border-border bg-surface px-2 py-1"
                   defaultValue={ai.embeddingModel}
                   placeholder="ollama pull nomic-embed-text 后填写"

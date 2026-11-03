@@ -1,3 +1,4 @@
+import { Input } from "@/design-system/primitives/Input";
 import { useEffect, useMemo, useRef, useState } from "react";
 import {
   DndContext,
@@ -166,7 +167,7 @@ function BoardQuickAdd({
     );
   }
   return (
-    <input
+    <Input
       autoFocus
       value={value}
       disabled={busy}

@@ -1,3 +1,8 @@
+import { Input } from "@/design-system/primitives/Input";
+import { Checkbox } from "@/design-system/primitives/Checkbox";
+import { Radio } from "@/design-system/primitives/Radio";
+import { Select } from "@/design-system/primitives/Select";
+import { Textarea } from "@/design-system/primitives/Textarea";
 import { useEffect, useRef, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useNavigate } from "react-router-dom";
@@ -6,7 +11,6 @@ import { cn } from "@/lib/cn";
 import { Button } from "@/design-system/primitives/Button";
 import { RecurrencePicker } from "@/design-system/patterns/RecurrencePicker";
 import { ConfirmButton } from "@/design-system/patterns/ConfirmButton";
-import { Input } from "@/design-system/primitives/Input";
 import { ShortcutRow } from "@/features/settings/ShortcutRow";
 import { AutomationRulesSection } from "@/features/settings/AutomationRulesSection";
 import { CsvTasksSection } from "@/features/settings/CsvTasksSection";
@@ -458,8 +462,7 @@ export function SettingsPage() {
           </p>
           {settings ? (
             <label className="mt-3 flex items-center gap-2 text-[12px]">
-              <input
-                type="checkbox"
+              <Checkbox
                 checked={settings.todaySmartSortEnabled}
                 onChange={(e) =>
                   saveSettings.mutate({
@@ -482,7 +485,7 @@ export function SettingsPage() {
               </p>
               <div className="mt-1.5 flex flex-col gap-1.5">
                 <label className="flex items-center gap-2">
-                  <input
+                  <Radio
                     type="radio"
                     name="quick-add-submit-key"
                     checked={settings.quickAddSubmitKey === "enter"}
@@ -496,7 +499,7 @@ export function SettingsPage() {
                   Enter 确认添加
                 </label>
                 <label className="flex items-center gap-2">
-                  <input
+                  <Radio
                     type="radio"
                     name="quick-add-submit-key"
                     checked={settings.quickAddSubmitKey === "modEnter"}
@@ -538,8 +541,7 @@ export function SettingsPage() {
           {settings ? (
             <div className="mt-3 flex flex-col gap-2">
               <label className="flex items-center gap-2 text-[12px]">
-                <input
-                  type="checkbox"
+                <Checkbox
                   checked={settings.subtaskAutoCompleteParent}
                   onChange={(e) =>
                     saveSettings.mutate({
@@ -551,8 +553,7 @@ export function SettingsPage() {
                 所有子任务完成时，自动完成父任务（取消子任务时父任务恢复）
               </label>
               <label className="flex items-center gap-2 text-[12px]">
-                <input
-                  type="checkbox"
+                <Checkbox
                   checked={settings.subtaskCascadeChildren}
                   onChange={(e) =>
                     saveSettings.mutate({
@@ -624,8 +625,7 @@ export function SettingsPage() {
             </div>
             {settings ? (
               <label className="flex items-start gap-2">
-                <input
-                  type="checkbox"
+                <Checkbox
                   className="mt-0.5"
                   checked={settings.launchAtLogin}
                   onChange={(e) =>
@@ -655,8 +655,7 @@ export function SettingsPage() {
             <div className="mt-3 space-y-3 text-[12px]">
               {settings ? (
                 <label className="flex items-start gap-2">
-                  <input
-                    type="checkbox"
+                  <Checkbox
                     className="mt-0.5"
                     checked={settings.autoCheckUpdates}
                     onChange={(e) =>
@@ -846,7 +845,7 @@ export function SettingsPage() {
                 </label>
                 <label className="flex flex-col gap-1">
                   <span className="text-muted">类型</span>
-                  <select
+                  <Select
                     className="h-8 w-full rounded-[var(--radius-control)] border border-border bg-surface-raised px-2 text-[13px] text-foreground outline-none focus:ring-2 focus:ring-accent/35"
                     value={templateKind}
                     onChange={(e) =>
@@ -856,7 +855,7 @@ export function SettingsPage() {
                     <option value="task">任务</option>
                     <option value="reminder">提醒</option>
                     <option value="memory">记忆</option>
-                  </select>
+                  </Select>
                 </label>
               </div>
               {templateKind === "task" ? (
@@ -880,7 +879,7 @@ export function SettingsPage() {
                   </label>
                   <label className="flex flex-col gap-1">
                     <span className="text-muted">优先级</span>
-                    <select
+                    <Select
                       className="h-8 w-full rounded-[var(--radius-control)] border border-border bg-surface-raised px-2 text-[13px] text-foreground outline-none focus:ring-2 focus:ring-accent/35"
                       value={priority}
                       onChange={(e) =>
@@ -891,7 +890,7 @@ export function SettingsPage() {
                       <option value="low">低</option>
                       <option value="medium">中</option>
                       <option value="high">高</option>
-                    </select>
+                    </Select>
                   </label>
                 </div>
               ) : null}
@@ -935,7 +934,7 @@ export function SettingsPage() {
                   </label>
                   <label className="flex flex-col gap-1">
                     <span className="text-muted">正文</span>
-                    <textarea
+                    <Textarea
                       rows={3}
                       value={memoryBody}
                       onChange={(e) => setMemoryBody(e.target.value)}
@@ -1120,8 +1119,7 @@ export function SettingsPage() {
           {settings ? (
             <div className="mt-3 space-y-3 text-[12px]">
               <label className="flex items-center gap-2">
-                <input
-                  type="checkbox"
+                <Checkbox
                   checked={settings.clipboardCaptureEnabled}
                   onChange={(e) =>
                     saveSettings.mutate({
@@ -1133,8 +1131,7 @@ export function SettingsPage() {
                 启用剪切板采集
               </label>
               <label className="flex items-center gap-2">
-                <input
-                  type="checkbox"
+                <Checkbox
                   checked={settings.clipboardSmartActionsEnabled}
                   onChange={(e) =>
                     saveSettings.mutate({
@@ -1169,7 +1166,7 @@ export function SettingsPage() {
               </label>
               <label className="flex flex-col gap-1">
                 <span className="text-muted">排除应用（每行一个）</span>
-                <textarea
+                <Textarea
                   className="min-h-24 w-full rounded-[var(--radius-control)] border border-border bg-surface p-2 text-[13px] outline-none focus:ring-2 focus:ring-accent/35"
                   value={excludedText}
                   onChange={(e) => setExcludedText(e.target.value)}
@@ -1188,8 +1185,7 @@ export function SettingsPage() {
           {settings ? (
             <div className="mt-3 space-y-3 text-[12px]">
               <label className="flex items-center gap-2">
-                <input
-                  type="checkbox"
+                <Checkbox
                   checked={settings.autoBackupOnLaunch}
                   onChange={(e) =>
                     saveSettings.mutate({
@@ -1235,7 +1231,7 @@ export function SettingsPage() {
                 >
                   导入 JSON…
                 </Button>
-                <input
+                <Input
                   ref={fileRef}
                   type="file"
                   accept="application/json,.json"
