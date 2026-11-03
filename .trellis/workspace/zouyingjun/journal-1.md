@@ -764,3 +764,24 @@ roadmap N3：快捷搜索此前调 searchQuery 未传 types（协议已有，前
 ### Status
 
 [OK] **Completed**
+
+
+## Session 35: UI 原语替换——原生表单控件全量迁移 design-system（PR #74）
+
+**Date**: 2026-11-03
+**Task**: UI 原语替换——原生表单控件全量迁移 design-system（PR #74）
+**Branch**: `main`
+
+### Summary
+
+新增 Select/Checkbox/Radio/Textarea 四个原语（沿 Input 惯例：forwardRef+cn 基类+用法覆盖），26 文件原生控件全量替换（select 19/checkbox/radio/textarea/裸 input 统一品牌样式与焦点环；file 隐藏输入保留原生；受控与 ref 透传不变）。typecheck/unit 95/build 绿；e2e 三 job 全绿兜底运行时；orca 截图抽查设置页/记忆页无回归
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `7d16941` | (see git log) |
+
+### Status
+
+[OK] **Completed**

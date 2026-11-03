@@ -8,8 +8,8 @@
 
 <!-- @@@auto:current-status -->
 - **Active File**: `journal-1.md`
-- **Total Sessions**: 34
-- **Last Active**: 2026-11-02
+- **Total Sessions**: 35
+- **Last Active**: 2026-11-03
 <!-- @@@/auto:current-status -->
 
 ---
@@ -19,7 +19,7 @@
 <!-- @@@auto:active-documents -->
 | File | Lines | Status |
 |------|-------|--------|
-| `journal-1.md` | ~766 | Active |
+| `journal-1.md` | ~787 | Active |
 <!-- @@@/auto:active-documents -->
 
 ---
@@ -29,6 +29,7 @@
 <!-- @@@auto:session-history -->
 | # | Date | Title | Commits | Branch |
 |---|------|-------|---------|--------|
+| 35 | 2026-11-03 | UI 原语替换——原生表单控件全量迁移 design-system（PR #74） | `7d16941` | `main` |
 | 34 | 2026-11-02 | 主窗口初始尺寸不小于屏幕工作区三分之一（PR #72） | `35d7fd6` | `main` |
 | 33 | 2026-11-02 | 设置页左侧分区导航——快速跳转 + scroll-spy（PR #70） | `083c50c` | `main` |
 | 32 | 2026-11-02 | v2.5.0 发版——快速添加确认键可配置上线 | `e887e61` | `main` |
