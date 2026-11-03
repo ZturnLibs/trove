@@ -1,3 +1,5 @@
+import { Checkbox } from "@/design-system/primitives/Checkbox";
+import { Input } from "@/design-system/primitives/Input";
 import { useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { ipc, type Task } from "@/ipc/client";
@@ -137,8 +139,7 @@ export function SubtaskSection({
       <ul className="space-y-1">
         {children.map((child, index) => (
           <li key={child.id} className="flex items-center gap-2 text-[12px]">
-            <input
-              type="checkbox"
+            <Checkbox
               className="mt-0"
               checked={child.status === "completed"}
               disabled={frozen || toggleMutation.isPending}
@@ -146,7 +147,7 @@ export function SubtaskSection({
               aria-label={`勾选完成子任务：${child.title}`}
             />
             {editingId === child.id ? (
-              <input
+              <Input
                 className="min-w-0 flex-1 rounded border border-border bg-surface px-2 py-1"
                 value={editingText}
                 autoFocus
@@ -230,7 +231,7 @@ export function SubtaskSection({
             if (title) addMutation.mutate(title);
           }}
         >
-          <input
+          <Input
             className="min-w-0 flex-1 rounded border border-border bg-surface px-2 py-1 text-[12px]"
             value={draft}
             placeholder="添加子任务，回车保存"

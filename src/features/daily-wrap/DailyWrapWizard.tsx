@@ -1,7 +1,7 @@
+import { Input } from "@/design-system/primitives/Input";
 import { useEffect, useRef, useState } from "react";
 import { useQueryClient } from "@tanstack/react-query";
 import { Button } from "@/design-system/primitives/Button";
-import { Input } from "@/design-system/primitives/Input";
 import { DeferPicker } from "@/design-system/patterns/DeferPicker";
 import { ipc, type Task } from "@/ipc/client";
 import { followUpPresets, localTodayString } from "@/lib/waiting";

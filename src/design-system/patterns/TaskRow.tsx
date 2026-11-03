@@ -1,10 +1,10 @@
+import { Input } from "@/design-system/primitives/Input";
 import { ChecklistBadge } from "@/design-system/patterns/ChecklistSection";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { Check, ChevronRight } from "lucide-react";
 import { useSortable } from "@dnd-kit/sortable";
 import { CSS } from "@dnd-kit/utilities";
-import { Input } from "@/design-system/primitives/Input";
 import { ipc, type Task } from "@/ipc/client";
 import { deferPresets, localTodayString } from "@/lib/defer";
 import { cn } from "@/lib/cn";

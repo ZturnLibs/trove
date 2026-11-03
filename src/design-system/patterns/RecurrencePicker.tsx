@@ -1,3 +1,6 @@
+import { Checkbox } from "@/design-system/primitives/Checkbox";
+import { Input } from "@/design-system/primitives/Input";
+import { Select } from "@/design-system/primitives/Select";
 import type { RecurrenceFrequency, RecurrenceRule } from "@/ipc/client";
 import {
   defaultRecurrence,
@@ -63,8 +66,7 @@ export function RecurrencePicker({
   return (
     <div className={cn("space-y-2", className)}>
       <label className="flex items-center gap-2 text-[12px] text-muted">
-        <input
-          type="checkbox"
+        <Checkbox
           checked={enabled}
           disabled={disabled}
           onChange={(e) => setEnabled(e.target.checked)}
@@ -80,7 +82,7 @@ export function RecurrencePicker({
         >
           <label className="flex flex-col gap-1 text-[11px] text-muted">
             频率
-            <select
+            <Select
               className="h-8 rounded-[var(--radius-control)] border border-border bg-surface px-2 text-[13px] text-foreground"
               value={value.frequency}
               disabled={disabled}
@@ -93,7 +95,7 @@ export function RecurrencePicker({
                   {opt.label}
                 </option>
               ))}
-            </select>
+            </Select>
           </label>
 
           {value.frequency === "weekly" ||
@@ -127,7 +129,7 @@ export function RecurrencePicker({
           {value.frequency === "monthly" ? (
             <label className="flex flex-col gap-1 text-[11px] text-muted">
               每月第几天
-              <input
+              <Input
                 type="number"
                 min={1}
                 max={31}
@@ -150,7 +152,7 @@ export function RecurrencePicker({
           value.frequency === "everyNWeeks" ? (
             <label className="flex flex-col gap-1 text-[11px] text-muted">
               间隔
-              <input
+              <Input
                 type="number"
                 min={1}
                 max={365}

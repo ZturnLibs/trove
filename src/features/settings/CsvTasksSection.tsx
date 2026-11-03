@@ -1,3 +1,5 @@
+import { Checkbox } from "@/design-system/primitives/Checkbox";
+import { Input } from "@/design-system/primitives/Input";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useRef, useState } from "react";
 import { Button } from "@/design-system/primitives/Button";
@@ -105,7 +107,7 @@ export function CsvTasksSection({ onMessage }: Props) {
         >
           预览导入 CSV…
         </Button>
-        <input
+        <Input
           ref={fileRef}
           type="file"
           accept="text/csv,.csv"
@@ -169,8 +171,7 @@ export function CsvTasksSection({ onMessage }: Props) {
             </ul>
           ) : null}
           <label className="flex items-center gap-2">
-            <input
-              type="checkbox"
+            <Checkbox
               checked={skipDuplicates}
               onChange={(e) => setSkipDuplicates(e.target.checked)}
             />

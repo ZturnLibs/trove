@@ -1,7 +1,9 @@
+import { Input } from "@/design-system/primitives/Input";
+import { Checkbox } from "@/design-system/primitives/Checkbox";
+import { Select } from "@/design-system/primitives/Select";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useState } from "react";
 import { Button } from "@/design-system/primitives/Button";
-import { Input } from "@/design-system/primitives/Input";
 import {
   ipc,
   type AppSettings,
@@ -150,8 +152,7 @@ export function AutomationRulesSection({
 
       {settings ? (
         <label className="mt-3 flex items-center gap-2 text-[12px]">
-          <input
-            type="checkbox"
+          <Checkbox
             checked={settings.automationEnabled}
             onChange={(e) =>
               onSaveSettings({
@@ -183,7 +184,7 @@ export function AutomationRulesSection({
           />
           <label className="flex flex-col gap-1">
             <span className="text-muted">触发器</span>
-            <select
+            <Select
               className="rounded border border-border bg-surface px-2 py-1"
               value={triggerKind}
               onChange={(e) =>
@@ -195,7 +196,7 @@ export function AutomationRulesSection({
                   {label}
                 </option>
               ))}
-            </select>
+            </Select>
           </label>
           <Input
             placeholder="标题关键词（可选，留空则匹配全部）"
@@ -204,7 +205,7 @@ export function AutomationRulesSection({
           />
           <label className="flex flex-col gap-1">
             <span className="text-muted">动作</span>
-            <select
+            <Select
               className="rounded border border-border bg-surface px-2 py-1"
               value={actionKind}
               onChange={(e) =>
@@ -216,7 +217,7 @@ export function AutomationRulesSection({
               <option value="setPriority">设为高优先级</option>
               <option value="addTag">添加标签</option>
               <option value="notify">显示本地通知</option>
-            </select>
+            </Select>
           </label>
           {actionKind === "addTag" ? (
             <Input
@@ -303,8 +304,7 @@ function RuleRow({
       </div>
       <div className="flex shrink-0 items-center gap-2">
         <label className="flex items-center gap-1">
-          <input
-            type="checkbox"
+          <Checkbox
             checked={rule.enabled}
             onChange={(e) => onToggle(e.target.checked)}
           />

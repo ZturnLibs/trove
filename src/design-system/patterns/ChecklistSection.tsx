@@ -1,3 +1,5 @@
+import { Checkbox } from "@/design-system/primitives/Checkbox";
+import { Input } from "@/design-system/primitives/Input";
 import { useEffect, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { ipc, type AISuggestionRecord, type Task } from "@/ipc/client";
@@ -144,8 +146,7 @@ export function ChecklistSection({ task }: { task: Task }) {
             {splitRecord.payload.items.map((item, idx) => (
               <li key={`${splitRecord.id}-${idx}`}>
                 <label className="flex items-start gap-2">
-                  <input
-                    type="checkbox"
+                  <Checkbox
                     className="mt-0.5"
                     checked={splitSelected.has(idx)}
                     onChange={() =>
@@ -201,8 +202,7 @@ export function ChecklistSection({ task }: { task: Task }) {
       <ul className="space-y-1">
         {items.map((item, index) => (
           <li key={item.id} className="flex items-center gap-2 text-[12px]">
-            <input
-              type="checkbox"
+            <Checkbox
               className="mt-0"
               checked={item.checked}
               disabled={frozen || updateMutation.isPending}
@@ -212,7 +212,7 @@ export function ChecklistSection({ task }: { task: Task }) {
               aria-label={`勾选检查项：${item.content}`}
             />
             {editingId === item.id ? (
-              <input
+              <Input
                 className="min-w-0 flex-1 rounded border border-border bg-surface px-2 py-1"
                 value={editingText}
                 autoFocus
@@ -288,7 +288,7 @@ export function ChecklistSection({ task }: { task: Task }) {
             if (content) addMutation.mutate(content);
           }}
         >
-          <input
+          <Input
             className="min-w-0 flex-1 rounded border border-border bg-surface px-2 py-1 text-[12px]"
             value={draft}
             placeholder="添加检查项，回车保存"

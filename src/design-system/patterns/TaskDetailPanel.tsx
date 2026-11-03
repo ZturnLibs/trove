@@ -1,3 +1,7 @@
+import { Input } from "@/design-system/primitives/Input";
+import { Checkbox } from "@/design-system/primitives/Checkbox";
+import { Select } from "@/design-system/primitives/Select";
+import { Textarea } from "@/design-system/primitives/Textarea";
 import { useEffect, useRef, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { AttachmentsSection } from "@/design-system/patterns/AttachmentsSection";
@@ -10,7 +14,6 @@ import { WaitingSection } from "@/design-system/patterns/WaitingSection";
 import { RecurrencePicker } from "@/design-system/patterns/RecurrencePicker";
 import { Button } from "@/design-system/primitives/Button";
 import { ConfirmButton } from "@/design-system/patterns/ConfirmButton";
-import { Input } from "@/design-system/primitives/Input";
 import { buildDetailSaveInput } from "@/design-system/patterns/taskDetailSave";
 import {
   ipc,
@@ -313,7 +316,7 @@ export function TaskDetailPanel({
           </label>
           <label className="space-y-1 text-[11px] text-muted">
             清单
-            <select
+            <Select
               className="h-8 w-full rounded-[var(--radius-control)] border border-border bg-surface-raised px-2 text-[13px] text-foreground"
               value={draft.listId}
               onChange={(e) => {
@@ -329,11 +332,11 @@ export function TaskDetailPanel({
               }}
             >
               {renderListOptions()}
-            </select>
+            </Select>
           </label>
           <label className="space-y-1 text-[11px] text-muted">
             优先级
-            <select
+            <Select
               className="h-8 w-full rounded-[var(--radius-control)] border border-border bg-surface-raised px-2 text-[13px] text-foreground"
               value={draft.priority}
               onChange={(e) => {
@@ -353,7 +356,7 @@ export function TaskDetailPanel({
               <option value="low">低</option>
               <option value="medium">中</option>
               <option value="high">高</option>
-            </select>
+            </Select>
           </label>
         </div>
 
@@ -447,7 +450,7 @@ export function TaskDetailPanel({
 
         <label className="block space-y-1 text-[11px] text-muted">
           说明
-          <textarea
+          <Textarea
             value={draft.notes}
             onChange={(e) => setDraft({ ...draft, notes: e.target.value })}
             onBlur={save}
@@ -723,8 +726,7 @@ function TaskReminderEditRow({
       <RecurrencePicker value={recurrence} onChange={setRecurrence} compact />
       <div className="flex items-center gap-3 text-[11px] text-muted">
         <label className="flex items-center gap-1">
-          <input
-            type="checkbox"
+          <Checkbox
             checked={enabled}
             onChange={(e) => setEnabled(e.target.checked)}
           />

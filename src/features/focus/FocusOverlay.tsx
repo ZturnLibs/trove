@@ -1,3 +1,5 @@
+import { Select } from "@/design-system/primitives/Select";
+import { Textarea } from "@/design-system/primitives/Textarea";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { useQueryClient } from "@tanstack/react-query";
 import {
@@ -207,7 +209,7 @@ export function FocusOverlay() {
           ) : (
             <span className="text-[13px] text-muted">无倒计时</span>
           )}
-          <select
+          <Select
             className="h-8 rounded-[var(--radius-control)] border border-border bg-surface px-2 text-[12px]"
             value={plannedMinutes ?? ""}
             onChange={(e) => {
@@ -224,7 +226,7 @@ export function FocusOverlay() {
                 {preset.label}
               </option>
             ))}
-          </select>
+          </Select>
         </div>
       </header>
 
@@ -257,7 +259,7 @@ export function FocusOverlay() {
 
         <label className="block space-y-1 text-[11px] text-muted">
           进展备注（可选）
-          <textarea
+          <Textarea
             value={progressNote}
             onChange={(e) => setProgressNote(e.target.value)}
             rows={3}

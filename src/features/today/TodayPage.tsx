@@ -1,3 +1,6 @@
+import { Input } from "@/design-system/primitives/Input";
+import { Checkbox } from "@/design-system/primitives/Checkbox";
+import { Textarea } from "@/design-system/primitives/Textarea";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   DndContext,
@@ -27,7 +30,6 @@ import { quickAddSubmitHint, shouldSubmitQuickAdd } from "./quickAddSubmit";
 import { NotificationPermissionBanner } from "@/components/NotificationPermissionBanner";
 import { Button } from "@/design-system/primitives/Button";
 import { ConfirmButton } from "@/design-system/patterns/ConfirmButton";
-import { Input } from "@/design-system/primitives/Input";
 import {
   ipc,
   type ListGroupScope,
@@ -235,7 +237,7 @@ function ReminderEditForm({
       </label>
       <label className="block space-y-1 text-[11px] text-muted">
         备注
-        <textarea
+        <Textarea
           value={notes}
           onChange={(e) => setNotes(e.target.value)}
           rows={3}
@@ -244,8 +246,7 @@ function ReminderEditForm({
       </label>
       <RecurrencePicker value={recurrence} onChange={setRecurrence} />
       <label className="flex items-center gap-2 text-[12px] text-muted">
-        <input
-          type="checkbox"
+        <Checkbox
           checked={enabled}
           onChange={(e) => setEnabled(e.target.checked)}
         />
@@ -318,8 +319,7 @@ function AllReminderRow({
             {!reminder.enabled ? " · 已停用" : ""}
           </div>
         </div>
-        <input
-          type="checkbox"
+        <Checkbox
           checked={reminder.enabled}
           title={reminder.enabled ? "停用" : "启用"}
           onClick={(e) => e.stopPropagation()}
