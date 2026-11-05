@@ -806,3 +806,24 @@ BoardQuickAdd 接收 submitMode（读 quick_add_submit_key，默认 enter）：s
 ### Status
 
 [OK] **Completed**
+
+
+## Session 37: v2.6.0 发版——看板列内新建确认键与设置同步上线
+
+**Date**: 2026-11-05
+**Task**: v2.6.0 发版——看板列内新建确认键与设置同步上线
+**Branch**: `main`
+
+### Summary
+
+发版执行：notes（PR #81）+ 版本 bump（PR #82）+ tag v2.6.0。release workflow 4 job 全绿；资产全平台 14 件；发布体已替换为手写 notes。上游含 PR #79 看板列内新建确认键与设置同步（Enter / ⌘Ctrl+Enter + placeholder 提示）
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `eabec13` | (see git log) |
+
+### Status
+
+[OK] **Completed**
