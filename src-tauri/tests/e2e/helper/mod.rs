@@ -480,7 +480,7 @@ impl Ctx {
     /// 看板列尾行内新建输入。
     pub fn board_composer(&self, column_title: &str) -> String {
         format!(
-            "{}//input[contains(@placeholder,'标题后回车创建')]",
+            "{}//input[contains(@placeholder,'标题后')]",
             self.board_column(column_title)
         )
     }
