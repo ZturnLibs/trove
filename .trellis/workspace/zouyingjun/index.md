@@ -8,7 +8,7 @@
 
 <!-- @@@auto:current-status -->
 - **Active File**: `journal-1.md`
-- **Total Sessions**: 37
+- **Total Sessions**: 38
 - **Last Active**: 2026-11-05
 <!-- @@@/auto:current-status -->
 
@@ -19,7 +19,7 @@
 <!-- @@@auto:active-documents -->
 | File | Lines | Status |
 |------|-------|--------|
-| `journal-1.md` | ~829 | Active |
+| `journal-1.md` | ~850 | Active |
 <!-- @@@/auto:active-documents -->
 
 ---
@@ -29,6 +29,7 @@
 <!-- @@@auto:session-history -->
 | # | Date | Title | Commits | Branch |
 |---|------|-------|---------|--------|
+| 38 | 2026-11-05 | 看板拖拽落卡回位动画去除（PR #84） | `908cb15` | `main` |
 | 37 | 2026-11-05 | v2.6.0 发版——看板列内新建确认键与设置同步上线 | `eabec13` | `main` |
 | 36 | 2026-11-05 | 看板列内新建确认键与设置同步（PR #79） | `5096d37` | `main` |
 | 35 | 2026-11-03 | UI 原语替换——原生表单控件全量迁移 design-system（PR #74） | `7d16941` | `main` |

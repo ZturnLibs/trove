@@ -827,3 +827,24 @@ BoardQuickAdd 接收 submitMode（读 quick_add_submit_key，默认 enter）：s
 ### Status
 
 [OK] **Completed**
+
+
+## Session 38: 看板拖拽落卡回位动画去除（PR #84）
+
+**Date**: 2026-11-05
+**Task**: 看板拖拽落卡回位动画去除（PR #84）
+**Branch**: `main`
+
+### Summary
+
+用户报告松手后卡片「跑回」原位再进入新列。动画来源两处：DragOverlay 默认落位动画（浮层滑回拖拽起点，keyframes initial→final）+ 排序容器 transform 回位过渡。修复：dropAnimation={null}（浮层松手处即逝）+ 移除过渡；真实卡片由 stage 乐观补丁即时进新列。orca 合成拖拽无法驱动 macOS WKWebView 的 dnd-kit（驱动器限制）；CI WebKitGTK W3C Actions 拖拽用例全绿兜底
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `908cb15` | (see git log) |
+
+### Status
+
+[OK] **Completed**
