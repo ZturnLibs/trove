@@ -696,10 +696,9 @@ export function BoardPage() {
               </BoardColumnView>
             </div>
             <DragOverlay
-              dropAnimation={{
-                duration: 180,
-                easing: "cubic-bezier(0.18, 0.67, 0.6, 0.22)",
-              }}
+              // null = 浮层在松手处即逝，不回滑（默认落位动画会让浮层滑回
+              // 拖拽起点，与乐观更新「卡片已进新列」叠加成来回跳动画）。
+              dropAnimation={null}
             >
               {activeDragTask ? (
                 <div className="w-[240px] rotate-2 cursor-grabbing rounded-[var(--radius-control)] border border-accent/50 bg-surface p-2 shadow-xl ring-2 ring-accent/40">

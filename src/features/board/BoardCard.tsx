@@ -107,7 +107,9 @@ export function BoardCard({
       style={{
         transform:
           !dragging && transform ? CSS.Translate.toString(transform) : undefined,
-        transition: "transform 180ms ease",
+        // 不做 transform 回位过渡：松手后 dnd-kit 的位移残量会带着卡片
+        // 「跑回」原位，与乐观更新（卡片随即进入新列）冲突，观感为来回跳动。
+        // 兄弟让位改为瞬时对齐，换取落卡后位置稳定。
       }}
       role="button"
       tabIndex={0}
