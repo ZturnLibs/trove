@@ -8,7 +8,7 @@
 
 <!-- @@@auto:current-status -->
 - **Active File**: `journal-1.md`
-- **Total Sessions**: 36
+- **Total Sessions**: 37
 - **Last Active**: 2026-11-05
 <!-- @@@/auto:current-status -->
 
@@ -19,7 +19,7 @@
 <!-- @@@auto:active-documents -->
 | File | Lines | Status |
 |------|-------|--------|
-| `journal-1.md` | ~808 | Active |
+| `journal-1.md` | ~829 | Active |
 <!-- @@@/auto:active-documents -->
 
 ---
@@ -29,6 +29,7 @@
 <!-- @@@auto:session-history -->
 | # | Date | Title | Commits | Branch |
 |---|------|-------|---------|--------|
+| 37 | 2026-11-05 | v2.6.0 发版——看板列内新建确认键与设置同步上线 | `eabec13` | `main` |
 | 36 | 2026-11-05 | 看板列内新建确认键与设置同步（PR #79） | `5096d37` | `main` |
 | 35 | 2026-11-03 | UI 原语替换——原生表单控件全量迁移 design-system（PR #74） | `7d16941` | `main` |
 | 34 | 2026-11-02 | 主窗口初始尺寸不小于屏幕工作区三分之一（PR #72） | `35d7fd6` | `main` |
