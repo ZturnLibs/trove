@@ -20,8 +20,16 @@ export function shouldSubmitQuickAdd(
   return true;
 }
 
-/** 输入框内的确认方式提示文案。 */
-export function quickAddSubmitHint(mode: QuickAddSubmitKey): string {
-  if (mode === "modEnter") return isMacPlatform() ? "⌘↩ 添加" : "Ctrl+↩ 添加";
-  return "Enter 添加";
+/** 提交组合键标签（Enter / ⌘↩ / Ctrl+↩）。 */
+export function submitComboLabel(mode: QuickAddSubmitKey): string {
+  if (mode === "modEnter") return isMacPlatform() ? "⌘↩" : "Ctrl+↩";
+  return "Enter";
+}
+
+/** 输入框内的确认方式提示文案（可自定义动词：添加 / 创建…）。 */
+export function quickAddSubmitHint(
+  mode: QuickAddSubmitKey,
+  verb = "添加",
+): string {
+  return `${submitComboLabel(mode)} ${verb}`;
 }

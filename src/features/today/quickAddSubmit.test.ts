@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import {
   quickAddSubmitHint,
   shouldSubmitQuickAdd,
+  submitComboLabel,
 } from "./quickAddSubmit";
 
 describe("shouldSubmitQuickAdd", () => {
@@ -27,6 +28,30 @@ describe("shouldSubmitQuickAdd", () => {
 
   it("modEnter 模式：其他键不提交", () => {
     expect(shouldSubmitQuickAdd("Escape", true, "modEnter")).toBe(false);
+  });
+});
+
+describe("submitComboLabel", () => {
+  it("enter 模式 → Enter", () => {
+    expect(submitComboLabel("enter")).toBe("Enter");
+  });
+
+  it("modEnter 模式：mac → ⌘↩，其他平台 → Ctrl+↩", () => {
+    const original = navigator.platform;
+    Object.defineProperty(navigator, "platform", {
+      value: "MacIntel",
+      configurable: true,
+    });
+    expect(submitComboLabel("modEnter")).toBe("⌘↩");
+    Object.defineProperty(navigator, "platform", {
+      value: "Win32",
+      configurable: true,
+    });
+    expect(submitComboLabel("modEnter")).toBe("Ctrl+↩");
+    Object.defineProperty(navigator, "platform", {
+      value: original,
+      configurable: true,
+    });
   });
 });
 

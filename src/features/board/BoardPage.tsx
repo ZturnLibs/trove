@@ -26,6 +26,11 @@ import {
 } from "@/features/board/splitBoardColumns";
 import { resolveBoardDrag } from "@/features/board/boardDrag";
 import {
+  shouldSubmitQuickAdd,
+  submitComboLabel,
+} from "@/features/today/quickAddSubmit";
+import type { QuickAddSubmitKey } from "@/ipc/client";
+import {
   buildTodayScopes,
   sameScope,
 } from "@/features/tasks/listGroupTree";
@@ -137,11 +142,12 @@ function BoardColumnView({
   );
 }
 
-/** 列内新建：折叠为「＋ 新建任务」，展开为行内标题输入（Enter 创建 / Esc 关闭）。 */
+/** 列内新建：折叠为「＋ 新建任务」，展开为行内标题输入（按设置的确认键创建 / Esc 关闭）。 */
 function BoardQuickAdd({
   open,
   busy,
   value,
+  submitMode,
   onOpen,
   onChange,
   onSubmit,
@@ -150,6 +156,8 @@ function BoardQuickAdd({
   open: boolean;
   busy: boolean;
   value: string;
+  /** 提交确认键（与设置 `quick_add_submit_key` 同步）。 */
+  submitMode: QuickAddSubmitKey;
   onOpen: () => void;
   onChange: (value: string) => void;
   onSubmit: () => void;
@@ -171,14 +179,18 @@ function BoardQuickAdd({
       autoFocus
       value={value}
       disabled={busy}
-      placeholder="标题后回车创建，Esc 关闭"
+      placeholder={`标题后 ${submitComboLabel(submitMode)} 创建，Esc 关闭`}
       onChange={(e) => onChange(e.target.value)}
       onBlur={() => {
         if (!value.trim()) onDismiss();
       }}
       onKeyDown={(e) => {
-        if (e.key === "Enter" && value.trim()) onSubmit();
         if (e.key === "Escape") onDismiss();
+        if (
+          shouldSubmitQuickAdd(e.key, e.metaKey || e.ctrlKey, submitMode) &&
+          value.trim()
+        )
+          onSubmit();
       }}
       className="w-full rounded-[var(--radius-control)] border border-border bg-surface-raised px-2 py-1.5 text-[12px] outline-none focus:border-accent"
     />
@@ -199,6 +211,12 @@ export function BoardPage() {
   const [activeDragTask, setActiveDragTask] = useState<Task | null>(null);
   const suppressClickUntilRef = useRef(0);
   const today = localTodayString();
+  const settingsQuery = useQuery({
+    queryKey: ["settings"],
+    queryFn: () => ipc.settingsGet(),
+  });
+  const quickAddSubmitMode: QuickAddSubmitKey =
+    settingsQuery.data?.quickAddSubmitKey ?? "enter";
 
   // 分组过滤：URL `?group=` 单向同步（解析即状态）；页内切换走 replace，
   // URL 无参数时回退 localStorage 偏好（board.groupFilter，try/catch 持久化）。
@@ -621,6 +639,7 @@ export function BoardPage() {
                 count={columns.todo.length}
                 footer={
                   <BoardQuickAdd
+                    submitMode={quickAddSubmitMode}
                     open={composerColumn === "todo"}
                     busy={createMutation.isPending}
                     value={composerTitle}
@@ -644,6 +663,7 @@ export function BoardPage() {
                 count={columns.doing.length}
                 footer={
                   <BoardQuickAdd
+                    submitMode={quickAddSubmitMode}
                     open={composerColumn === "doing"}
                     busy={createMutation.isPending}
                     value={composerTitle}
