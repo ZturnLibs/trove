@@ -785,3 +785,24 @@ roadmap N3：快捷搜索此前调 searchQuery 未传 types（协议已有，前
 ### Status
 
 [OK] **Completed**
+
+
+## Session 36: 看板列内新建确认键与设置同步（PR #79）
+
+**Date**: 2026-11-05
+**Task**: 看板列内新建确认键与设置同步（PR #79）
+**Branch**: `main`
+
+### Summary
+
+BoardQuickAdd 接收 submitMode（读 quick_add_submit_key，默认 enter）：shouldSubmitQuickAdd 判定提交（modEnter 模式裸 Enter 不动作、Esc 关闭不变）、placeholder 提交键标签按模式与平台显示（标题后 ⌘↩ 创建…）。quickAddSubmit.ts 泛化：submitComboLabel + hint 动词参数。vitest 95→97。e2e 抓到定位器锚定旧 placeholder 文案回归 → 解耦为「标题后」前缀（run 41980493600 三 job 全绿）。任务归档
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `5096d37` | (see git log) |
+
+### Status
+
+[OK] **Completed**
