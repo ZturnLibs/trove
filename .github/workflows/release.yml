@@ -49,8 +49,9 @@ jobs:
       fail-fast: false
       matrix:
         include:
-          # Apple Silicon 运行器构建 universal 包（同时覆盖 Intel 与 Apple Silicon）。
-          - platform: macos-14
+          # universal 包（同时覆盖 Intel 与 Apple Silicon）：在 Intel 运行器上
+          # 交叉编译两个 target（macos-14 arm64 池近期容量性取消，见 v2.6.1）。
+          - platform: macos-13
             args: '--target universal-apple-darwin'
             rust-targets: 'aarch64-apple-darwin,x86_64-apple-darwin'
           - platform: windows-latest
