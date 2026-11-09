@@ -1376,6 +1376,15 @@ pub fn entity_link_create(
     state: State<'_, AppState>,
     input: LinkInput,
 ) -> Result<EntityLink, AppError> {
+    // 目标为资产时必须真实存在：否则会创建幽灵链接，查询时被
+    // entity_link_assets 的 assets.get 静默跳过，附件永不显示。
+    if input.target_type == "asset" {
+        state
+            .clipboard
+            .assets()
+            .get(input.target_id)
+            .map_err(|e| AppError::from(e))?;
+    }
     state
         .links
         .link(
