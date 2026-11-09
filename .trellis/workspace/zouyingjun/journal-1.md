@@ -848,3 +848,24 @@ BoardQuickAdd 接收 submitMode（读 quick_add_submit_key，默认 enter）：s
 ### Status
 
 [OK] **Completed**
+
+
+## Session 39: 任务附件修复——资产 id 纠偏 + 多选批量附加（PR #89）
+
+**Date**: 2026-11-09
+**Task**: 任务附件修复——资产 id 纠偏 + 多选批量附加（PR #89）
+**Branch**: `main`
+
+### Summary
+
+用户实证：附加图片选中后弹窗关闭但附件不显示。根因：ImagePicker onPick(item.id) 传剪贴板条目 id 当 targetId（应为资产 id）→ 幽灵链接被 entity_link_assets 的 assets.get 跳过。修复 id 来源 + 多选批量附加（勾选角标/计数/已链接隐藏）+ 后端 entity_link_create 资产存在性校验（防幽灵链接入库）+ 链路回归测试（真实资产→link→查询命中+缩略图解析）。rust 205/unit 97 绿；dispatch CI 三 job 全绿（10 passed/51.2s）。附带：e2e job 固定 ubuntu-24.04（webkit2gtk-driver 在 26.04 档案已移除）；ci.yml workflow_dispatch 通道
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `b15c79e` | (see git log) |
+
+### Status
+
+[OK] **Completed**
