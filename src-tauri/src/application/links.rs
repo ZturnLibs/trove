@@ -241,6 +241,46 @@ mod tests {
         EntityLinkService::new(db)
     }
 
+    /// 附件链路回归：真实资产 → link(target=asset) → list_outgoing 命中，
+    /// 且 assets.get(target) 可解析出缩略图（裸 base64，无 data URL 前缀）。
+    /// 幽灵 target_id（如误传剪贴板条目 id）会被查询侧跳过——前端必须传资产 id。
+    #[test]
+    fn attach_asset_link_round_trip_resolves_asset() {
+        use crate::application::assets::AssetStore;
+
+        let dir = tempdir().unwrap();
+        let db = Database::open(dir.path().join("attach.db")).unwrap();
+        let assets = AssetStore::new(db.clone(), dir.path().join("assets"));
+        let links = EntityLinkService::new(db.clone());
+        let task = uuid::Uuid::new_v4();
+
+        let stored = assets
+            .store_rgba_image(
+                2,
+                2,
+                &[
+                    255, 0, 0, 255, 0, 255, 0, 255, 0, 0, 255, 255, 255, 255, 0, 255,
+                ],
+            )
+            .unwrap();
+        links
+            .link("task", task, "asset", stored.asset.id, "attachment")
+            .unwrap();
+
+        let outgoing = links.list_outgoing("task", task).unwrap();
+        assert_eq!(outgoing.len(), 1);
+
+        let asset = assets.get(stored.asset.id).unwrap();
+        let thumb = assets.thumb_base64(&asset).unwrap();
+        assert!(thumb.is_some());
+        let thumb = thumb.unwrap();
+        assert!(!thumb.starts_with("data:"));
+
+        // 幽灵 target（不存在的资产 id）不可解析——查询侧会跳过此类链接。
+        let ghost = uuid::Uuid::new_v4();
+        assert!(assets.get(ghost).is_err());
+    }
+
     #[test]
     fn link_is_idempotent() {
         let dir = tempdir().unwrap();

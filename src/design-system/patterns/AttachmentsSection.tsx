@@ -1,15 +1,9 @@
 import { useRef, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { ImagePlus, Paperclip, X } from "lucide-react";
+import { Check, ImagePlus, Paperclip, X } from "lucide-react";
 import { Button } from "@/design-system/primitives/Button";
-import { ipc, type LinkedAsset } from "@/ipc/client";
+import { ipc, type ClipboardItem } from "@/ipc/client";
 import { cn } from "@/lib/cn";
-
-function thumbSrc(asset: LinkedAsset) {
-  return asset.thumbBase64
-    ? `data:image/png;base64,${asset.thumbBase64}`
-    : null;
-}
 
 function formatBytes(bytes: number) {
   if (bytes < 1024) return `${bytes} B`;
@@ -57,22 +51,30 @@ export function AttachmentsSection({
     onSuccess: invalidate,
   });
 
-  const addMutation = useMutation({
-    mutationFn: (assetId: string) =>
-      ipc.entityLinkCreate({
-        sourceType: entityType,
-        sourceId: entityId,
-        targetType: "asset",
-        targetId: assetId,
-        linkKind: "attachment",
-      }),
+  const links = linksQuery.data ?? [];
+
+  const attachMutation = useMutation({
+    // 目标必须是资产 id（剪贴板条目 id 不是资产 id——传条目 id 会创建
+    // 幽灵链接，查询时被 assets.get 跳过，附件永不显示）。
+    mutationFn: async (assetIds: string[]) => {
+      const linked = new Set(links.map((a) => a.assetId));
+      const targets = assetIds.filter((id) => !linked.has(id));
+      for (const targetId of targets) {
+        await ipc.entityLinkCreate({
+          sourceType: entityType,
+          sourceId: entityId,
+          targetType: "asset",
+          targetId,
+          linkKind: "attachment",
+        });
+      }
+      return targets.length;
+    },
     onSuccess: () => {
       setPickerOpen(false);
       invalidate();
     },
   });
-
-  const assets = linksQuery.data ?? [];
 
   return (
     <section className="space-y-2 border-t border-border pt-3">
@@ -80,7 +82,7 @@ export function AttachmentsSection({
         <h3 className="flex items-center gap-1 text-[12px] font-medium">
           <Paperclip className="size-3.5" />
           附件
-          {assets.length > 0 ? <span className="text-muted">({assets.length})</span> : null}
+          {links.length > 0 ? <span className="text-muted">({links.length})</span> : null}
         </h3>
         <Button size="sm" variant="ghost" onClick={() => setPickerOpen(true)}>
           <ImagePlus className="size-3.5" />
@@ -88,14 +90,16 @@ export function AttachmentsSection({
         </Button>
       </div>
 
-      {assets.length === 0 ? (
+      {links.length === 0 ? (
         <p className="text-[11px] text-muted">
           暂无附件。可从剪切板图片历史附加图片。
         </p>
       ) : (
         <ul className="grid grid-cols-3 gap-2">
-          {assets.map((asset) => {
-            const src = thumbSrc(asset);
+          {links.map((asset) => {
+            const src = asset.thumbBase64
+              ? `data:image/png;base64,${asset.thumbBase64}`
+              : null;
             return (
               <li
                 key={asset.linkId}
@@ -149,7 +153,9 @@ export function AttachmentsSection({
 
       {pickerOpen ? (
         <ImagePicker
-          onPick={(assetId) => addMutation.mutate(assetId)}
+          linkedAssetIds={links.map((a) => a.assetId)}
+          busy={attachMutation.isPending}
+          onAttach={(assetIds) => attachMutation.mutate(assetIds)}
           onClose={() => setPickerOpen(false)}
         />
       ) : null}
@@ -158,17 +164,27 @@ export function AttachmentsSection({
 }
 
 function ImagePicker({
-  onPick,
+  linkedAssetIds,
+  busy,
+  onAttach,
   onClose,
 }: {
-  onPick: (assetId: string) => void;
+  linkedAssetIds: string[];
+  busy: boolean;
+  onAttach: (assetIds: string[]) => void;
   onClose: () => void;
 }) {
+  const [selected, setSelected] = useState<string[]>([]);
+
   const historyQuery = useQuery({
     queryKey: ["clipboard", "images"],
     queryFn: () => ipc.clipboardQuery({ kind: "image", limit: 60 }),
   });
-  const items = historyQuery.data?.items ?? [];
+  // 仅展示带资产 id 的图片（无资产则无法建立附件链接）。
+  const items = (historyQuery.data?.items ?? []).filter(
+    (item): item is ClipboardItem & { assetId: string } =>
+      item.assetId !== null && !linkedAssetIds.includes(item.assetId),
+  );
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center p-6">
@@ -194,37 +210,74 @@ function ImagePicker({
           <p className="p-4 text-center text-[12px] text-muted">加载中…</p>
         ) : items.length === 0 ? (
           <p className="p-4 text-center text-[12px] text-muted">
-            暂无图片历史。先复制一张图片试试。
+            暂无可附加的新图片。先复制一张图片试试。
           </p>
         ) : (
-          <div className="grid grid-cols-4 gap-2">
-            {items.map((item) => {
-              const src = item.thumbBase64
-                ? `data:image/png;base64,${item.thumbBase64}`
-                : null;
-              return (
-                <button
-                  key={item.id}
-                  type="button"
-                  className="aspect-square overflow-hidden rounded-[var(--radius-control)] border border-border hover:border-accent"
-                  title={`${item.width ?? ""}×${item.height ?? ""}`}
-                  onClick={() => onPick(item.id)}
+          <>
+            <div className="grid grid-cols-4 gap-2">
+              {items.map((item) => {
+                const src = item.thumbBase64
+                  ? `data:image/png;base64,${item.thumbBase64}`
+                  : null;
+                const picked = selected.includes(item.assetId);
+                return (
+                  <button
+                    key={item.id}
+                    type="button"
+                    className={cn(
+                      "relative aspect-square overflow-hidden rounded-[var(--radius-control)] border transition-colors",
+                      picked
+                        ? "border-accent ring-2 ring-accent/40"
+                        : "border-border hover:border-accent",
+                    )}
+                    title={`${item.width ?? ""}×${item.height ?? ""}`}
+                    onClick={() =>
+                      setSelected((prev) =>
+                        prev.includes(item.assetId)
+                          ? prev.filter((id) => id !== item.assetId)
+                          : [...prev, item.assetId],
+                      )
+                    }
+                    aria-pressed={picked}
+                  >
+                    {src ? (
+                      <img
+                        src={src}
+                        alt=""
+                        className="h-full w-full object-cover"
+                      />
+                    ) : (
+                      <span className="flex h-full w-full items-center justify-center text-[10px] text-muted">
+                        图片
+                      </span>
+                    )}
+                    {picked ? (
+                      <span className="absolute right-1 top-1 flex size-4 items-center justify-center rounded-full bg-accent text-accent-fg">
+                        <Check className="size-3" />
+                      </span>
+                    ) : null}
+                  </button>
+                );
+              })}
+            </div>
+            <div className="mt-3 flex items-center justify-between gap-2">
+              <span className="text-[11px] text-muted">
+                已选 {selected.length} 张，可多选
+              </span>
+              <div className="flex gap-2">
+                <Button size="sm" variant="ghost" onClick={onClose}>
+                  取消
+                </Button>
+                <Button
+                  size="sm"
+                  disabled={selected.length === 0 || busy}
+                  onClick={() => onAttach(selected)}
                 >
-                  {src ? (
-                    <img
-                      src={src}
-                      alt=""
-                      className="h-full w-full object-cover"
-                    />
-                  ) : (
-                    <span className="flex h-full w-full items-center justify-center text-[10px] text-muted">
-                      图片
-                    </span>
-                  )}
-                </button>
-              );
-            })}
-          </div>
+                  {busy ? "附加中…" : `附加${selected.length > 0 ? `（${selected.length}）` : ""}`}
+                </Button>
+              </div>
+            </div>
+          </>
         )}
       </div>
     </div>
