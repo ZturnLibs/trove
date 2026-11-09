@@ -42,7 +42,10 @@ jobs:
       - run: cargo test
 
   e2e:
-    runs-on: ubuntu-latest
+    # 固定 24.04：webkit2gtk-driver（WebKitWebDriver）仅存在于 24.04 档案，
+    # ubuntu-latest 已迁移 26.04（包被移除，apt 安装无候选）。其余 job 用
+    # ubuntu-latest（构建链的 4.1 头文件在 26 仍存在）。
+    runs-on: ubuntu-24.04
     # 兜底：任何残留挂起最多烧 45min（最坏合法情形：8 条用例各 270s 上限 + 构建），
     # 超时属 failure，artifact 上传仍会执行；此前无显示服务器时曾挂满 6h job 上限。
     timeout-minutes: 45
