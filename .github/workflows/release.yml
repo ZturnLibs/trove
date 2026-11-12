@@ -50,9 +50,9 @@ jobs:
       matrix:
         include:
           # Apple Silicon 运行器构建 universal 包（同时覆盖 Intel 与 Apple Silicon）。
-          # 注意：勿切 macos-13——该镜像池已无供给，任务排队 24h 超时取消
-          # （v2.6.1 重切实证 36h+ 无 runner）。
-          - platform: macos-14
+          # 注意：勿用 macos-13/14——两者均已退役（13 于 2025-09 关停、
+          # 14 于 2026-11-02 退役，任务排队 24h 超时取消）；现役 arm64 池。
+          - platform: macos-15
             args: '--target universal-apple-darwin'
             rust-targets: 'aarch64-apple-darwin,x86_64-apple-darwin'
           - platform: windows-latest
