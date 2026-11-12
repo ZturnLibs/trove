@@ -8,8 +8,8 @@
 
 <!-- @@@auto:current-status -->
 - **Active File**: `journal-1.md`
-- **Total Sessions**: 39
-- **Last Active**: 2026-11-09
+- **Total Sessions**: 40
+- **Last Active**: 2026-11-12
 <!-- @@@/auto:current-status -->
 
 ---
@@ -19,7 +19,7 @@
 <!-- @@@auto:active-documents -->
 | File | Lines | Status |
 |------|-------|--------|
-| `journal-1.md` | ~871 | Active |
+| `journal-1.md` | ~892 | Active |
 <!-- @@@/auto:active-documents -->
 
 ---
@@ -29,6 +29,7 @@
 <!-- @@@auto:session-history -->
 | # | Date | Title | Commits | Branch |
 |---|------|-------|---------|--------|
+| 40 | 2026-11-12 | trove-cli 完整任务管理(d47008d) | `d47008d` | `main` |
 | 39 | 2026-11-09 | 任务附件修复——资产 id 纠偏 + 多选批量附加（PR #89） | `b15c79e` | `main` |
 | 38 | 2026-11-05 | 看板拖拽落卡回位动画去除（PR #84） | `908cb15` | `main` |
 | 37 | 2026-11-05 | v2.6.0 发版——看板列内新建确认键与设置同步上线 | `eabec13` | `main` |

@@ -19,6 +19,7 @@
 ### 3. Contracts
 
 - Serde **tag field is `action`**, not `kind`. Several variants already have a `kind` field (`CreatePreview`, create payloads). Using `tag = "kind"` collides and fails to deserialize.
+- **Enum variant fields stay snake_case on the wire**; `#[serde(rename_all = "camelCase")]` on the enum renames variant names only. Nested standalone structs (`ActionUpdateTaskInput`, `TaskQuery`, `CreateTaskInput`) follow their own `rename_all` and are camelCase. The same wire vocabulary therefore mixes `{"action":"updateTask","input":{"clearDue":true}}` with `{"action":"deleteTask","task_id":…}`. Regression test: `delete_task_wire_uses_disposition`.
 - Mutating actions from UrlScheme / CLI require `confirmed: true` (or `--yes` on CLI, which sets that flag). Unconfirmed writes return `Rejected`.
 - `dry_run: true` returns a description and does not persist.
 - `trove://create` stays preview-first (same as v1.3). Silent create is CLI `--yes` / explicit `confirmed`.
