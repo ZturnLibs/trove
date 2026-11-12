@@ -27,16 +27,19 @@ export function SplitTaskLayout({
         </div>
         {actions ? <div className="flex items-center gap-2">{actions}</div> : null}
       </header>
-      <div className="flex min-h-0 flex-1">
-        <div className="flex min-w-0 flex-1 flex-col border-r border-border bg-surface">
+      <div className="relative flex min-h-0 flex-1">
+        <div className="flex min-w-0 flex-1 flex-col bg-surface">
           <section className="min-h-0 flex-1 overflow-auto">{list}</section>
           {footer ? (
             <div className="shrink-0 border-t border-border">{footer}</div>
           ) : null}
         </div>
-        <aside className="w-[360px] shrink-0 overflow-hidden bg-surface-raised">
-          {detail}
-        </aside>
+        {/* 详情悬浮于内容区之上，不占用列表宽度；未选中任务时不渲染。 */}
+        {detail ? (
+          <aside className="absolute inset-y-0 right-0 z-10 w-[360px] overflow-hidden border-l border-border bg-surface-raised shadow-xl">
+            {detail}
+          </aside>
+        ) : null}
       </div>
     </div>
   );

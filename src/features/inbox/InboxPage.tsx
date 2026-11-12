@@ -234,11 +234,14 @@ export function InboxPage() {
         )
       }
       detail={
-        <TaskDetailPanel
-          task={selected}
-          onDeleted={() => setSelectedId(null)}
-          focusTitleId={createdId}
-        />
+        selected ? (
+          <TaskDetailPanel
+            task={selected}
+            onDeleted={() => setSelectedId(null)}
+            focusTitleId={createdId}
+            onClose={() => setSelectedId(null)}
+          />
+        ) : null
       }
     />
   );

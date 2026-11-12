@@ -206,7 +206,7 @@ export function BoardCardBody({
         ) : (
           <div
             className={cn(
-              "truncate text-[13px]",
+              "line-clamp-3 whitespace-pre-wrap break-words text-[13px]",
               task.status === "completed" && "text-muted line-through",
               overdue && "text-danger",
             )}

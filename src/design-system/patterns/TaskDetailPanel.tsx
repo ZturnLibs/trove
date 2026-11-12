@@ -2,6 +2,7 @@ import { Input } from "@/design-system/primitives/Input";
 import { Checkbox } from "@/design-system/primitives/Checkbox";
 import { Select } from "@/design-system/primitives/Select";
 import { Textarea } from "@/design-system/primitives/Textarea";
+import { X } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { AttachmentsSection } from "@/design-system/patterns/AttachmentsSection";
@@ -33,6 +34,7 @@ export function TaskDetailPanel({
   dailyFocus,
   onStartFocus,
   onOpenTask,
+  onClose,
 }: {
   task: Task | null;
   onDeleted?: () => void;
@@ -46,6 +48,8 @@ export function TaskDetailPanel({
   onStartFocus?: () => void;
   /** Open a subtask's own detail (switches the selected task in the list). */
   onOpenTask?: (taskId: string) => void;
+  /** 关闭详情面板（悬浮模式下由面板头部 ✕ 触发）。 */
+  onClose?: () => void;
 }) {
   const queryClient = useQueryClient();
   const listsQuery = useQuery({
@@ -66,7 +70,15 @@ export function TaskDetailPanel({
   const [deleteDisposition, setDeleteDisposition] = useState<
     "cascade" | "promote" | null
   >(null);
-  const titleRef = useRef<HTMLInputElement>(null);
+  const titleRef = useRef<HTMLTextAreaElement>(null);
+
+  // 任务内容多行输入：内容变化（含切换任务）后按行数自动增高。
+  useEffect(() => {
+    const el = titleRef.current;
+    if (!el) return;
+    el.style.height = "auto";
+    el.style.height = `${Math.min(el.scrollHeight, 160)}px`;
+  }, [draft?.title]);
 
   useEffect(() => {
     if (!task) {
@@ -96,6 +108,16 @@ export function TaskDetailPanel({
       });
     }
   }, [task, focusTitleId]);
+
+  // 悬浮模式：Esc 关闭详情（删除确认浮层打开时除外）。
+  useEffect(() => {
+    if (!task || !onClose) return;
+    const onKey = (event: KeyboardEvent) => {
+      if (event.key === "Escape" && !deleteTarget) onClose();
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [task, onClose, deleteTarget]);
 
   const saveMutation = useMutation({
     mutationFn: (input: UpdateTaskInput) => ipc.taskUpdate(input),
@@ -255,8 +277,10 @@ export function TaskDetailPanel({
   return (
     <div className="flex h-full min-h-0 flex-col">
       <div className="flex items-center justify-between gap-2 border-b border-border px-3 py-2 text-[11px] text-muted">
-        <span>任务 · {task.updatedAt.slice(0, 16).replace("T", " ")}</span>
-        <div className="flex items-center gap-2">
+        <span className="min-w-0 truncate">
+          {task.updatedAt.slice(0, 16).replace("T", " ")}
+        </span>
+        <div className="flex shrink-0 items-center gap-2">
           {task.status === "todo" && onStartFocus ? (
             <Button type="button" size="sm" variant="secondary" onClick={onStartFocus}>
               开始专注
@@ -272,17 +296,41 @@ export function TaskDetailPanel({
               {dailyFocus.inFocus ? "移出重点" : "加入重点"}
             </Button>
           ) : null}
-          <span>{task.listName}</span>
+          <span className="whitespace-nowrap">{task.listName}</span>
+          {onClose ? (
+            <button
+              type="button"
+              aria-label="关闭详情"
+              title="关闭详情 (Esc)"
+              onClick={onClose}
+              className="rounded p-0.5 text-muted hover:bg-row-hover hover:text-foreground"
+            >
+              <X className="h-3.5 w-3.5" />
+            </button>
+          ) : null}
         </div>
       </div>
 
       <div className="min-h-0 flex-1 space-y-3 overflow-auto p-3">
-        <Input
+        {/* 任务内容：多行输入，Enter 保存、Shift+Enter 换行，随内容自动增高。 */}
+        <Textarea
           ref={titleRef}
           value={draft.title}
-          onChange={(e) => setDraft({ ...draft, title: e.target.value })}
+          rows={1}
+          onChange={(e) => {
+            setDraft({ ...draft, title: e.target.value });
+            const el = e.target;
+            el.style.height = "auto";
+            el.style.height = `${Math.min(el.scrollHeight, 160)}px`;
+          }}
+          onKeyDown={(e) => {
+            if (e.key === "Enter" && !e.shiftKey) {
+              e.preventDefault();
+              save();
+            }
+          }}
           onBlur={save}
-          className="h-9 text-[14px] font-medium"
+          className="resize-none overflow-hidden text-[14px] font-medium leading-5"
         />
 
         <div className="grid grid-cols-2 gap-2">
