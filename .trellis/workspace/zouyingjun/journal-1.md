@@ -869,3 +869,24 @@ BoardQuickAdd 接收 submitMode（读 quick_add_submit_key，默认 enter）：s
 ### Status
 
 [OK] **Completed**
+
+
+## Session 40: trove-cli 完整任务管理(d47008d)
+
+**Date**: 2026-11-12
+**Task**: trove-cli 完整任务管理(d47008d)
+**Branch**: `main`
+
+### Summary
+
+9 新动作(查询/批量/修改/生命周期)+CLI 子命令+docs/cli.md 重写+trove-cli skill;单测+10,实机冒烟 AC1-8 全过;spec 沉淀 enum 字段 snake_case wire 契约
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `d47008d` | (see git log) |
+
+### Status
+
+[OK] **Completed**
