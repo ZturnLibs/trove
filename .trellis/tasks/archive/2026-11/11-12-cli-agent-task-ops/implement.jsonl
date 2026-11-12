@@ -1,0 +1,7 @@
+{"_example": "Fill with {\"file\": \"<path>\", \"reason\": \"<why>\"}. Put spec/research files only — no code paths. Run `python3 .trellis/scripts/get_context.py --mode packages` to list available specs. Delete this line once real entries are added."}
+{"file": ".trellis/spec/tauri/workbench-action.md", "reason": "动作枚举 serde tag(action/outcome)、confirmed 确认门、CLI 协议契约"}
+{"file": ".trellis/spec/tauri/index.md", "reason": "tauri 层质量检查清单与坑则(clear 显式标志、tempdir 生命周期、软删除过滤)"}
+{"file": ".trellis/spec/tauri/extra-binaries-and-release.md", "reason": "trove-cli 额外 bin 的打包/lipo 契约,本次不触碰但需知悉"}
+{"file": "docs/action-layer.md", "reason": "动作层产品文档,需补 9 个新动作行"}
+{"file": "docs/cli.md", "reason": "CLI 现有文档,重写基础"}
+{"file": ".trellis/tasks/11-12-cli-agent-task-ops/design.md", "reason": "本任务技术设计:变体表、CLI 映射、解析与批量策略"}
