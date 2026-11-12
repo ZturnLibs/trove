@@ -126,6 +126,14 @@ export function MainShell() {
         <div className="flex h-11 items-center gap-2 px-3 text-[15px] font-semibold tracking-tight">
           <BrandLogo className="h-5 w-5" />
           <span className="truncate">Trove</span>
+          {import.meta.env.DEV ? (
+            <span
+              className="rounded bg-warning/15 px-1 text-[10px] font-semibold leading-4 text-warning"
+              title="开发版（com.trove.dev，独立数据目录）"
+            >
+              DEV
+            </span>
+          ) : null}
         </div>
         <nav className="flex flex-1 flex-col overflow-y-auto px-2 py-1">
           {navItems.map(({ to, label, icon: Icon, badge }) => (
