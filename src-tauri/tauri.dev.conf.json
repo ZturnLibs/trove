@@ -1,0 +1,14 @@
+{
+  "$schema": "https://schema.tauri.app/config/2",
+  "productName": "Trove Dev",
+  "identifier": "com.trove.dev",
+  "plugins": {
+    "deep-link": {
+      "desktop": {
+        "schemes": [
+          "trove-dev"
+        ]
+      }
+    }
+  }
+}
