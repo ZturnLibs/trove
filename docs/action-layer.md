@@ -12,6 +12,14 @@
 | `createTask` / `createReminder` / `createMemory` | 直接写入 | ❌ 须 `confirmed: true` 且非 UrlScheme |
 | `completeTask` | 完成任务 | ❌ 同上 |
 | `queryToday` / `queryOverdue` / `queryInbox` / `queryList` | 查询任务摘要 | ✅ CLI / 快捷指令 |
+| `queryTasks` | 通用任务查询（状态/清单/搜索/截止区间/父任务/分页） | ✅ CLI / 快捷指令 |
+| `getTask` | 任务详情（完整字段） | ✅ CLI / 快捷指令 |
+| `queryLists` | 清单清单（id/名称/未完成数） | ✅ CLI / 快捷指令 |
+| `updateTask` | 部分字段更新（应用内读-改-写合并） | ❌ 须 `confirmed: true` 且非 UrlScheme |
+| `reopenTask` / `archiveTask` | 重开 / 归档 | ❌ 同上 |
+| `deleteTask` | 删除任务树（必须显式 disposition：cascade/promote） | ❌ 同上 |
+| `postponeTask` | 截止日延后 N 天（仅待办） | ❌ 同上 |
+| `setTaskDefer` | 设置 / 清除延期显示日期 | ❌ 同上 |
 | `searchMemories` / `getSnippets` | 搜索记忆、收藏文本片段 | ✅ CLI / 快捷指令 |
 
 ## 分发选项

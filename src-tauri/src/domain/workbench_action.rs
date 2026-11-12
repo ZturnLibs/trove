@@ -1,8 +1,9 @@
 use serde::{Deserialize, Serialize};
 
 use super::{
-    CreateMemoryInput, CreateReminderInput, CreateTaskInput, DomainError, EntityId, Memory,
-    Reminder, Task, TaskPriority, TaskStatus, UrlCreateKind, UrlSchemeAction,
+    CreateMemoryInput, CreateReminderInput, CreateTaskInput, DomainError, EntityId, ListKind,
+    Memory, Reminder, Task, TaskDeleteDisposition, TaskPriority, TaskQuery, TaskStatus,
+    UrlCreateKind, UrlSchemeAction,
 };
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
@@ -94,6 +95,46 @@ pub enum WorkbenchAction {
     },
     /// Read-only: export the task CSV (same columns as the Settings export).
     ExportTasksCsv,
+    /// Read-only: generic task query (status / list / search / due range / parent).
+    QueryTasks {
+        #[serde(default)]
+        query: TaskQuery,
+    },
+    /// Read-only: full task detail (complete notes, tags, parent link).
+    GetTask {
+        task_id: EntityId,
+    },
+    /// Read-only: list inventory (id / name / kind / open count) for name→uuid resolution.
+    QueryLists,
+    /// Partial update; the app merges with the existing task before persisting.
+    UpdateTask {
+        input: ActionUpdateTaskInput,
+        confirmed: bool,
+    },
+    ReopenTask {
+        task_id: EntityId,
+        confirmed: bool,
+    },
+    ArchiveTask {
+        task_id: EntityId,
+        confirmed: bool,
+    },
+    DeleteTask {
+        task_id: EntityId,
+        disposition: TaskDeleteDisposition,
+        confirmed: bool,
+    },
+    PostponeTask {
+        task_id: EntityId,
+        days: i64,
+        confirmed: bool,
+    },
+    /// Some(date) = set defer date; None = clear it.
+    SetTaskDefer {
+        task_id: EntityId,
+        available_at: Option<String>,
+        confirmed: bool,
+    },
 }
 
 const PREVIEW_LEN: usize = 120;
@@ -211,6 +252,42 @@ pub fn snippet_hit(
     }
 }
 
+/// Partial update semantics: `None` = keep existing value. Clearing optional
+/// fields is explicit (`clear_due`), mirroring the three-state convention in
+/// `commands::task_list_update`.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ActionUpdateTaskInput {
+    pub id: EntityId,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub title: Option<String>,
+    /// Some("") clears the notes.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub notes: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub priority: Option<TaskPriority>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub list_id: Option<EntityId>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub due_date: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub due_time: Option<String>,
+    #[serde(default)]
+    pub clear_due: bool,
+    /// None = keep existing tags; Some(vec) = replace wholesale (empty vec clears).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub tag_names: Option<Vec<String>>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ActionListHit {
+    pub id: EntityId,
+    pub name: String,
+    pub kind: ListKind,
+    pub open_count: u64,
+}
+
 pub fn query_limit(limit: Option<i64>) -> i64 {
     limit.unwrap_or(20).clamp(1, 100)
 }
@@ -245,6 +322,12 @@ impl WorkbenchAction {
                 | WorkbenchAction::CreateReminder { .. }
                 | WorkbenchAction::CreateMemory { .. }
                 | WorkbenchAction::CompleteTask { .. }
+                | WorkbenchAction::UpdateTask { .. }
+                | WorkbenchAction::ReopenTask { .. }
+                | WorkbenchAction::ArchiveTask { .. }
+                | WorkbenchAction::DeleteTask { .. }
+                | WorkbenchAction::PostponeTask { .. }
+                | WorkbenchAction::SetTaskDefer { .. }
         )
     }
 
@@ -253,7 +336,13 @@ impl WorkbenchAction {
             WorkbenchAction::CreateTask { confirmed, .. }
             | WorkbenchAction::CreateReminder { confirmed, .. }
             | WorkbenchAction::CreateMemory { confirmed, .. }
-            | WorkbenchAction::CompleteTask { confirmed, .. } => *confirmed,
+            | WorkbenchAction::CompleteTask { confirmed, .. }
+            | WorkbenchAction::UpdateTask { confirmed, .. }
+            | WorkbenchAction::ReopenTask { confirmed, .. }
+            | WorkbenchAction::ArchiveTask { confirmed, .. }
+            | WorkbenchAction::DeleteTask { confirmed, .. }
+            | WorkbenchAction::PostponeTask { confirmed, .. }
+            | WorkbenchAction::SetTaskDefer { confirmed, .. } => *confirmed,
             _ => true,
         }
     }
@@ -311,6 +400,30 @@ pub enum ActionOutcome {
     TasksCsvExported {
         csv: String,
     },
+    TaskFetched {
+        task: Task,
+    },
+    TaskUpdated {
+        task: Task,
+    },
+    TaskReopened {
+        task: Task,
+    },
+    TaskArchived {
+        task: Task,
+    },
+    TaskDeleted {
+        task_id: EntityId,
+    },
+    TaskPostponed {
+        task: Task,
+    },
+    TaskDeferred {
+        task: Task,
+    },
+    ListsQueried {
+        lists: Vec<ActionListHit>,
+    },
     Rejected {
         reason: String,
     },
@@ -346,6 +459,44 @@ pub fn workbench_action_description(action: &WorkbenchAction) -> String {
             _ => "查询收藏文本片段".into(),
         },
         WorkbenchAction::ExportTasksCsv => "导出任务 CSV".into(),
+        WorkbenchAction::QueryTasks { query } => {
+            let parts: Vec<String> = [
+                query.status.map(|s| format!("状态={s:?}")),
+                query.search.clone().map(|s| format!("搜索「{s}」")),
+                query
+                    .due_from
+                    .clone()
+                    .map(|d| format!("截止≥{d}")),
+                query.due_to.clone().map(|d| format!("截止≤{d}")),
+            ]
+            .into_iter()
+            .flatten()
+            .collect();
+            if parts.is_empty() {
+                "查询任务".into()
+            } else {
+                format!("查询任务（{}）", parts.join("，"))
+            }
+        }
+        WorkbenchAction::GetTask { task_id } => format!("查询任务详情 {task_id}"),
+        WorkbenchAction::QueryLists => "查询清单列表".into(),
+        WorkbenchAction::UpdateTask { input, .. } => format!("更新任务 {}", input.id),
+        WorkbenchAction::ReopenTask { task_id, .. } => format!("重开任务 {task_id}"),
+        WorkbenchAction::ArchiveTask { task_id, .. } => format!("归档任务 {task_id}"),
+        WorkbenchAction::DeleteTask {
+            task_id, disposition, ..
+        } => format!("删除任务 {task_id}（{}）", disposition.as_str()),
+        WorkbenchAction::PostponeTask { task_id, days, .. } => {
+            format!("任务 {task_id} 延后 {days} 天")
+        }
+        WorkbenchAction::SetTaskDefer {
+            task_id,
+            available_at,
+            ..
+        } => match available_at {
+            Some(date) => format!("任务 {task_id} 延期至 {date} 显示"),
+            None => format!("清除任务 {task_id} 的延期显示"),
+        },
     }
 }
 
@@ -402,6 +553,123 @@ mod tests {
         assert_eq!(query_limit(None), 20);
         assert_eq!(query_limit(Some(0)), 1);
         assert_eq!(query_limit(Some(500)), 100);
+    }
+
+    #[test]
+    fn new_mutating_actions_require_confirmation() {
+        let id = uuid::Uuid::new_v4();
+        let cases = vec![
+            WorkbenchAction::UpdateTask {
+                input: ActionUpdateTaskInput {
+                    id,
+                    title: Some("t".into()),
+                    notes: None,
+                    priority: None,
+                    list_id: None,
+                    due_date: None,
+                    due_time: None,
+                    clear_due: false,
+                    tag_names: None,
+                },
+                confirmed: false,
+            },
+            WorkbenchAction::ReopenTask {
+                task_id: id,
+                confirmed: false,
+            },
+            WorkbenchAction::ArchiveTask {
+                task_id: id,
+                confirmed: false,
+            },
+            WorkbenchAction::DeleteTask {
+                task_id: id,
+                disposition: TaskDeleteDisposition::Cascade,
+                confirmed: false,
+            },
+            WorkbenchAction::PostponeTask {
+                task_id: id,
+                days: 1,
+                confirmed: false,
+            },
+            WorkbenchAction::SetTaskDefer {
+                task_id: id,
+                available_at: Some("2026-11-20".into()),
+                confirmed: false,
+            },
+        ];
+        for action in cases {
+            assert!(reject_unconfirmed(&action).is_err(), "{action:?}");
+            assert!(action.requires_confirmation());
+        }
+    }
+
+    #[test]
+    fn update_task_wire_round_trips() {
+        let id = uuid::Uuid::new_v4();
+        let wire = serde_json::json!({
+            "action": "updateTask",
+            "input": { "id": id.to_string(), "clearDue": true },
+            "confirmed": true,
+        });
+        let action: WorkbenchAction = serde_json::from_value(wire.clone()).unwrap();
+        assert!(matches!(
+            &action,
+            WorkbenchAction::UpdateTask { input, confirmed: true }
+                if input.id == id && input.clear_due && input.title.is_none()
+        ));
+        assert_eq!(serde_json::to_value(&action).unwrap(), wire);
+    }
+
+    #[test]
+    fn query_tasks_parses_with_default_query() {
+        let action: WorkbenchAction =
+            serde_json::from_value(serde_json::json!({ "action": "queryTasks" })).unwrap();
+        assert!(matches!(
+            &action,
+            WorkbenchAction::QueryTasks { query }
+                if query.status.is_none() && query.limit.is_none()
+        ));
+    }
+
+    #[test]
+    fn delete_task_wire_uses_disposition() {
+        let id = uuid::Uuid::new_v4();
+        let action: WorkbenchAction = serde_json::from_value(serde_json::json!({
+            "action": "deleteTask",
+            "task_id": id.to_string(),
+            "disposition": "cascade",
+            "confirmed": true,
+        }))
+        .unwrap();
+        assert!(matches!(
+            action,
+            WorkbenchAction::DeleteTask { disposition: TaskDeleteDisposition::Cascade, .. }
+        ));
+        assert_eq!(
+            workbench_action_description(&WorkbenchAction::DeleteTask {
+                task_id: id,
+                disposition: TaskDeleteDisposition::Promote,
+                confirmed: true,
+            }),
+            format!("删除任务 {id}（promote）")
+        );
+    }
+
+    #[test]
+    fn lists_queried_outcome_round_trips() {
+        let id = uuid::Uuid::new_v4();
+        let wire = serde_json::json!({
+            "outcome": "listsQueried",
+            "lists": [
+                { "id": id.to_string(), "name": "收件箱", "kind": "inbox", "openCount": 3 }
+            ]
+        });
+        let outcome: ActionOutcome = serde_json::from_value(wire.clone()).unwrap();
+        assert!(matches!(
+            &outcome,
+            ActionOutcome::ListsQueried { lists } if lists.len() == 1 && lists[0].open_count == 3
+        ));
+        assert_eq!(serde_json::to_value(&outcome).unwrap(), wire);
     }
 
     #[test]

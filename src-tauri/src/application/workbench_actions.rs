@@ -5,8 +5,9 @@ use crate::app_state::AppState;
 use crate::commands;
 use crate::domain::{
     format_local_datetime, local_now_naive, memory_hit, query_limit, reminder_hit, snippet_hit,
-    task_hit, ActionDispatchOptions, ActionOutcome, ActionSource, ActionTodayHit, ClipboardKind,
-    ClipboardQuery, DomainError, MemoryQuery, SmartListKind, TaskQuery, TaskStatus,
+    task_hit, ActionDispatchOptions, ActionListHit, ActionOutcome, ActionSource, ActionTodayHit,
+    ActionUpdateTaskInput, ClipboardKind, ClipboardQuery, DomainError, MemoryQuery,
+    SearchEntityType, SmartListKind, Task, TaskQuery, TaskStatus, UpdateTaskInput,
     UrlCreateKind, UrlSchemeAction, WorkbenchAction,
 };
 
@@ -47,13 +48,25 @@ pub fn dispatch(
         WorkbenchAction::CreateTask { confirmed: false, .. }
         | WorkbenchAction::CreateReminder { confirmed: false, .. }
         | WorkbenchAction::CreateMemory { confirmed: false, .. }
-        | WorkbenchAction::CompleteTask { confirmed: false, .. } => Err(DomainError::Validation(
+        | WorkbenchAction::CompleteTask { confirmed: false, .. }
+        | WorkbenchAction::UpdateTask { confirmed: false, .. }
+        | WorkbenchAction::ReopenTask { confirmed: false, .. }
+        | WorkbenchAction::ArchiveTask { confirmed: false, .. }
+        | WorkbenchAction::DeleteTask { confirmed: false, .. }
+        | WorkbenchAction::PostponeTask { confirmed: false, .. }
+        | WorkbenchAction::SetTaskDefer { confirmed: false, .. } => Err(DomainError::Validation(
             "该动作需要 confirmed=true 才能执行".into(),
         )),
         WorkbenchAction::CreateTask { .. }
         | WorkbenchAction::CreateReminder { .. }
         | WorkbenchAction::CreateMemory { .. }
         | WorkbenchAction::CompleteTask { .. }
+        | WorkbenchAction::UpdateTask { .. }
+        | WorkbenchAction::ReopenTask { .. }
+        | WorkbenchAction::ArchiveTask { .. }
+        | WorkbenchAction::DeleteTask { .. }
+        | WorkbenchAction::PostponeTask { .. }
+        | WorkbenchAction::SetTaskDefer { .. }
             if matches!(options.source, ActionSource::UrlScheme) =>
         {
             Err(DomainError::Validation(
@@ -174,6 +187,124 @@ pub fn dispatch(
             let csv = state.csv_tasks.export_csv()?;
             Ok(ActionOutcome::TasksCsvExported { csv })
         }
+        WorkbenchAction::QueryTasks { query } => {
+            let state = state.ok_or_else(|| DomainError::Validation("应用未就绪".into()))?;
+            let page = state.tasks.query_tasks(query)?;
+            Ok(ActionOutcome::TasksQueried {
+                items: page.items.iter().map(task_hit).collect(),
+                total: page.total,
+            })
+        }
+        WorkbenchAction::GetTask { task_id } => {
+            let state = state.ok_or_else(|| DomainError::Validation("应用未就绪".into()))?;
+            let task = state.tasks.get_task(task_id)?;
+            Ok(ActionOutcome::TaskFetched { task })
+        }
+        WorkbenchAction::QueryLists => {
+            let state = state.ok_or_else(|| DomainError::Validation("应用未就绪".into()))?;
+            let lists = state.tasks.list_lists()?;
+            let hits = lists
+                .iter()
+                .map(|list| {
+                    let open_count = state
+                        .tasks
+                        .count_list_todo_tasks(list.id)
+                        .unwrap_or_default();
+                    ActionListHit {
+                        id: list.id,
+                        name: list.name.clone(),
+                        kind: list.kind,
+                        open_count: open_count.unsigned_abs(),
+                    }
+                })
+                .collect();
+            Ok(ActionOutcome::ListsQueried { lists: hits })
+        }
+        WorkbenchAction::UpdateTask { input, .. } => {
+            let state = state.ok_or_else(|| DomainError::Validation("应用未就绪".into()))?;
+            let existing = state.tasks.get_task(input.id)?;
+            let merged = merge_update_input(&existing, &input);
+            let task = state.tasks.update_task(merged)?;
+            index_task(state, &task);
+            emit_task_change(app, &task, "updated");
+            Ok(ActionOutcome::TaskUpdated { task })
+        }
+        WorkbenchAction::ReopenTask { task_id, .. } => {
+            let state = state.ok_or_else(|| DomainError::Validation("应用未就绪".into()))?;
+            let task = state.tasks.uncomplete_task(task_id)?;
+            index_task(state, &task);
+            emit_task_change(app, &task, "updated");
+            Ok(ActionOutcome::TaskReopened { task })
+        }
+        WorkbenchAction::ArchiveTask { task_id, .. } => {
+            let state = state.ok_or_else(|| DomainError::Validation("应用未就绪".into()))?;
+            let task = state.tasks.archive_task(task_id)?;
+            index_task(state, &task);
+            emit_task_change(app, &task, "updated");
+            Ok(ActionOutcome::TaskArchived { task })
+        }
+        WorkbenchAction::DeleteTask {
+            task_id, disposition, ..
+        } => {
+            let state = state.ok_or_else(|| DomainError::Validation("应用未就绪".into()))?;
+            state.tasks.delete_task_tree(task_id, disposition)?;
+            let _ = state.search.remove(SearchEntityType::Task, task_id);
+            let _ = app.emit(
+                "domain://changed",
+                commands::DomainChangeEvent {
+                    entity_type: "task".into(),
+                    entity_id: task_id.to_string(),
+                    change: "deleted".into(),
+                    revision: 0,
+                },
+            );
+            Ok(ActionOutcome::TaskDeleted { task_id })
+        }
+        WorkbenchAction::PostponeTask { task_id, days, .. } => {
+            let state = state.ok_or_else(|| DomainError::Validation("应用未就绪".into()))?;
+            let task = state.tasks.postpone_task(task_id, days)?;
+            index_task(state, &task);
+            emit_task_change(app, &task, "updated");
+            Ok(ActionOutcome::TaskPostponed { task })
+        }
+        WorkbenchAction::SetTaskDefer {
+            task_id,
+            available_at,
+            ..
+        } => {
+            let state = state.ok_or_else(|| DomainError::Validation("应用未就绪".into()))?;
+            let task = state.tasks.set_task_defer(task_id, available_at)?;
+            index_task(state, &task);
+            emit_task_change(app, &task, "updated");
+            Ok(ActionOutcome::TaskDeferred { task })
+        }
+    }
+}
+
+/// Merge a partial CLI update onto the existing task. Application-level
+/// `UpdateTaskInput` requires complete fields, so `None` fields fall back to
+/// the current values; `clear_due` wins over due fields.
+fn merge_update_input(existing: &Task, input: &ActionUpdateTaskInput) -> UpdateTaskInput {
+    UpdateTaskInput {
+        id: existing.id,
+        title: input.title.clone().unwrap_or_else(|| existing.title.clone()),
+        notes: input.notes.clone().unwrap_or_else(|| existing.notes.clone()),
+        priority: input.priority.unwrap_or(existing.priority),
+        list_id: input.list_id.unwrap_or(existing.list_id),
+        due_date: if input.clear_due {
+            None
+        } else {
+            input.due_date.clone().or_else(|| existing.due_date.clone())
+        },
+        due_time: if input.clear_due {
+            None
+        } else {
+            input.due_time.clone().or_else(|| existing.due_time.clone())
+        },
+        tag_names: input
+            .tag_names
+            .clone()
+            .unwrap_or_else(|| existing.tag_names.clone()),
     }
 }
 
@@ -291,4 +422,167 @@ fn index_memory(state: &AppState, memory: &crate::domain::Memory) {
         &memory.title,
         &memory.body,
     );
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::application::tasks::TaskService;
+    use crate::domain::{CreateTaskInput, TaskDeleteDisposition};
+    use crate::infrastructure::db::Database;
+    use tempfile::tempdir;
+
+    fn open_service() -> TaskService {
+        let dir = tempdir().unwrap();
+        let path = dir.path().join("wb.db");
+        let db = Database::open(&path).unwrap();
+        let svc = TaskService::new(db);
+        svc.ensure_seed_data().unwrap();
+        std::mem::forget(dir);
+        svc
+    }
+
+    fn seeded_task() -> Task {
+        let svc = open_service();
+        svc.create_task(CreateTaskInput {
+            title: "原始标题".into(),
+            notes: Some("原始备注".into()),
+            priority: Some(crate::domain::TaskPriority::Medium),
+            list_id: None,
+            due_date: Some("2026-11-20".into()),
+            due_time: Some("09:00".into()),
+            tag_names: Some(vec!["work".into()]),
+            parent_id: None,
+        })
+        .unwrap()
+    }
+
+    /// AC3: partial update keeps untouched fields (read-modify-write merge).
+    #[test]
+    fn merge_update_keeps_unspecified_fields() {
+        let existing = seeded_task();
+        let merged = merge_update_input(
+            &existing,
+            &ActionUpdateTaskInput {
+                id: existing.id,
+                title: Some("新标题".into()),
+                notes: None,
+                priority: None,
+                list_id: None,
+                due_date: None,
+                due_time: None,
+                clear_due: false,
+                tag_names: None,
+            },
+        );
+        assert_eq!(merged.title, "新标题");
+        assert_eq!(merged.notes, "原始备注");
+        assert_eq!(merged.priority, existing.priority);
+        assert_eq!(merged.list_id, existing.list_id);
+        assert_eq!(merged.due_date.as_deref(), Some("2026-11-20"));
+        assert_eq!(merged.due_time.as_deref(), Some("09:00"));
+        assert_eq!(merged.tag_names, vec!["work".to_string()]);
+    }
+
+    #[test]
+    fn merge_update_clear_due_wins_and_empty_notes_clears() {
+        let existing = seeded_task();
+        let merged = merge_update_input(
+            &existing,
+            &ActionUpdateTaskInput {
+                id: existing.id,
+                title: None,
+                notes: Some(String::new()),
+                priority: None,
+                list_id: None,
+                due_date: Some("2026-12-01".into()),
+                due_time: Some("10:00".into()),
+                clear_due: true,
+                tag_names: Some(Vec::new()),
+            },
+        );
+        assert_eq!(merged.due_date, None);
+        assert_eq!(merged.due_time, None);
+        assert_eq!(merged.notes, "");
+        assert!(merged.tag_names.is_empty());
+    }
+
+    /// AC5: reopen is idempotent at the service layer (completed → todo).
+    #[test]
+    fn reopen_completed_then_reopen_again_is_idempotent() {
+        let svc = open_service();
+        let task = svc
+            .create_task(CreateTaskInput {
+                title: "重开测试".into(),
+                notes: None,
+                priority: None,
+                list_id: None,
+                due_date: None,
+                due_time: None,
+                tag_names: None,
+                parent_id: None,
+            })
+            .unwrap();
+        let completed = svc.complete_task(task.id).unwrap();
+        assert_eq!(completed.status, crate::domain::TaskStatus::Completed);
+        let reopened = svc.uncomplete_task(task.id).unwrap();
+        assert_eq!(reopened.status, crate::domain::TaskStatus::Todo);
+        let again = svc.uncomplete_task(task.id).unwrap();
+        assert_eq!(again.status, crate::domain::TaskStatus::Todo);
+    }
+
+    /// AC5: postpone only applies to todo tasks.
+    #[test]
+    fn postpone_rejects_completed_task() {
+        let svc = open_service();
+        let task = svc
+            .create_task(CreateTaskInput {
+                title: "延期测试".into(),
+                notes: None,
+                priority: None,
+                list_id: None,
+                due_date: Some("2026-11-20".into()),
+                due_time: None,
+                tag_names: None,
+                parent_id: None,
+            })
+            .unwrap();
+        svc.complete_task(task.id).unwrap();
+        assert!(svc.postpone_task(task.id, 3).is_err());
+    }
+
+    /// AC6 helper: delete_tree honors the explicit disposition.
+    #[test]
+    fn delete_task_tree_cascades_children() {
+        let svc = open_service();
+        let parent = svc
+            .create_task(CreateTaskInput {
+                title: "父任务".into(),
+                notes: None,
+                priority: None,
+                list_id: None,
+                due_date: None,
+                due_time: None,
+                tag_names: None,
+                parent_id: None,
+            })
+            .unwrap();
+        let child = svc
+            .create_task(CreateTaskInput {
+                title: "子任务".into(),
+                notes: None,
+                priority: None,
+                list_id: None,
+                due_date: None,
+                due_time: None,
+                tag_names: None,
+                parent_id: Some(parent.id),
+            })
+            .unwrap();
+        let affected = svc
+            .delete_task_tree(parent.id, TaskDeleteDisposition::Cascade)
+            .unwrap();
+        assert!(affected.contains(&parent.id) && affected.contains(&child.id));
+        assert!(svc.get_task(child.id).is_err());
+    }
 }
