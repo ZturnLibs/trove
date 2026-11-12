@@ -9,6 +9,7 @@ import {
   type ProcessingSummary,
 } from "@/features/weekly-review/processingSummary";
 import { TaskDetailPanel } from "@/design-system/patterns/TaskDetailPanel";
+import { ResizableDetailPane } from "@/features/tasks/TaskLayout";
 import { Button } from "@/design-system/primitives/Button";
 import {
   ipc,
@@ -288,7 +289,7 @@ export function WeeklyReviewPage() {
         </PageScaffold>
       </div>
         {selectedTaskQuery.data ? (
-          <aside className="absolute inset-y-0 right-0 z-10 w-[360px] overflow-hidden border-l border-border bg-surface-raised shadow-xl">
+          <ResizableDetailPane>
             <TaskDetailPanel
               task={selectedTaskQuery.data}
               onClose={() => setSelectedTaskId(null)}
@@ -298,7 +299,7 @@ export function WeeklyReviewPage() {
                   : undefined
               }
             />
-          </aside>
+          </ResizableDetailPane>
         ) : null}
     </div>
   );

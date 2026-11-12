@@ -1575,6 +1575,16 @@ pub fn asset_read_thumb(
         .map_err(Into::into)
 }
 
+/// 完整图片 data URL（附件预览）。
+#[tauri::command]
+pub fn asset_read_data(
+    state: State<'_, AppState>,
+    id: EntityId,
+) -> Result<Option<String>, AppError> {
+    let asset = state.clipboard.assets().get(id)?;
+    state.clipboard.assets().data_url(&asset).map_err(Into::into)
+}
+
 #[tauri::command]
 pub fn clipboard_delete(
     app: AppHandle,
