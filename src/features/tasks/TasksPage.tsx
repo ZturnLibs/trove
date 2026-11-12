@@ -1296,20 +1296,23 @@ export function TasksPage() {
         </div>
       }
       detail={
-        <TaskDetailPanel
-          task={selected}
-          onDeleted={() => setSelectedId(null)}
-          focusTitleId={createdId}
-          onOpenTask={(id) => {
-            setSelectedId(id);
-            setCreatedId(null);
-          }}
-          onStartFocus={
-            selected?.status === "todo"
-              ? () => void startFocus(selected.id)
-              : undefined
-          }
-        />
+        selected ? (
+          <TaskDetailPanel
+            task={selected}
+            onDeleted={() => setSelectedId(null)}
+            focusTitleId={createdId}
+            onOpenTask={(id) => {
+              setSelectedId(id);
+              setCreatedId(null);
+            }}
+            onStartFocus={
+              selected?.status === "todo"
+                ? () => void startFocus(selected.id)
+                : undefined
+            }
+            onClose={() => setSelectedId(null)}
+          />
+        ) : null
       }
     />
     {listMenu ? (

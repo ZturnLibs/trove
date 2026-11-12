@@ -710,11 +710,14 @@ export function BoardPage() {
         </div>
       }
       detail={
-        <TaskDetailPanel
-          task={selectedTask}
-          onDeleted={() => setSelectedId(null)}
-          focusTitleId={focusTitleId}
-        />
+        selectedTask ? (
+          <TaskDetailPanel
+            task={selectedTask}
+            onDeleted={() => setSelectedId(null)}
+            focusTitleId={focusTitleId}
+            onClose={() => setSelectedId(null)}
+          />
+        ) : null
       }
     />
   );

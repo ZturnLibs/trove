@@ -1574,7 +1574,7 @@ export function TodayPage() {
               </>
             )}
           </div>
-        ) : (
+        ) : selected ? (
           <TaskDetailPanel
             task={selected}
             onDeleted={() => setSelectedId(null)}
@@ -1593,8 +1593,9 @@ export function TodayPage() {
                 ? () => void startFocus(selected.id)
                 : undefined
             }
+            onClose={() => setSelectedId(null)}
           />
-        )
+        ) : null
       }
       footer={
         <div className="p-2">

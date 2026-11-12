@@ -225,7 +225,7 @@ export function WeeklyReviewPage() {
   const processingItems = snap ? flattenQueues(snap) : [];
 
   return (
-    <div className="flex h-full min-h-0">
+    <div className="relative flex h-full min-h-0">
       <div className="min-w-0 flex-1">
         <PageScaffold
           title="每周回顾"
@@ -287,16 +287,19 @@ export function WeeklyReviewPage() {
           )}
         </PageScaffold>
       </div>
-      <aside className="w-[360px] shrink-0 border-l border-border bg-surface-raised">
-        <TaskDetailPanel
-          task={selectedTaskQuery.data ?? null}
-          onStartFocus={
-            selectedTaskQuery.data?.status === "todo"
-              ? () => void startFocus(selectedTaskQuery.data!.id)
-              : undefined
-          }
-        />
-      </aside>
+        {selectedTaskQuery.data ? (
+          <aside className="absolute inset-y-0 right-0 z-10 w-[360px] overflow-hidden border-l border-border bg-surface-raised shadow-xl">
+            <TaskDetailPanel
+              task={selectedTaskQuery.data}
+              onClose={() => setSelectedTaskId(null)}
+              onStartFocus={
+                selectedTaskQuery.data?.status === "todo"
+                  ? () => void startFocus(selectedTaskQuery.data!.id)
+                  : undefined
+              }
+            />
+          </aside>
+        ) : null}
     </div>
   );
 }
