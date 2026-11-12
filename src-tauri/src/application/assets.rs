@@ -189,6 +189,23 @@ impl AssetStore {
         )))
     }
 
+    /// 完整图片 data URL——附件预览用（缩略图见 thumb_base64）。
+    pub fn data_url(&self, asset: &Asset) -> Result<Option<String>, DomainError> {
+        let bytes = self.read_bytes(asset)?;
+        if bytes.is_empty() {
+            return Ok(None);
+        }
+        let mime = if asset.mime_type.is_empty() {
+            "image/png"
+        } else {
+            asset.mime_type.as_str()
+        };
+        Ok(Some(format!(
+            "data:{mime};base64,{}",
+            base64::Engine::encode(&base64::engine::general_purpose::STANDARD, bytes)
+        )))
+    }
+
     pub fn collect_garbage(&self, retention_days: u32) -> Result<GcSummary, DomainError> {
         let candidates = self.gc_candidates(retention_days)?;
         let mut removed = 0usize;
@@ -348,6 +365,27 @@ mod tests {
             .expect("载荷必须是合法 base64");
         // PNG 签名：\x89 P N G。
         assert!(bytes.starts_with(&[0x89, b'P', b'N', b'G']));
+    }
+
+    #[test]
+    fn data_url_carries_mime_and_full_image_bytes() {
+        let dir = tempdir().unwrap();
+        let store = store(dir.path());
+        let stored = store.store_rgba_image(2, 2, &rgba()).unwrap();
+
+        let data_url = store.data_url(&stored.asset).unwrap().unwrap();
+        let (mime, payload) = data_url
+            .split_once(";base64,")
+            .expect("必须是带 base64 载荷的 data URL");
+        assert_eq!(mime, "data:image/png");
+
+        use base64::Engine as _;
+        let bytes = base64::engine::general_purpose::STANDARD
+            .decode(payload)
+            .expect("载荷必须是合法 base64");
+        // 原图（非缩略图）：PNG 签名 + 与落盘原文件等长。
+        assert!(bytes.starts_with(&[0x89, b'P', b'N', b'G']));
+        assert_eq!(bytes.len(), store.read_bytes(&stored.asset).unwrap().len());
     }
 
     #[test]

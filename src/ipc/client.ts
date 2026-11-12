@@ -1274,6 +1274,8 @@ export const ipc = {
   clipboardCopy: (id: string) => invoke<ClipboardItem>("clipboard_copy", { id }),
   assetReadThumb: (id: string) =>
     invoke<string | null>("asset_read_thumb", { id }),
+  assetReadData: (id: string) =>
+    invoke<string | null>("asset_read_data", { id }),
   clipboardDelete: (id: string) => invoke<void>("clipboard_delete", { id }),
   clipboardClearNonFavorites: () =>
     invoke<number>("clipboard_clear_non_favorites"),

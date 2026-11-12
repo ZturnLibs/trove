@@ -1,4 +1,4 @@
-import { useRef, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Check, ImagePlus, Paperclip, X } from "lucide-react";
 import { Button } from "@/design-system/primitives/Button";
@@ -21,7 +21,30 @@ export function AttachmentsSection({
   const queryClient = useQueryClient();
   const [pickerOpen, setPickerOpen] = useState(false);
   const [removeArmedId, setRemoveArmedId] = useState<string | null>(null);
+  const [preview, setPreview] = useState<{ src: string; loading: boolean } | null>(
+    null,
+  );
   const removeTimer = useRef<number | null>(null);
+
+  // 图片预览：点击缩略图拉取原图 data URL；Esc / 点击遮罩 / ✕ 关闭。
+  useEffect(() => {
+    if (!preview) return;
+    const onKey = (event: KeyboardEvent) => {
+      if (event.key === "Escape") setPreview(null);
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [preview]);
+
+  const openPreview = (assetId: string) => {
+    setPreview({ src: "", loading: true });
+    void ipc.assetReadData(assetId).then((dataUrl) => {
+      setPreview(
+        dataUrl ? { src: dataUrl, loading: false } : { src: "", loading: false },
+      );
+    });
+  };
+
 
   const onRemoveClick = (linkId: string) => {
     if (removeArmedId === linkId) {
@@ -108,8 +131,13 @@ export function AttachmentsSection({
                 {src ? (
                   <img
                     src={src}
-                    alt="附件缩略图"
-                    className="aspect-square w-full object-cover"
+                    alt="附件缩略图（点击预览原图）"
+                    title="点击预览原图"
+                    className="aspect-square w-full cursor-zoom-in object-cover"
+                    onClick={(event) => {
+                      event.stopPropagation();
+                      openPreview(asset.assetId);
+                    }}
                   />
                 ) : (
                   <div className="flex aspect-square w-full items-center justify-center text-[11px] text-muted">
@@ -158,6 +186,34 @@ export function AttachmentsSection({
           onAttach={(assetIds) => attachMutation.mutate(assetIds)}
           onClose={() => setPickerOpen(false)}
         />
+      ) : null}
+
+      {preview ? (
+        <div
+          className="fixed inset-0 z-50 flex items-center justify-center bg-black/80 p-8"
+          onClick={() => setPreview(null)}
+        >
+          <button
+            type="button"
+            aria-label="关闭预览"
+            className="absolute right-4 top-4 rounded p-1.5 text-white/80 hover:bg-white/10 hover:text-white"
+            onClick={() => setPreview(null)}
+          >
+            <X className="size-5" />
+          </button>
+          {preview.loading ? (
+            <p className="text-[13px] text-white/80">加载原图…</p>
+          ) : preview.src ? (
+            <img
+              src={preview.src}
+              alt="附件预览"
+              className="max-h-[88vh] max-w-[92vw] rounded-[var(--radius-control)] object-contain shadow-2xl"
+              onClick={(event) => event.stopPropagation()}
+            />
+          ) : (
+            <p className="text-[13px] text-white/80">无法加载原图</p>
+          )}
+        </div>
       ) : null}
     </section>
   );

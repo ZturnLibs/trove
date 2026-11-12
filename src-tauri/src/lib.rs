@@ -734,6 +734,7 @@ pub fn run() {
             commands::clipboard_set_favorite,
             commands::clipboard_copy,
             commands::asset_read_thumb,
+            commands::asset_read_data,
             commands::clipboard_delete,
             commands::clipboard_clear_non_favorites,
             commands::clipboard_convert_to_task,
