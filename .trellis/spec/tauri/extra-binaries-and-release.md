@@ -75,6 +75,22 @@ default-run = "trove"
 Keep extra bin names in `scripts/lipo-extra-bins.mjs` (`extraBins`) in sync with `src/bin/*.rs`.
 
 
+### macOS runner 镜像 EOL 与标签选择（2026-11-12 定案，v2.6.2 实证）
+
+| 标签 | 状态 | 症状 |
+| --- | --- | --- |
+| macos-13 (Intel) | **已关停**（2025-09-19 官方公告） | 任务排队 **36h+ 无 runner** → 24h 队列超时自动取消 |
+| macos-14 (arm64) | **已退役**（2026-11-02 官方公告） | 启动即取消（容量约束） |
+| **macos-15 (arm64)** | ✅ 现役，universal 交叉编译标准池 | v2.6.0/v2.5.1 时代 macos-14 同模式连续成功 |
+
+- 规则：release matrix 的 macOS 一律用 **macos-15**；升级周期关注
+  `actions/runner-images` 的 EOL 公告（每镜像约 18 个月生命周期）。
+- 诊断特征：job 长期 queued、`started_at: null`、~24h 整被自动取消 =
+  标签已退役，换标签重跑即可；不要反复 rerun 空耗（每次 rerun 会取消
+  上一 attempt 的排队任务）。
+- 已知竞态（独立问题）：三矩阵并发 create-release 偶发
+  `already_exists` 422 → `gh run rerun --failed` 重跑失败 job 即可。
+
 ### 已知抖动：三矩阵并发 create-release（2026-11-03 实证，v2.5.1）
 
 - 症状：release workflow 中**最后到达**的 publish job 失败，日志
