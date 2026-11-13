@@ -5,7 +5,7 @@ import { Select } from "@/design-system/primitives/Select";
 import { Textarea } from "@/design-system/primitives/Textarea";
 import { useEffect, useMemo, useRef, useState, useCallback } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { Pin } from "lucide-react";
+import { Pin, X } from "lucide-react";
 import { MarkdownView } from "@/components/MarkdownView";
 import { EmptyState } from "@/components/PageScaffold";
 import { AttachmentsSection } from "@/design-system/patterns/AttachmentsSection";
@@ -141,6 +141,7 @@ function MemoryDetail({
   onArchived,
   onNavigateToMemory,
   focusTitleId,
+  onClose,
 }: {
   memory: Memory | null;
   onDeleted?: () => void;
@@ -149,6 +150,7 @@ function MemoryDetail({
   onNavigateToMemory?: (id: string) => void;
   /** When set to the memory's id (e.g. right after "新建"), focus + select its title. */
   focusTitleId?: string | null;
+  onClose?: () => void;
 }) {
   const queryClient = useQueryClient();
   const [draft, setDraft] = useState<UpdateMemoryInput | null>(null);
@@ -305,9 +307,22 @@ function MemoryDetail({
     <div className="flex h-full min-h-0 flex-col">
       <div className="flex items-center justify-between border-b border-border px-3 py-2 text-[11px] text-muted">
         <span>记忆 · {memory.updatedAt.slice(0, 16).replace("T", " ")}</span>
-        <Button size="sm" variant="ghost" onClick={() => setPreview((v) => !v)}>
-          {preview ? "编辑" : "预览"}
-        </Button>
+        <div className="flex items-center gap-1.5">
+          <Button size="sm" variant="ghost" onClick={() => setPreview((v) => !v)}>
+            {preview ? "编辑" : "预览"}
+          </Button>
+          {onClose ? (
+            <button
+              type="button"
+              aria-label="关闭详情"
+              title="关闭详情 (Esc)"
+              onClick={onClose}
+              className="-mr-1 flex h-6 w-6 shrink-0 items-center justify-center rounded-[var(--radius-control)] text-foreground hover:bg-row-hover"
+            >
+              <X className="h-4 w-4" />
+            </button>
+          ) : null}
+        </div>
       </div>
       <div className="min-h-0 flex-1 space-y-3 overflow-auto p-3">
         <Input
@@ -845,6 +860,7 @@ export function MemoryPage() {
                   onArchived={() => setSelectedId(null)}
                   onNavigateToMemory={(id) => setSelectedId(id)}
                   focusTitleId={createdId}
+                  onClose={() => setSelectedId(null)}
                 />
               )
             : null
