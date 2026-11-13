@@ -384,12 +384,58 @@ function ClipboardListRow({
   );
 }
 
+type ClipboardTypeFilter =
+  | "all"
+  | "text"
+  | "image"
+  | "code"
+  | "url"
+  | "email"
+  | "phone"
+  | "date"
+  | "error";
+
+const TYPE_FILTERS: { value: ClipboardTypeFilter; label: string }[] = [
+  { value: "all", label: "全部" },
+  { value: "text", label: "纯文本" },
+  { value: "image", label: "图片" },
+  { value: "code", label: "代码" },
+  { value: "url", label: "链接" },
+  { value: "email", label: "邮箱" },
+  { value: "phone", label: "电话" },
+  { value: "date", label: "日期" },
+  { value: "error", label: "错误" },
+];
+
+const TYPE_EMPTY_COPY: Record<
+  Exclude<ClipboardTypeFilter, "all">,
+  { title: string; body: string }
+> = {
+  text: {
+    title: "暂无纯文本",
+    body: "复制不含代码/链接特征的普通文本后会归到纯文本。",
+  },
+  image: { title: "暂无图片", body: "复制图片后会出现在这里。" },
+  code: {
+    title: "暂无代码片段",
+    body: "复制含代码特征的内容后会自动归类为代码片段。",
+  },
+  url: { title: "暂无链接", body: "复制 URL 后会自动归到链接类型。" },
+  email: { title: "暂无邮箱", body: "复制邮箱地址后会自动归到邮箱类型。" },
+  phone: { title: "暂无电话", body: "复制电话号码后会自动归到电话类型。" },
+  date: { title: "暂无日期", body: "复制日期文本后会自动归到日期类型。" },
+  error: {
+    title: "暂无错误信息",
+    body: "复制含报错特征的内容后会自动归到错误类型。",
+  },
+};
+
 export function ClipboardPage() {
   useDomainInvalidation();
   const queryClient = useQueryClient();
   const [search, setSearch] = useState("");
   const [favoritesOnly, setFavoritesOnly] = useState(false);
-  const [codeOnly, setCodeOnly] = useState(false);
+  const [typeFilter, setTypeFilter] = useState<ClipboardTypeFilter>("all");
   const [sourceApp, setSourceApp] = useState<string>("all");
   const [dateRange, setDateRange] = useState<"all" | "7d" | "30d">("all");
   const [selectedId, setSelectedId] = useState<string | null>(null);
@@ -419,6 +465,29 @@ export function ClipboardPage() {
     return { dateFrom: fmt(from), dateTo: fmt(to) };
   }, [dateRange]);
 
+  const typeQuery = useMemo(() => {
+    switch (typeFilter) {
+      case "image":
+        return { kind: "image" as const, kindHint: undefined };
+      case "text":
+        return { kind: undefined, kindHint: "plain" as const };
+      case "code":
+        return { kind: undefined, kindHint: "code" as const };
+      case "url":
+        return { kind: undefined, kindHint: "url" as const };
+      case "email":
+        return { kind: undefined, kindHint: "email" as const };
+      case "phone":
+        return { kind: undefined, kindHint: "phone" as const };
+      case "date":
+        return { kind: undefined, kindHint: "date" as const };
+      case "error":
+        return { kind: undefined, kindHint: "error" as const };
+      default:
+        return { kind: undefined, kindHint: undefined };
+    }
+  }, [typeFilter]);
+
   const fetchClipboard = useCallback(
     (offset: number, limit: number) =>
       ipc.clipboardQuery({
@@ -427,11 +496,12 @@ export function ClipboardPage() {
         sourceApp: sourceApp === "all" ? undefined : sourceApp,
         dateFrom: dateFilter.dateFrom,
         dateTo: dateFilter.dateTo,
-        kindHint: codeOnly ? "code" : undefined,
+        kind: typeQuery.kind,
+        kindHint: typeQuery.kindHint,
         limit,
         offset,
       }),
-    [codeOnly, dateFilter.dateFrom, dateFilter.dateTo, favoritesOnly, search, sourceApp],
+    [typeQuery, dateFilter.dateFrom, dateFilter.dateTo, favoritesOnly, search, sourceApp],
   );
 
   const {
@@ -442,7 +512,7 @@ export function ClipboardPage() {
     loadingMore: clipLoadingMore,
     loadMore: loadMoreClipboard,
   } = usePagedQuery(
-    ["clipboard", favoritesOnly, codeOnly, search, sourceApp, dateRange],
+    ["clipboard", favoritesOnly, typeFilter, search, sourceApp, dateRange],
     fetchClipboard,
     300,
   );
@@ -544,13 +614,6 @@ export function ClipboardPage() {
               />
               仅收藏
             </label>
-            <label className="flex items-center gap-1.5 text-[12px] text-muted">
-              <Checkbox
-                checked={codeOnly}
-                onChange={(e) => setCodeOnly(e.target.checked)}
-              />
-              代码片段
-            </label>
             <Input
               className="h-8 w-44"
               value={search}
@@ -598,64 +661,101 @@ export function ClipboardPage() {
           </>
         }
         list={
-          clipLoading ? (
-            <div className="p-4 text-[12px] text-muted">加载中…</div>
-          ) : items.length === 0 ? (
-            <EmptyState
-              title={codeOnly ? "暂无代码片段" : favoritesOnly ? "暂无收藏" : "暂无剪切板历史"}
-              body={
-                codeOnly
-                  ? "复制含代码特征的内容后会自动归类为代码片段。"
-                  : favoritesOnly
-                    ? "在历史条目上点亮星标，收藏不会随过期清理删除。"
-                    : capturing
-                      ? "复制文本或图片后会出现在这里。密码管理器等应用默认已排除。"
-                      : "采集已暂停，恢复后才会记录新的复制内容。"
-              }
-              primaryAction={
-                codeOnly
-                  ? { label: "显示全部", onClick: () => setCodeOnly(false) }
-                  : favoritesOnly
-                    ? {
-                        label: "显示全部历史",
-                        onClick: () => setFavoritesOnly(false),
-                      }
-                    : !capturing
-                      ? {
-                          label: "恢复采集",
-                          onClick: () => toggleCapture.mutate(true),
-                        }
-                      : undefined
-              }
-            />
-          ) : (
-            <ul>
-              {items.map((item) => (
-                <ClipboardListRow
-                  key={item.id}
-                  item={item}
-                  selected={selectedId === item.id}
-                  smartEnabled={smartEnabled}
-                  onSelect={() => setSelectedId(item.id)}
-                  onAction={handleListAction}
-                />
+          <div className="flex h-full min-h-0 flex-col">
+            <div className="flex flex-wrap items-center gap-1.5 border-b border-border px-3 py-2">
+              {TYPE_FILTERS.map(({ value, label }) => (
+                <button
+                  key={value}
+                  type="button"
+                  onClick={() => setTypeFilter(value)}
+                  className={cn(
+                    "rounded-full px-2.5 py-0.5 text-[11px] transition-colors",
+                    typeFilter === value
+                      ? "bg-accent text-accent-fg"
+                      : "border border-border bg-surface-raised text-muted hover:bg-row-hover hover:text-foreground",
+                  )}
+                >
+                  {label}
+                </button>
               ))}
-              <PagedListFooter
-                shown={items.length}
-                total={clipTotal}
-                hasMore={clipHasMore}
-                loadingMore={clipLoadingMore}
-                onLoadMore={loadMoreClipboard}
-              />
-            </ul>
-          )
+            </div>
+            <div className="min-h-0 flex-1 overflow-auto">
+              {clipLoading ? (
+                <div className="p-4 text-[12px] text-muted">加载中…</div>
+              ) : items.length === 0 ? (() => {
+                const emptyCopy =
+                  typeFilter === "all"
+                    ? favoritesOnly
+                      ? TYPE_EMPTY_COPY.text
+                      : undefined
+                    : TYPE_EMPTY_COPY[typeFilter];
+                return (
+                  <EmptyState
+                    title={
+                      emptyCopy
+                        ? emptyCopy.title
+                        : favoritesOnly
+                          ? "暂无收藏"
+                          : "暂无剪切板历史"
+                    }
+                    body={
+                      emptyCopy
+                        ? emptyCopy.body
+                        : favoritesOnly
+                          ? "在历史条目上点亮星标，收藏不会随过期清理删除。"
+                          : capturing
+                            ? "复制文本或图片后会出现在这里。密码管理器等应用默认已排除。"
+                            : "采集已暂停，恢复后才会记录新的复制内容。"
+                    }
+                    primaryAction={
+                      typeFilter !== "all"
+                        ? { label: "显示全部", onClick: () => setTypeFilter("all") }
+                        : favoritesOnly
+                          ? {
+                              label: "显示全部历史",
+                              onClick: () => setFavoritesOnly(false),
+                            }
+                          : !capturing
+                            ? {
+                                label: "恢复采集",
+                                onClick: () => toggleCapture.mutate(true),
+                              }
+                            : undefined
+                    }
+                  />
+                );
+              })() : (
+                <ul>
+                  {items.map((item) => (
+                    <ClipboardListRow
+                      key={item.id}
+                      item={item}
+                      selected={selectedId === item.id}
+                      smartEnabled={smartEnabled}
+                      onSelect={() => setSelectedId(item.id)}
+                      onAction={handleListAction}
+                    />
+                  ))}
+                  <PagedListFooter
+                    shown={items.length}
+                    total={clipTotal}
+                    hasMore={clipHasMore}
+                    loadingMore={clipLoadingMore}
+                    onLoadMore={loadMoreClipboard}
+                  />
+                </ul>
+              )}
+            </div>
+          </div>
         }
         detail={
-          <ClipboardDetail
-            item={selected}
-            smartEnabled={smartEnabled}
-            onDeleted={() => setSelectedId(null)}
-          />
+          selected ? (
+            <ClipboardDetail
+              item={selected}
+              smartEnabled={smartEnabled}
+              onDeleted={() => setSelectedId(null)}
+            />
+          ) : null
         }
       />
     </>

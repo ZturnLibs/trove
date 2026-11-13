@@ -276,11 +276,24 @@ export function TaskDetailPanel({
 
   return (
     <div className="flex h-full min-h-0 flex-col">
-      <div className="flex items-center justify-between gap-2 border-b border-border px-3 py-2 text-[11px] text-muted">
-        <span className="min-w-0 truncate">
-          {task.updatedAt.slice(0, 16).replace("T", " ")}
-        </span>
-        <div className="flex shrink-0 items-center gap-2">
+      <div className="border-b border-border px-3 py-2 text-[11px] text-muted">
+        <div className="flex items-center justify-between gap-2">
+          <span className="min-w-0 truncate">
+            {task.updatedAt.slice(0, 16).replace("T", " ")}
+          </span>
+          {onClose ? (
+            <button
+              type="button"
+              aria-label="关闭详情"
+              title="关闭详情 (Esc)"
+              onClick={onClose}
+              className="-mr-1 flex h-6 w-6 shrink-0 items-center justify-center rounded-[var(--radius-control)] text-foreground hover:bg-row-hover"
+            >
+              <X className="h-4 w-4" />
+            </button>
+          ) : null}
+        </div>
+        <div className="mt-1.5 flex flex-wrap items-center gap-1.5">
           {task.status === "todo" && onStartFocus ? (
             <Button type="button" size="sm" variant="secondary" onClick={onStartFocus}>
               开始专注
@@ -297,17 +310,6 @@ export function TaskDetailPanel({
             </Button>
           ) : null}
           <span className="whitespace-nowrap">{task.listName}</span>
-          {onClose ? (
-            <button
-              type="button"
-              aria-label="关闭详情"
-              title="关闭详情 (Esc)"
-              onClick={onClose}
-              className="rounded p-0.5 text-muted hover:bg-row-hover hover:text-foreground"
-            >
-              <X className="h-3.5 w-3.5" />
-            </button>
-          ) : null}
         </div>
       </div>
 
