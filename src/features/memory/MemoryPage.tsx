@@ -835,19 +835,19 @@ export function MemoryPage() {
         )
       }
       detail={
-        view === "notes" ? (
-          <div className="flex h-full items-center justify-center p-6 text-center text-[12px] text-muted">
-            随手记在左侧快速记录与删除
-          </div>
-        ) : (
-          <MemoryDetail
-            memory={selected}
-            onDeleted={() => setSelectedId(null)}
-            onArchived={() => setSelectedId(null)}
-            onNavigateToMemory={(id) => setSelectedId(id)}
-            focusTitleId={createdId}
-          />
-        )
+        view === "notes"
+          ? null
+          : selected
+            ? (
+                <MemoryDetail
+                  memory={selected}
+                  onDeleted={() => setSelectedId(null)}
+                  onArchived={() => setSelectedId(null)}
+                  onNavigateToMemory={(id) => setSelectedId(id)}
+                  focusTitleId={createdId}
+                />
+              )
+            : null
       }
     />
   );
