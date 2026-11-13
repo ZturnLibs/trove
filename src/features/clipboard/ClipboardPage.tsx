@@ -3,7 +3,7 @@ import { Checkbox } from "@/design-system/primitives/Checkbox";
 import { Select } from "@/design-system/primitives/Select";
 import { useEffect, useMemo, useState, useCallback } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { Star } from "lucide-react";
+import { Star, X } from "lucide-react";
 import { EmptyState } from "@/components/PageScaffold";
 import { PermissionBanner } from "@/components/PermissionBanner";
 import { Button } from "@/design-system/primitives/Button";
@@ -64,10 +64,12 @@ function ClipboardDetail({
   item,
   smartEnabled,
   onDeleted,
+  onClose,
 }: {
   item: ClipboardItem | null;
   smartEnabled: boolean;
   onDeleted?: () => void;
+  onClose?: () => void;
 }) {
   const queryClient = useQueryClient();
   const [notice, setNotice] = useState<string | null>(null);
@@ -143,6 +145,20 @@ function ClipboardDetail({
 
   return (
     <div className="flex h-full flex-col gap-3 p-4">
+      <div className="flex items-center justify-between gap-2">
+        <h3 className="text-[13px] font-semibold text-foreground">剪切板详情</h3>
+        {onClose ? (
+          <button
+            type="button"
+            aria-label="关闭详情"
+            title="关闭详情 (Esc)"
+            onClick={onClose}
+            className="-mr-1.5 flex h-6 w-6 shrink-0 items-center justify-center rounded-[var(--radius-control)] text-foreground hover:bg-row-hover"
+          >
+            <X className="h-4 w-4" />
+          </button>
+        ) : null}
+      </div>
       {notice ? (
         <p className="rounded-[var(--radius-control)] border border-border bg-surface-raised px-2 py-1.5 text-[12px] text-foreground">
           {notice}
@@ -754,6 +770,7 @@ export function ClipboardPage() {
               item={selected}
               smartEnabled={smartEnabled}
               onDeleted={() => setSelectedId(null)}
+              onClose={() => setSelectedId(null)}
             />
           ) : null
         }
