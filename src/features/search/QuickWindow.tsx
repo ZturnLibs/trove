@@ -1,7 +1,7 @@
 import { Input } from "@/design-system/primitives/Input";
 import { Select } from "@/design-system/primitives/Select";
 import { Textarea } from "@/design-system/primitives/Textarea";
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { emit, listen } from "@tauri-apps/api/event";
 import { useQuery } from "@tanstack/react-query";
 import { RecurrencePicker } from "@/design-system/patterns/RecurrencePicker";
@@ -20,6 +20,8 @@ import {
   formatParsedHint,
   mergeTagNames,
 } from "@/lib/nl-capture";
+import { splitQuickAddLines } from "@/features/today/quickAddSubmit";
+import { QuickAddLinesDialog } from "@/design-system/patterns/QuickAddLinesDialog";
 import { useUiStore, type QuickMode } from "@/stores/ui";
 import { cn } from "@/lib/cn";
 
@@ -54,22 +56,32 @@ export function QuickWindow() {
   const [captureListId, setCaptureListId] = useState("");
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [pendingLines, setPendingLines] = useState<string[] | null>(null);
   const [searchText, setSearchText] = useState("");
   const [selectedIndex, setSelectedIndex] = useState(0);
   const [clipSearch, setClipSearch] = useState("");
   const [clipIndex, setClipIndex] = useState(0);
   const [ambiguous, setAmbiguous] = useState<string[]>([]);
   const [parsedHint, setParsedHint] = useState<string | null>(null);
-  const inputRef = useRef<HTMLInputElement>(null);
+  const captureInputRef = useRef<HTMLTextAreaElement>(null);
+  const searchInputRef = useRef<HTMLInputElement>(null);
+  const clipInputRef = useRef<HTMLInputElement>(null);
   const dueDateRef = useRef<HTMLInputElement>(null);
   const dueTimeRef = useRef<HTMLInputElement>(null);
   const tagsRef = useRef<HTMLInputElement>(null);
   const priorityRef = useRef<HTMLSelectElement>(null);
 
   const focusCaptureField = (index: number) => {
-    const refs = [inputRef, dueDateRef, dueTimeRef, tagsRef, priorityRef];
+    const refs = [captureInputRef, dueDateRef, dueTimeRef, tagsRef, priorityRef];
     refs[index]?.current?.focus();
   };
+
+  // 聚焦当前模式的主输入框（capture=多行任务输入，search/clip=搜索框）。
+  const focusModeInput = useCallback(() => {
+    if (mode === "search") searchInputRef.current?.focus();
+    else if (mode === "clip") clipInputRef.current?.focus();
+    else captureInputRef.current?.focus();
+  }, [mode]);
 
   const handleCaptureFieldShortcut = (
     event: React.KeyboardEvent,
@@ -106,18 +118,18 @@ export function QuickWindow() {
         setError(null);
       }
       // Focus the active mode's input after the (possible) mode switch renders.
-      requestAnimationFrame(() => inputRef.current?.focus());
+      requestAnimationFrame(() => focusModeInput());
     }).then((fn) => {
       unlisten = fn;
     });
     return () => unlisten?.();
-  }, [setQuickMode]);
+  }, [setQuickMode, focusModeInput]);
 
   useEffect(() => {
     let unlisten: (() => void) | undefined;
     void listen<string>("quick://set-search-query", (event) => {
       setSearchText(event.payload ?? "");
-      requestAnimationFrame(() => inputRef.current?.focus());
+      requestAnimationFrame(() => searchInputRef.current?.focus());
     }).then((fn) => {
       unlisten = fn;
     });
@@ -125,10 +137,10 @@ export function QuickWindow() {
   }, []);
 
   useEffect(() => {
-    inputRef.current?.focus();
+    focusModeInput();
     setError(null);
     setRecurrence(null);
-  }, [mode, captureType]);
+  }, [mode, captureType, focusModeInput]);
 
   useEffect(() => {
     if (
@@ -456,10 +468,49 @@ export function QuickWindow() {
     await ipc.windowHideQuick();
   };
 
+  // 多行多条：按行纯创建（不做自然语言解析），沿用当前清单与标签。
+  const createManyLines = async () => {
+    if (!pendingLines) return;
+    setSaving(true);
+    setError(null);
+    try {
+      const tags = tagText
+        .split(/[,，]/)
+        .map((t) => t.trim())
+        .filter(Boolean);
+      for (const line of pendingLines) {
+        await ipc.taskCreate({
+          title: line,
+          listId: captureListId || undefined,
+          tagNames: tags.length ? tags : undefined,
+        });
+      }
+      setPendingLines(null);
+      setTitle("");
+      setBody("");
+      setTagText("");
+      setCaptureListId("");
+      setParsedHint(null);
+      await ipc.windowHideQuick();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "创建失败");
+    } finally {
+      setSaving(false);
+    }
+  };
+
   const submit = async () => {
     if (mode !== "capture") return;
     const value = title.trim();
     if (!value) return;
+    if (captureType === "task") {
+      const lines = splitQuickAddLines(value);
+      if (lines.length > 1) {
+        // 多行输入：先询问创建为一条还是逐行多条。
+        setPendingLines(lines);
+        return;
+      }
+    }
     setSaving(true);
     setError(null);
     try {
@@ -588,19 +639,26 @@ export function QuickWindow() {
                 </button>
               ))}
             </div>
-            <Input
-              ref={inputRef}
+            <Textarea
+              ref={captureInputRef}
+              rows={1}
               value={title}
-              onChange={(event) => setTitle(event.target.value)}
+              onChange={(event) => {
+                setTitle(event.target.value);
+                const el = event.target;
+                el.style.height = "auto";
+                el.style.height = `${Math.min(el.scrollHeight, 96)}px`;
+              }}
               placeholder={
                 captureType === "task"
-                  ? "如：明天下午三点回复客户…"
+                  ? "如：明天下午三点回复客户…（⌘↩ 创建，Shift+Enter 换行）"
                   : captureType === "reminder"
                     ? "如：明天下午三点 Standup…"
                     : captureType === "memory"
                       ? "快速记录记忆标题…"
                       : "随手记…"
               }
+              className="min-h-9 resize-none overflow-hidden leading-5"
               onKeyDown={(event) => {
                 handleCaptureFieldShortcut(event);
                 if (event.key === "Tab" && !event.shiftKey && captureType === "task") {
@@ -807,7 +865,7 @@ export function QuickWindow() {
         {mode === "search" ? (
           <>
             <Input
-              ref={inputRef}
+              ref={searchInputRef}
               value={searchText}
               onChange={(e) => setSearchText(e.target.value)}
               placeholder="搜索内容或输入命令…"
@@ -937,7 +995,7 @@ export function QuickWindow() {
         {mode === "clip" ? (
           <>
             <Input
-              ref={inputRef}
+              ref={clipInputRef}
               value={clipSearch}
               onChange={(e) => setClipSearch(e.target.value)}
               placeholder="筛选剪切板历史…"
@@ -1026,6 +1084,20 @@ export function QuickWindow() {
           </>
         ) : null}
       </div>
+      {pendingLines ? (
+        <QuickAddLinesDialog
+          lines={pendingLines}
+          busy={saving}
+          onCancel={() => setPendingLines(null)}
+          onCreateSingle={() => {
+            const value = pendingLines.join("\n");
+            setPendingLines(null);
+            setTitle(value);
+            void submit();
+          }}
+          onCreateMultiple={() => void createManyLines()}
+        />
+      ) : null}
     </div>
   );
 }

@@ -33,3 +33,14 @@ export function quickAddSubmitHint(
 ): string {
   return `${submitComboLabel(mode)} ${verb}`;
 }
+
+/**
+ * 拆分多行输入为任务标题数组：按行切分、去首尾空白、丢弃空行。
+ * 单行输入返回长度 1 的数组——调用方以此判断是否需要询问「一条还是多条」。
+ */
+export function splitQuickAddLines(text: string): string[] {
+  return text
+    .split(/\r?\n/)
+    .map((line) => line.trim())
+    .filter((line) => line.length > 0);
+}

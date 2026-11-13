@@ -26,7 +26,8 @@ import { DailySuggestionsCard } from "@/features/today/DailySuggestionsCard";
 import { TaskDetailPanel } from "@/design-system/patterns/TaskDetailPanel";
 import { SortableTaskRow, TaskRow } from "@/design-system/patterns/TaskRow";
 import { EmptyState } from "@/components/PageScaffold";
-import { quickAddSubmitHint, shouldSubmitQuickAdd } from "./quickAddSubmit";
+import { quickAddSubmitHint, shouldSubmitQuickAdd, splitQuickAddLines } from "./quickAddSubmit";
+import { QuickAddLinesDialog } from "@/design-system/patterns/QuickAddLinesDialog";
 import { NotificationPermissionBanner } from "@/components/NotificationPermissionBanner";
 import { Button } from "@/design-system/primitives/Button";
 import { ConfirmButton } from "@/design-system/patterns/ConfirmButton";
@@ -462,6 +463,18 @@ export function TodayPage() {
   const [completedCollapsed, setCompletedCollapsed] = useState(true);
   const [createdId, setCreatedId] = useState<string | null>(null);
   const [quickTitle, setQuickTitle] = useState("");
+  const quickTitleRef = useRef<HTMLTextAreaElement>(null);
+  // 多行输入框随内容自动增高（上限约 5 行，超出内部滚动）。
+  useEffect(() => {
+    const el = quickTitleRef.current;
+    if (!el) return;
+    el.style.height = "auto";
+    el.style.height = `${Math.min(el.scrollHeight, 120)}px`;
+  }, [quickTitle]);
+  const [pendingQuickLines, setPendingQuickLines] = useState<string[] | null>(
+    null,
+  );
+  const [quickBatchBusy, setQuickBatchBusy] = useState(false);
   const [activeDragId, setActiveDragId] = useState<string | null>(null);
   const suppressClickUntilRef = useRef(0);
   const [quickError, setQuickError] = useState<string | null>(null);
@@ -913,8 +926,28 @@ export function TodayPage() {
 
   const submitQuickAdd = () => {
     const value = quickTitle.trim();
-    if (!value || quickAddMutation.isPending) return;
+    if (!value || quickAddMutation.isPending || quickBatchBusy) return;
+    const lines = splitQuickAddLines(value);
+    if (lines.length > 1) {
+      // 多行输入：先询问创建为一条还是逐行多条。
+      setPendingQuickLines(lines);
+      return;
+    }
     quickAddMutation.mutate(value);
+  };
+
+  const createMultipleQuickAdd = async () => {
+    if (!pendingQuickLines) return;
+    setQuickBatchBusy(true);
+    try {
+      for (const line of pendingQuickLines) {
+        await quickAddMutation.mutateAsync(line);
+      }
+      setPendingQuickLines(null);
+      setQuickTitle("");
+    } finally {
+      setQuickBatchBusy(false);
+    }
   };
 
   const quickAddSubmitMode =
@@ -1602,16 +1635,25 @@ export function TodayPage() {
           {quickError ? (
             <p className="mb-2 text-[12px] text-danger">{quickError}</p>
           ) : null}
-          <div className="flex items-center gap-2">
-            <Input
+          <div className="flex items-end gap-2">
+            <Textarea
+              ref={quickTitleRef}
+              rows={1}
               value={quickTitle}
               onChange={(e) => {
                 setQuickTitle(e.target.value);
                 setQuickError(null);
+                const el = e.target;
+                el.style.height = "auto";
+                el.style.height = `${Math.min(el.scrollHeight, 120)}px`;
               }}
-              placeholder={`快速添加任务，如：明天下午三点回复客户…（${quickAddSubmitHint(quickAddSubmitMode)}）`}
+              placeholder={`快速添加任务，如：明天下午三点回复客户…（${quickAddSubmitHint(quickAddSubmitMode)}，Shift+Enter 换行）`}
               onKeyDown={(e) => {
                 if (e.nativeEvent.isComposing) return;
+                // enter 模式下 Shift+Enter 换行，不触发提交。
+                if (e.key === "Enter" && e.shiftKey && quickAddSubmitMode === "enter") {
+                  return;
+                }
                 if (
                   shouldSubmitQuickAdd(
                     e.key,
@@ -1623,6 +1665,7 @@ export function TodayPage() {
                   submitQuickAdd();
                 }
               }}
+              className="min-h-9 resize-none overflow-hidden leading-5"
             />
             <Button
               size="sm"
@@ -1657,6 +1700,20 @@ export function TodayPage() {
           setWrapOpen(true);
         }}
       />
+      {pendingQuickLines ? (
+        <QuickAddLinesDialog
+          lines={pendingQuickLines}
+          busy={quickBatchBusy || quickAddMutation.isPending}
+          onCancel={() => setPendingQuickLines(null)}
+          onCreateSingle={() => {
+            const value = pendingQuickLines.join("\n");
+            setPendingQuickLines(null);
+            quickAddMutation.mutate(value);
+            setQuickTitle("");
+          }}
+          onCreateMultiple={() => void createMultipleQuickAdd()}
+        />
+      ) : null}
     </>
   );
 }

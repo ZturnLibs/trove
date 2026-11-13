@@ -1,4 +1,5 @@
-import { Input } from "@/design-system/primitives/Input";
+import { Textarea } from "@/design-system/primitives/Textarea";
+import { QuickAddLinesDialog } from "@/design-system/patterns/QuickAddLinesDialog";
 import { useEffect, useMemo, useRef, useState } from "react";
 import {
   DndContext,
@@ -27,6 +28,7 @@ import {
 import { resolveBoardDrag } from "@/features/board/boardDrag";
 import {
   shouldSubmitQuickAdd,
+  splitQuickAddLines,
   submitComboLabel,
 } from "@/features/today/quickAddSubmit";
 import type { QuickAddSubmitKey } from "@/ipc/client";
@@ -175,24 +177,32 @@ function BoardQuickAdd({
     );
   }
   return (
-    <Input
+    <Textarea
       autoFocus
+      rows={1}
       value={value}
       disabled={busy}
-      placeholder={`标题后 ${submitComboLabel(submitMode)} 创建，Esc 关闭`}
-      onChange={(e) => onChange(e.target.value)}
+      placeholder={`标题后 ${submitComboLabel(submitMode)} 创建（Shift+Enter 换行），Esc 关闭`}
+      onChange={(e) => {
+        onChange(e.target.value);
+        const el = e.target;
+        el.style.height = "auto";
+        el.style.height = `${Math.min(el.scrollHeight, 96)}px`;
+      }}
       onBlur={() => {
         if (!value.trim()) onDismiss();
       }}
       onKeyDown={(e) => {
         if (e.key === "Escape") onDismiss();
+        // enter 模式下 Shift+Enter 换行，不触发提交。
+        if (e.key === "Enter" && e.shiftKey && submitMode === "enter") return;
         if (
           shouldSubmitQuickAdd(e.key, e.metaKey || e.ctrlKey, submitMode) &&
           value.trim()
         )
           onSubmit();
       }}
-      className="w-full rounded-[var(--radius-control)] border border-border bg-surface-raised px-2 py-1.5 text-[12px] outline-none focus:border-accent"
+      className="min-h-9 w-full resize-none overflow-hidden rounded-[var(--radius-control)] border border-border bg-surface-raised px-2 py-1.5 text-[12px] outline-none focus:border-accent"
     />
   );
 }
@@ -208,6 +218,11 @@ export function BoardPage() {
     null,
   );
   const [composerTitle, setComposerTitle] = useState("");
+  const [pendingComposer, setPendingComposer] = useState<{
+    lines: string[];
+    column: "todo" | "doing";
+  } | null>(null);
+  const [composerBatchBusy, setComposerBatchBusy] = useState(false);
   const [activeDragTask, setActiveDragTask] = useState<Task | null>(null);
   const suppressClickUntilRef = useRef(0);
   const today = localTodayString();
@@ -497,7 +512,38 @@ export function BoardPage() {
   const submitComposer = (column: "todo" | "doing") => {
     const title = composerTitle.trim();
     if (!title || createMutation.isPending) return;
+    const lines = splitQuickAddLines(title);
+    if (lines.length > 1) {
+      // 多行输入：先询问创建为一条还是逐行多条。
+      setPendingComposer({ lines, column });
+      return;
+    }
     createMutation.mutate({ title, column });
+  };
+
+  const createManyComposer = async () => {
+    if (!pendingComposer) return;
+    setComposerBatchBusy(true);
+    try {
+      for (const line of pendingComposer.lines) {
+        const created = await ipc.taskCreate({
+          title: line,
+          listId:
+            overviewQuery.data
+              ? (defaultListIdForScope(groupScope, overviewQuery.data) ??
+                undefined)
+              : undefined,
+        });
+        if (pendingComposer.column === "doing") {
+          await ipc.taskSetBoardStage(created.id, "doing");
+        }
+      }
+      invalidateBoard();
+      setComposerTitle("");
+      setPendingComposer(null);
+    } finally {
+      setComposerBatchBusy(false);
+    }
   };
 
   const dismissComposer = () => {
@@ -600,6 +646,7 @@ export function BoardPage() {
     columns.todo.length + columns.doing.length + columns.done.length;
 
   return (
+    <>
     <SplitTaskLayout
       title="看板"
       description={`待办 / 进行中 / 今日完成 · 共 ${totalCount} 项`}
@@ -717,8 +764,23 @@ export function BoardPage() {
             focusTitleId={focusTitleId}
             onClose={() => setSelectedId(null)}
           />
-        ) : null
+          ) : null
       }
     />
+      {pendingComposer ? (
+        <QuickAddLinesDialog
+          lines={pendingComposer.lines}
+          busy={composerBatchBusy || createMutation.isPending}
+          onCancel={() => setPendingComposer(null)}
+          onCreateSingle={() => {
+            const { lines, column } = pendingComposer;
+            setPendingComposer(null);
+            createMutation.mutate({ title: lines.join("\n"), column });
+            setComposerTitle("");
+          }}
+          onCreateMultiple={() => void createManyComposer()}
+        />
+      ) : null}
+    </>
   );
 }
