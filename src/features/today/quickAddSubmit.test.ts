@@ -2,8 +2,27 @@ import { describe, expect, it } from "vitest";
 import {
   quickAddSubmitHint,
   shouldSubmitQuickAdd,
+  splitQuickAddLines,
   submitComboLabel,
 } from "./quickAddSubmit";
+
+describe("splitQuickAddLines", () => {
+  it("单行输入返回长度 1", () => {
+    expect(splitQuickAddLines("回复客户")).toEqual(["回复客户"]);
+  });
+
+  it("按行拆分并去除空行与首尾空白", () => {
+    expect(splitQuickAddLines("  任务一  \r\n\r\n任务二\n   \n任务三 ")).toEqual([
+      "任务一",
+      "任务二",
+      "任务三",
+    ]);
+  });
+
+  it("纯空白输入返回空数组", () => {
+    expect(splitQuickAddLines("  \n ")).toEqual([]);
+  });
+});
 
 describe("shouldSubmitQuickAdd", () => {
   it("enter 模式：裸 Enter 提交", () => {
