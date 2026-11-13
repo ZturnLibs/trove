@@ -538,10 +538,9 @@ export function ClipboardPage() {
   );
 
   useEffect(() => {
+    // 选中项因删除/过滤而不可见时清空选中（详情默认收起，不自动选中第一条）。
     if (selectedId && !items.some((item) => item.id === selectedId)) {
-      setSelectedId(items[0]?.id ?? null);
-    } else if (!selectedId && items[0]) {
-      setSelectedId(items[0].id);
+      setSelectedId(null);
     }
   }, [items, selectedId]);
 
