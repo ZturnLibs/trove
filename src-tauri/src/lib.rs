@@ -654,6 +654,7 @@ pub fn run() {
             commands::task_list_group_create,
             commands::task_list_group_rename,
             commands::task_list_group_reorder,
+            commands::task_list_reorder,
             commands::task_list_group_delete,
             commands::task_list_group_undo_delete,
             commands::task_list_overview,

@@ -334,6 +334,17 @@ pub fn task_list_group_reorder(
 }
 
 #[tauri::command]
+pub fn task_list_reorder(
+    app: AppHandle,
+    state: State<'_, AppState>,
+    ordered_ids: Vec<EntityId>,
+) -> Result<(), AppError> {
+    state.tasks.reorder_lists(ordered_ids)?;
+    emit_entities_changed(&app, "task_list", "reordered");
+    Ok(())
+}
+
+#[tauri::command]
 pub fn task_list_group_delete(
     app: AppHandle,
     state: State<'_, AppState>,
