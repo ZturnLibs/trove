@@ -1096,6 +1096,8 @@ export const ipc = {
     invoke<TaskListGroup>("task_list_group_rename", { id, name }),
   taskListGroupReorder: (orderedIds: string[]) =>
     invoke<void>("task_list_group_reorder", { orderedIds }),
+  taskListReorder: (orderedIds: string[]) =>
+    invoke<void>("task_list_reorder", { orderedIds }),
   taskListGroupDelete: (id: string) =>
     invoke<ListGroupDeleteUndo>("task_list_group_delete", { id }),
   taskListGroupUndoDelete: (undo: ListGroupDeleteUndo) =>

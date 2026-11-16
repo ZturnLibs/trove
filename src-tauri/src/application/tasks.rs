@@ -129,6 +129,38 @@ impl TaskService {
         self.get_list(id)
     }
 
+    /// 按给定顺序全量重写自定义清单 sort_order = 0..n（收件箱不参与，恒排最前）；
+    /// id 集合必须与现存活跃自定义清单一致。
+    pub fn reorder_lists(&self, ordered_ids: Vec<EntityId>) -> Result<(), DomainError> {
+        let existing: Vec<EntityId> = self
+            .list_lists()?
+            .iter()
+            .filter(|l| l.kind == ListKind::Custom)
+            .map(|l| l.id)
+            .collect();
+        if ordered_ids.len() != existing.len()
+            || ordered_ids
+                .iter()
+                .any(|id| !existing.iter().any(|e| *e == *id))
+        {
+            return Err(DomainError::Validation("清单排序数据不完整".into()));
+        }
+        let conn = self.connect()?;
+        let now = stamp(&self.clock);
+        let tx = conn.unchecked_transaction().map_err(internal)?;
+        for (index, id) in ordered_ids.iter().enumerate() {
+            tx.execute(
+                "UPDATE task_lists
+                 SET sort_order = ?1, updated_at = ?2, revision = revision + 1
+                 WHERE id = ?3 AND kind = 'custom' AND deleted_at IS NULL",
+                params![index as f64, now, id.to_string()],
+            )
+            .map_err(internal)?;
+        }
+        tx.commit().map_err(internal)?;
+        Ok(())
+    }
+
     pub fn count_list_todo_tasks(&self, list_id: EntityId) -> Result<i64, DomainError> {
         let _ = self.get_list(list_id)?;
         let conn = self.connect()?;
@@ -3107,6 +3139,44 @@ mod tests {
         .into_iter()
         .map(|t| t.id)
         .collect()
+    }
+
+    #[test]
+    fn reorder_lists_rewrites_custom_list_order() {
+        let svc = open_service();
+        let a = svc.create_list("A".into()).unwrap();
+        let b = svc.create_list("B".into()).unwrap();
+        let c = svc.create_list("C".into()).unwrap();
+
+        svc.reorder_lists(vec![c.id, a.id, b.id]).unwrap();
+
+        let order: Vec<uuid::Uuid> = svc
+            .list_lists()
+            .unwrap()
+            .iter()
+            .filter(|l| l.kind == ListKind::Custom)
+            .map(|l| l.id)
+            .collect();
+        assert_eq!(order, vec![c.id, a.id, b.id]);
+    }
+
+    #[test]
+    fn reorder_lists_rejects_incomplete_or_extra_ids() {
+        let svc = open_service();
+        let a = svc.create_list("A".into()).unwrap();
+        let b = svc.create_list("B".into()).unwrap();
+
+        // 少一个 id。
+        assert!(svc.reorder_lists(vec![a.id]).is_err());
+        // 多一个未知 id。
+        assert!(svc
+            .reorder_lists(vec![a.id, b.id, uuid::Uuid::new_v4()])
+            .is_err());
+        // 收件箱不参与排序。
+        let inbox = svc.inbox_list_id().unwrap();
+        assert!(svc.reorder_lists(vec![a.id, b.id, inbox]).is_err());
+        // 正确集合仍然可用。
+        assert!(svc.reorder_lists(vec![b.id, a.id]).is_ok());
     }
 
     #[test]

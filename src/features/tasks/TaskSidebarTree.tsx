@@ -115,6 +115,10 @@ export function TaskSidebarTree() {
       ipc.taskListUpdate(id, name),
     onSuccess: invalidate,
   });
+  const listReorderMutation = useMutation({
+    mutationFn: (orderedIds: string[]) => ipc.taskListReorder(orderedIds),
+    onSuccess: invalidate,
+  });
   const listGroupingMutation = useMutation({
     mutationFn: (input: {
       id: string;
@@ -246,6 +250,66 @@ export function TaskSidebarTree() {
       if (overId === "ungrouped") {
         if (list.groupId == null) return;
         listGroupingMutation.mutate({ id: list.id, name: list.name, clearGroup: true });
+        return;
+      }
+      if (overId.startsWith("list:")) {
+        const overListId = overId.slice("list:".length);
+        if (overListId === listId) return;
+        const overList = allLists.find((l) => l.id === overListId);
+        if (!overList) return;
+        // 同级：清单排序；跨级：移动到目标清单所在分组。
+        const parentIdOf = (rowListId: string): string | null => {
+          const groupRow = rows.find(
+            (r): r is SidebarGroupRowData =>
+              r.kind === "group" && r.lists.some((l) => l.id === rowListId),
+          );
+          return groupRow ? groupRow.id : null;
+        };
+        const activeParent = parentIdOf(listId);
+        const overParent = parentIdOf(overListId);
+        if (activeParent !== overParent) {
+          if (overList.groupId == null) {
+            if (list.groupId == null) return;
+            listGroupingMutation.mutate({ id: list.id, name: list.name, clearGroup: true });
+          } else {
+            listGroupingMutation.mutate({
+              id: list.id,
+              name: list.name,
+              groupId: overList.groupId,
+            });
+          }
+          return;
+        }
+        const siblings = rows
+          .map((r) =>
+            r.kind === "group" && r.id === activeParent
+              ? r.lists.map((l) => l.id)
+              : r.kind === "list"
+                ? [r.id]
+                : [],
+          )
+          .find((ids) => ids.includes(listId));
+        if (!siblings) return;
+        const from = siblings.indexOf(listId);
+        const to = siblings.indexOf(overListId);
+        if (from < 0 || to < 0) return;
+        const next = [...siblings];
+        const [moved] = next.splice(from, 1);
+        next.splice(to, 0, moved);
+        if (next.join("|") === siblings.join("|")) return;
+        // 全局顺序 = 既有树顺序，同级块内替换为新顺序。
+        const siblingSet = new Set(siblings);
+        const full = rows.flatMap((r) =>
+          r.kind === "group"
+            ? r.lists.map((l) => l.id)
+            : r.kind === "list"
+              ? [r.id]
+              : [],
+        );
+        const start = full.findIndex((id) => siblingSet.has(id));
+        const rest = full.filter((id) => !siblingSet.has(id));
+        rest.splice(Math.max(0, start), 0, ...next);
+        listReorderMutation.mutate(rest);
       }
     }
   };
@@ -763,9 +827,14 @@ function ListRow({
   const { attributes, listeners, setNodeRef, isDragging } = useDraggable({
     id: `list:${list.id}`,
   });
+  // 作为同级清单拖拽排序的落点（同时保留拖入分组的来源能力）。
+  const { setNodeRef: setDropNodeRef, isOver } = useDroppable({ id: `list:${list.id}` });
   return (
     <div
-      ref={setNodeRef}
+      ref={(el) => {
+        setNodeRef(el);
+        setDropNodeRef(el);
+      }}
       {...attributes}
       {...listeners}
       className={cn(
@@ -774,6 +843,7 @@ function ListRow({
         depth > 0 ? "pl-7" : "pl-2",
         active && "bg-row-active text-foreground",
         isDragging && "opacity-40",
+        isOver && "bg-accent/15 ring-1 ring-inset ring-accent/50",
       )}
       onClick={onNavigate}
       onContextMenu={(e) => {

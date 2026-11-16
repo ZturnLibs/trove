@@ -438,9 +438,16 @@ export function BoardPage() {
       }
       return created;
     },
-    onSuccess: () => {
+    onSuccess: (created) => {
       setComposerTitle("");
       invalidateBoard();
+      // 新建任务置顶所在清单：按创建前列中该清单的既有顺序重排（新任务第一）。
+      const listTodoIds = [...columns.todo, ...columns.doing]
+        .filter((t) => t.listId === created.listId)
+        .map((t) => t.id);
+      if (listTodoIds.length > 0) {
+        void ipc.taskReorder([created.id, ...listTodoIds]);
+      }
     },
   });
 
