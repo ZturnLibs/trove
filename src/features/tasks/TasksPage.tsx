@@ -16,11 +16,12 @@ import {
   arrayMove,
   verticalListSortingStrategy,
 } from "@dnd-kit/sortable";
-import { Sparkles, X } from "lucide-react";
+import { Bookmark, SlidersHorizontal, Sparkles, X } from "lucide-react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { TaskDetailPanel } from "@/design-system/patterns/TaskDetailPanel";
 import { SortableTaskRow, TaskRow } from "@/design-system/patterns/TaskRow";
 import { EmptyState } from "@/components/PageScaffold";
+import { cn } from "@/lib/cn";
 import { Button } from "@/design-system/primitives/Button";
 import { ConfirmButton } from "@/design-system/patterns/ConfirmButton";
 import {
@@ -105,6 +106,45 @@ export function TasksPage() {
     todoCount: number;
   } | null>(null);
   const [showViewInput, setShowViewInput] = useState(false);
+  const [filterOpen, setFilterOpen] = useState(false);
+  const [viewOpen, setViewOpen] = useState(false);
+
+  // 工具栏弹层：点击面板外 / 页面滚动时关闭。
+  useEffect(() => {
+    if (!filterOpen && !viewOpen) return;
+    const close = (event: MouseEvent) => {
+      const target = event.target as HTMLElement;
+      if (target.closest("[data-toolbar-popover]")) return;
+      if (target.closest("[data-toolbar-trigger]")) return;
+      setFilterOpen(false);
+      setViewOpen(false);
+    };
+    const onScroll = () => {
+      setFilterOpen(false);
+      setViewOpen(false);
+    };
+    window.addEventListener("click", close);
+    window.addEventListener("scroll", onScroll, true);
+    return () => {
+      window.removeEventListener("click", close);
+      window.removeEventListener("scroll", onScroll, true);
+    };
+  }, [filterOpen, viewOpen]);
+
+  const activeFilterCount =
+    (status !== "active" ? 1 : 0) +
+    (priority !== "all" ? 1 : 0) +
+    (tagId ? 1 : 0) +
+    (showDeferred ? 1 : 0) +
+    (showWaiting ? 1 : 0);
+
+  const clearFilters = () => {
+    setStatus("active");
+    setPriority("all");
+    setTagId(null);
+    setShowDeferred(false);
+    setShowWaiting(false);
+  };
   const [viewName, setViewName] = useState("");
   const [selectedViewId, setSelectedViewId] = useState<string>("");
   const [activeDragId, setActiveDragId] = useState<string | null>(null);
@@ -791,7 +831,7 @@ export function TasksPage() {
       }
       actions={
         <>
-          <Select
+                    <Select
             className="h-7 rounded-[var(--radius-control)] border border-border bg-surface-raised px-2 text-[12px]"
             value={smart}
             onChange={(e) => {
@@ -811,13 +851,13 @@ export function TasksPage() {
           </Select>
           {smart === "none" ? (
             <>
-              <Input
+                            <Input
                 className="h-7 w-36"
                 value={search}
                 onChange={(e) => setSearch(e.target.value)}
                 placeholder="搜索任务…"
               />
-              <Select
+                            <Select
                 className="h-7 rounded-[var(--radius-control)] border border-border bg-surface-raised px-2 text-[12px]"
                 value={listGroupId ? `group:${listGroupId}` : listId}
                 onChange={(e) => {
@@ -866,154 +906,245 @@ export function TasksPage() {
                   </optgroup>
                 ) : null}
               </Select>
-              {smart === "none" && listId === "all" && !listGroupId ? (
-                <Button
-                  size="sm"
-                  variant={groupByList ? "secondary" : "ghost"}
-                  onClick={() => setGroupByList((v) => !v)}
-                >
-                  按清单分区
-                </Button>
-              ) : null}
-              <Select
-                className="h-7 rounded-[var(--radius-control)] border border-border bg-surface-raised px-2 text-[12px]"
-                value={status}
-                onChange={(e) =>
-                  setStatus(e.target.value as TaskStatus | "active")
-                }
-              >
-                <option value="active">未归档</option>
-                <option value="todo">待办</option>
-                <option value="completed">已完成</option>
-                <option value="archived">已归档</option>
-              </Select>
-              <Select
-                className="h-7 rounded-[var(--radius-control)] border border-border bg-surface-raised px-2 text-[12px]"
-                value={priority}
-                onChange={(e) =>
-                  setPriority(e.target.value as TaskPriority | "all")
-                }
-              >
-                <option value="all">全部优先级</option>
-                <option value="high">高</option>
-                <option value="medium">中</option>
-                <option value="low">低</option>
-                <option value="none">无</option>
-              </Select>
-              <Select
-                className="h-7 rounded-[var(--radius-control)] border border-border bg-surface-raised px-2 text-[12px]"
-                value={tagId ?? "all"}
-                onChange={(e) =>
-                  setTagId(e.target.value === "all" ? null : e.target.value)
-                }
-              >
-                <option value="all">全部标签</option>
-                {(tagsQuery.data ?? []).map((tag) => (
-                  <option key={tag.id} value={tag.id}>
-                    {tag.name}
-                  </option>
-                ))}
-              </Select>
-              <Button
-                size="sm"
-                variant={showDeferred ? "secondary" : "ghost"}
-                onClick={() => {
-                  setShowDeferred((v) => !v);
-                  if (!showDeferred) {
-                    setSmart("none");
-                    setShowWaiting(false);
-                  }
-                }}
-              >
-                已推迟
-              </Button>
-              <Button
-                size="sm"
-                variant={showWaiting ? "secondary" : "ghost"}
-                onClick={() => {
-                  setShowWaiting((v) => !v);
-                  if (!showWaiting) {
-                    setSmart("none");
-                    setShowDeferred(false);
-                  }
-                }}
-              >
-                等待中
-              </Button>
             </>
           ) : null}
-          {(savedViewsQuery.data ?? []).length > 0 ? (
-            <>
-              <Select
-                className="h-7 rounded-[var(--radius-control)] border border-border bg-surface-raised px-2 text-[12px]"
-                value={selectedViewId}
-                onChange={(e) => {
-                  const id = e.target.value;
-                  setSelectedViewId(id);
-                  const view = savedViewsQuery.data?.find((v) => v.id === id);
-                  if (view) applySavedView(view);
-                }}
-              >
-                <option value="">无</option>
-                {(savedViewsQuery.data ?? []).map((view) => (
-                  <option key={view.id} value={view.id}>
-                    {view.name}
-                  </option>
-                ))}
-              </Select>
-              {selectedViewId ? (
-                <ConfirmButton
-                  size="sm"
-                  variant="secondary"
-                  confirmLabel="确认删除"
-                  confirmVariant="danger"
-                  onConfirm={() => deleteViewMutation.mutate(selectedViewId)}
-                  resetKey={selectedViewId}
-                >
-                  删除视图
-                </ConfirmButton>
-              ) : null}
-            </>
-          ) : null}
-          {showViewInput ? (
-            <>
-              <Input
-                value={viewName}
-                onChange={(e) => setViewName(e.target.value)}
-                placeholder="视图名称…"
-                className="h-7 w-32"
-                onKeyDown={(e) => {
-                  if (e.key === "Enter" && viewName.trim()) {
-                    saveViewMutation.mutate();
-                  } else if (e.key === "Escape") {
-                    setShowViewInput(false);
-                  }
-                }}
-              />
+          {smart === "none" ? (
+            <div className="relative">
               <Button
                 size="sm"
-                variant="secondary"
-                disabled={!viewName.trim() || saveViewMutation.isPending}
-                onClick={() => saveViewMutation.mutate()}
+                variant={filterOpen || activeFilterCount > 0 ? "secondary" : "ghost"}
+                data-toolbar-trigger="filter"
+                onClick={() => {
+                  setFilterOpen((v) => !v);
+                  setViewOpen(false);
+                }}
               >
-                保存
+                <SlidersHorizontal className="h-3.5 w-3.5" />
+                筛选
+                {activeFilterCount > 0 ? (
+                  <span className="rounded-full bg-accent px-1.5 text-[10px] font-semibold text-accent-fg">
+                    {activeFilterCount}
+                  </span>
+                ) : null}
               </Button>
-            </>
-          ) : (
-            <Button
-              size="sm"
-              variant="secondary"
-              onClick={() => setShowViewInput(true)}
-            >
-              保存视图
-            </Button>
-          )}
-          {selectedId ? (
-            <>
+              {filterOpen ? (
+                <div
+                  data-toolbar-popover
+                  className="absolute right-0 top-full z-30 mt-1 w-64 space-y-2.5 rounded-[var(--radius-panel)] border border-border bg-surface-raised p-3 shadow-2xl"
+                >
+                  <div className="flex items-center justify-between gap-2">
+                    <span className="text-[11px] text-muted">状态</span>
+                    <Select
+                      className="h-7 w-36 rounded-[var(--radius-control)] border border-border bg-surface px-2 text-[12px] text-foreground"
+                      value={status}
+                      onChange={(e) =>
+                        setStatus(e.target.value as TaskStatus | "active")
+                      }
+                    >
+                      <option value="active">未归档</option>
+                      <option value="todo">待办</option>
+                      <option value="completed">已完成</option>
+                      <option value="archived">已归档</option>
+                    </Select>
+                  </div>
+                  <div className="flex items-center justify-between gap-2">
+                    <span className="text-[11px] text-muted">优先级</span>
+                    <Select
+                      className="h-7 w-36 rounded-[var(--radius-control)] border border-border bg-surface px-2 text-[12px] text-foreground"
+                      value={priority}
+                      onChange={(e) =>
+                        setPriority(e.target.value as TaskPriority | "all")
+                      }
+                    >
+                      <option value="all">全部优先级</option>
+                      <option value="high">高</option>
+                      <option value="medium">中</option>
+                      <option value="low">低</option>
+                      <option value="none">无</option>
+                    </Select>
+                  </div>
+                  <div className="flex items-center justify-between gap-2">
+                    <span className="text-[11px] text-muted">标签</span>
+                    <Select
+                      className="h-7 w-36 rounded-[var(--radius-control)] border border-border bg-surface px-2 text-[12px] text-foreground"
+                      value={tagId ?? "all"}
+                      onChange={(e) =>
+                        setTagId(e.target.value === "all" ? null : e.target.value)
+                      }
+                    >
+                      <option value="all">全部标签</option>
+                      {(tagsQuery.data ?? []).map((tag) => (
+                        <option key={tag.id} value={tag.id}>
+                          {tag.name}
+                        </option>
+                      ))}
+                    </Select>
+                  </div>
+                  <div className="flex items-center justify-between gap-2">
+                    <span className="text-[11px] text-muted">显示推迟任务</span>
+                    <Button
+                      size="sm"
+                      variant={showDeferred ? "secondary" : "ghost"}
+                      onClick={() => {
+                        setShowDeferred((v) => !v);
+                        if (!showDeferred) {
+                          setSmart("none");
+                          setShowWaiting(false);
+                        }
+                      }}
+                    >
+                      {showDeferred ? "已开启" : "已关闭"}
+                    </Button>
+                  </div>
+                  <div className="flex items-center justify-between gap-2">
+                    <span className="text-[11px] text-muted">显示等待任务</span>
+                    <Button
+                      size="sm"
+                      variant={showWaiting ? "secondary" : "ghost"}
+                      onClick={() => {
+                        setShowWaiting((v) => !v);
+                        if (!showWaiting) {
+                          setSmart("none");
+                          setShowDeferred(false);
+                        }
+                      }}
+                    >
+                      {showWaiting ? "已开启" : "已关闭"}
+                    </Button>
+                  </div>
+                  {listId === "all" && !listGroupId ? (
+                    <div className="flex items-center justify-between gap-2">
+                      <span className="text-[11px] text-muted">布局</span>
+                      <Button
+                        size="sm"
+                        variant={groupByList ? "secondary" : "ghost"}
+                        onClick={() => setGroupByList((v) => !v)}
+                      >
+                        {groupByList ? "按清单分区" : "平铺"}
+                      </Button>
+                    </div>
+                  ) : null}
+                  <div className="border-t border-border pt-2">
+                    <Button
+                      size="sm"
+                      variant="ghost"
+                      className="w-full"
+                      disabled={activeFilterCount === 0}
+                      onClick={clearFilters}
+                    >
+                      清除筛选
+                    </Button>
+                  </div>
+                </div>
+              ) : null}
+            </div>
+          ) : null}
+          {(savedViewsQuery.data ?? []).length > 0 || viewOpen ? (
+            <div className="relative">
               <Button
                 size="sm"
-                variant="secondary"
-                onClick={() => postponeMutation.mutate(selectedId)}
+                variant={viewOpen || selectedViewId ? "secondary" : "ghost"}
+                data-toolbar-trigger="view"
+                onClick={() => {
+                  setViewOpen((v) => !v);
+                  setFilterOpen(false);
+                }}
+              >
+                <Bookmark className="h-3.5 w-3.5" />
+                视图
+              </Button>
+              {viewOpen ? (
+                <div
+                  data-toolbar-popover
+                  className="absolute right-0 top-full z-30 mt-1 w-60 space-y-2 rounded-[var(--radius-panel)] border border-border bg-surface-raised p-3 shadow-2xl"
+                >
+                  {(savedViewsQuery.data ?? []).length === 0 ? (
+                    <p className="text-[11px] text-muted">暂无保存的视图</p>
+                  ) : (
+                    <div className="space-y-1">
+                      {(savedViewsQuery.data ?? []).map((view) => (
+                        <div
+                          key={view.id}
+                          className="flex items-center justify-between gap-2"
+                        >
+                          <button
+                            type="button"
+                            className={cn(
+                              "min-w-0 flex-1 truncate rounded-[var(--radius-control)] px-2 py-1 text-left text-[12px] hover:bg-row-hover",
+                              selectedViewId === view.id &&
+                                "bg-row-active text-foreground",
+                            )}
+                            onClick={() => {
+                              setSelectedViewId(view.id);
+                              applySavedView(view);
+                              setViewOpen(false);
+                            }}
+                          >
+                            {view.name}
+                          </button>
+                          {selectedViewId === view.id ? (
+                            <ConfirmButton
+                              size="sm"
+                              confirmLabel="确认删除"
+                              confirmVariant="danger"
+                              onConfirm={() => deleteViewMutation.mutate(view.id)}
+                              resetKey={view.id}
+                            >
+                              删除
+                            </ConfirmButton>
+                          ) : null}
+                        </div>
+                      ))}
+                    </div>
+                  )}
+                  <div className="border-t border-border pt-2">
+                    {showViewInput ? (
+                      <div className="flex items-center gap-1.5">
+                        <Input
+                          value={viewName}
+                          onChange={(e) => setViewName(e.target.value)}
+                          placeholder="视图名称…"
+                          className="h-7 min-w-0 flex-1"
+                          onKeyDown={(e) => {
+                            if (e.key === "Enter" && viewName.trim()) {
+                              saveViewMutation.mutate();
+                            } else if (e.key === "Escape") {
+                              setShowViewInput(false);
+                            }
+                          }}
+                        />
+                        <Button
+                          size="sm"
+                          variant="secondary"
+                          disabled={!viewName.trim() || saveViewMutation.isPending}
+                          onClick={() => saveViewMutation.mutate()}
+                        >
+                          保存
+                        </Button>
+                      </div>
+                    ) : (
+                      <Button
+                        size="sm"
+                        variant="ghost"
+                        className="w-full"
+                        onClick={() => setShowViewInput(true)}
+                      >
+                        保存当前视图
+                      </Button>
+                    )}
+                  </div>
+                </div>
+              ) : null}
+            </div>
+          ) : null}
+          {selected ? (
+            <div className="flex shrink-0 items-center gap-1.5 rounded-[var(--radius-control)] border border-border bg-surface-raised px-1.5 py-0.5">
+              <Button
+                size="sm"
+                variant="ghost"
+                onClick={() => {
+                  if (selectedId) postponeMutation.mutate(selectedId);
+                }}
               >
                 延期明天
               </Button>
@@ -1021,21 +1152,21 @@ export function TasksPage() {
                 <>
                   <Button
                     size="sm"
-                    variant="secondary"
+                    variant="ghost"
                     onClick={() => moveSelected("up")}
                   >
                     上移
                   </Button>
                   <Button
                     size="sm"
-                    variant="secondary"
+                    variant="ghost"
                     onClick={() => moveSelected("down")}
                   >
                     下移
                   </Button>
                 </>
               ) : null}
-            </>
+            </div>
           ) : null}
           <NewTaskButton onClick={() => createMutation.mutate()} />
         </>
